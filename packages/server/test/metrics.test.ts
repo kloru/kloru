@@ -12,7 +12,7 @@ const issue = (id: number, o: Partial<Issue>): Issue => ({ id, kind: "work", sta
 function setup(fetchImpl: typeof fetch) {
   const dir = mkdtempSync(join(tmpdir(), "metrics-"));
   mkdirSync(join(dir, "sessions"));
-  writeFileSync(join(dir, "sessions", `${encodeURIComponent("desk:issue:1:engineer")}.jsonl`), [JSON.stringify({ role: "assistant", usage: { cost: { total: 0.4 } }, timestamp: Date.parse("2026-11-03T18:10:00Z") }), JSON.stringify({ role: "assistant", usage: { cost: { total: 0.1 } }, timestamp: Date.parse("2026-11-03T18:20:00Z") })].join("\n"));
+  writeFileSync(join(dir, "sessions", `${encodeURIComponent("desk:issue:1:engineer")}.jsonl`), [JSON.stringify({ role: "assistant", usage: { cost: { total: 0.4 } }, timestamp: Date.parse("2026-11-03T18:10:00Z") }), JSON.stringify({ role: "assistant", usage: { cost: { total: 0.1 } }, timestamp: Date.parse("2026-11-03T18:20:00Z") })].join("\n") + "\n");
   mkdirSync(join(dir, "repo", "calls", "c1"), { recursive: true });
   writeFileSync(join(dir, "repo", "calls", "c1", "call.json"), JSON.stringify({ id: "c1", callSid: "CA1", phone: EVAN, channel: "voice", startedAt: "2026-11-03T18:00:00Z", endedAt: "2026-11-03T18:10:00Z" }));
   const ledger: LedgerEntry[] = [{ at: "2026-11-03T18:15:00Z", issue: 1, call: "c1", phone: EVAN, tool: "app", slug: "GOOGLECALENDAR_CREATE_EVENT", args: {}, ok: true, result: "ok", parent: "", hash: "" }];
@@ -56,5 +56,39 @@ describe("metrics", () => {
     expect(today.cost.browser).toBeNull();
     expect(today.modelSource).toBe("sessions");
     expect(today.cost.models).toBeCloseTo(0.5);
+  });
+});
+
+describe("metrics.db (2026-11-04)", () => {
+  const line = (usd: number, at: string) => JSON.stringify({ role: "assistant", usage: { cost: { total: usd } }, timestamp: Date.parse(at) });
+
+  it("reads only what's new in each log, waits for a half-written line, and recounts a rewritten one", async () => {
+    const { m, dir } = setup((async () => new Response("", { status: 500 })) as unknown as typeof fetch);
+    const log = join(dir, "sessions", `${encodeURIComponent("desk:issue:1:engineer")}.jsonl`);
+    const { appendFileSync } = await import("node:fs");
+    expect(m.ingest()).toBe(2);
+    expect(m.ingest()).toBe(0);
+    appendFileSync(log, `${line(0.25, "2026-11-03T19:00:00Z")}\n${line(1, "2026-11-03T19:05:00Z").slice(0, 20)}`);
+    expect(m.ingest()).toBe(1);
+    appendFileSync(log, `${line(1, "2026-11-03T19:05:00Z").slice(20)}\n`);
+    expect(m.ingest()).toBe(1);
+    expect(m.db.costsByIssue()[1]).toBeCloseTo(1.75);
+    writeFileSync(log, `${line(0.1, "2026-11-03T18:10:00Z")}\n`);
+    m.ingest();
+    expect(m.db.costsByIssue()[1]).toBeCloseTo(0.1);
+  });
+
+  it("brings in the first version's files once", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "metrics-old-"));
+    mkdirSync(join(dir, "metrics"));
+    writeFileSync(join(dir, "metrics", "openrouter.jsonl"), `${JSON.stringify({ at: "2026-11-03T20:00:00Z", usage: { main: 10 } })}\n${JSON.stringify({ at: "2026-11-03T21:00:00Z", usage: { main: 12.5 } })}\n`);
+    writeFileSync(join(dir, "metrics", "saved.json"), JSON.stringify({ 7: 30 }));
+    const m = new Metrics({ dataDir: dir, issues: () => [], ledger: () => [], nameOf: () => undefined, timezone: "America/Los_Angeles", openrouterKeys: {}, now: () => NOW });
+    expect(m.db.readings()).toHaveLength(2);
+    expect(m.db.saved()).toEqual({ 7: 30 });
+    expect((await m.report(2)).days.at(-1)!.cost.models).toBeCloseTo(2.5);
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(join(dir, "metrics", "openrouter.jsonl"))).toBe(false);
+    expect(existsSync(join(dir, "metrics", "openrouter.jsonl.imported"))).toBe(true);
   });
 });

@@ -3,13 +3,15 @@
  * and who uses it. Every number says where it came from.
  *
  * - Models: OpenRouter's own usage for Kloru's keys, recorded hourly (it keeps no daily history for
- *   an ordinary key), and before that the cost each desk session recorded per reply.
+ *   an ordinary key), and before that the cost each desk session recorded per reply. Both live in
+ *   metrics.db (metrics-db.ts), where session costs are read in as they're written.
  * - Phone: Twilio's daily usage. Browser: Steel session minutes. Speech: voice minutes at a set rate.
  *   Hosting: a set amount a day. A provider that can't be reached shows as not available, never $0.
  * - Time saved: Jev estimates once, per finished request, how long it would have taken them by hand.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { MetricsDb } from "./metrics-db.js";
 import type { Issue, LedgerEntry } from "@kloru/desk";
 
 const DECISIONS = "https://openrouter.ai/api/alpha/decisions";
@@ -72,12 +74,14 @@ export class Metrics {
   private readonly now: () => Date;
   private readonly fetch: typeof fetch;
   private readonly dir: string;
-  private cache: { at: number; twilio?: Record<string, number>; steel?: Record<string, number> } = { at: 0 };
+  readonly db: MetricsDb;
 
   constructor(private readonly o: MetricsOptions) {
     this.now = o.now ?? (() => new Date());
     this.fetch = o.fetchImpl ?? fetch;
     this.dir = join(o.dataDir, "metrics");
+    this.db = new MetricsDb(join(this.dir, "metrics.db"));
+    this.db.importFiles(this.dir);
   }
 
   private day(iso: string | number | Date): string {
@@ -95,15 +99,12 @@ export class Metrics {
       if (typeof d?.usage === "number") usage[name] = d.usage;
     }
     if (!Object.keys(usage).length) return;
-    mkdirSync(this.dir, { recursive: true });
-    appendFileSync(join(this.dir, "openrouter.jsonl"), `${JSON.stringify({ at: this.now().toISOString(), usage })}\n`);
+    this.db.addReading(this.now().toISOString(), usage);
   }
 
   /** Model spend by day from the hourly snapshots: each interval's increase, counted on the day it ended. */
   private openrouterByDay(): Record<string, number> {
-    const file = join(this.dir, "openrouter.jsonl");
-    if (!existsSync(file)) return {};
-    const rows = readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { at: string; usage: Record<string, number> });
+    const rows = this.db.readings();
     const out: Record<string, number> = {};
     for (let i = 1; i < rows.length; i++) {
       let spent = 0;
@@ -117,47 +118,41 @@ export class Metrics {
     return out;
   }
 
-  /** What each desk session recorded per model reply: by day, by role, and by issue. */
-  private sessions(): { byDay: Record<string, number>; byRole: Record<string, Record<string, number>>; byIssue: Record<number, number>; byCall: Record<string, number> } {
-    const out = { byDay: {} as Record<string, number>, byRole: {} as Record<string, Record<string, number>>, byIssue: {} as Record<number, number>, byCall: {} as Record<string, number> };
-    const dir = join(this.o.dataDir, "sessions");
-    if (!existsSync(dir)) return out;
-    for (const f of readdirSync(dir)) {
-      const key = decodeURIComponent(f.replace(/\.jsonl$/, ""));
-      const m = /^desk:issue:(\d+):(\w+)/.exec(key);
-      const role = m ? m[2]! : key.startsWith("chat:voice:") ? "voice" : key.startsWith("scheduled:") ? "automations" : "other";
-      const call = /^chat:voice:(CA\w+)/.exec(key)?.[1];
-      for (const line of readFileSync(join(dir, f), "utf8").split("\n")) {
-        if (!line.includes('"usage"')) continue;
-        let o: { usage?: { cost?: { total?: number } }; timestamp?: number };
-        try {
-          o = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        const c = o.usage?.cost?.total;
-        if (!c || !o.timestamp) continue;
-        const d = this.day(o.timestamp);
-        out.byDay[d] = (out.byDay[d] ?? 0) + c;
-        (out.byRole[d] ??= {})[role] = (out.byRole[d]![role] ?? 0) + c;
-        if (m) out.byIssue[Number(m[1])] = (out.byIssue[Number(m[1])] ?? 0) + c;
-        if (call) out.byCall[call] = (out.byCall[call] ?? 0) + c;
-      }
-    }
-    return out;
+  /** What each session recorded per model reply, read in incrementally: by day, by role, by request and by call. */
+  private sessions(from: string): { byDay: Record<string, number>; byRole: Record<string, Record<string, number>>; byIssue: Record<number, number>; byCall: Record<string, number> } {
+    this.ingest();
+    return { byDay: this.db.costsByDay(from), byRole: this.db.costsByRole(from), byIssue: this.db.costsByIssue(), byCall: this.db.costsByCall() };
+  }
+
+  /** Read the lines added to the session logs since last time. */
+  ingest(): number {
+    return this.db.ingestSessions(
+      join(this.o.dataDir, "sessions"),
+      (f) => {
+        const key = decodeURIComponent(f.replace(/\.jsonl$/, ""));
+        const m = /^desk:issue:(\d+):(\w+)/.exec(key);
+        return { role: m ? m[2]! : key.startsWith("chat:voice:") ? "voice" : key.startsWith("scheduled:") ? "automations" : "other", issue: m ? Number(m[1]) : null, call: /^chat:voice:(CA\w+)/.exec(key)?.[1] ?? null };
+      },
+      (ms) => this.day(ms),
+    );
   }
 
   /** Twilio's daily spend, and Steel's browser time at its hourly rate; null where the provider can't be reached. */
   private async providers(from: string): Promise<{ twilio?: Record<string, number>; steel?: Record<string, number> }> {
-    if (Date.now() - this.cache.at < HOUR) return this.cache;
-    const fresh: { at: number; twilio?: Record<string, number>; steel?: Record<string, number> } = { at: Date.now() };
+    const fresh = (p: string) => {
+      const got = this.db.providerDays(p);
+      return got && this.now().getTime() - Date.parse(got.fetchedAt) < HOUR ? got.days : undefined;
+    };
+    const cached = { twilio: this.o.twilio ? fresh("twilio") : undefined, steel: this.o.steelKey ? fresh("steel") : undefined };
+    if ((!this.o.twilio || cached.twilio) && (!this.o.steelKey || cached.steel)) return { ...(cached.twilio ? { twilio: cached.twilio } : {}), ...(cached.steel ? { steel: cached.steel } : {}) };
+    const at = this.now().toISOString();
     if (this.o.twilio) {
       const auth = Buffer.from(`${this.o.twilio.sid}:${this.o.twilio.token}`).toString("base64");
       const url = `https://api.twilio.com/2010-04-01/Accounts/${this.o.twilio.sid}/Usage/Records/Daily.json?Category=totalprice&StartDate=${from}&PageSize=100`;
       const r = await this.fetch(url, { headers: { Authorization: `Basic ${auth}` }, signal: AbortSignal.timeout(15_000) }).catch(() => undefined);
       if (r?.ok) {
         const d = (await r.json()) as { usage_records?: Array<{ start_date: string; price: string }> };
-        fresh.twilio = Object.fromEntries((d.usage_records ?? []).map((x) => [x.start_date, Math.abs(Number(x.price) || 0)]));
+        this.db.setProviderDays("twilio", Object.fromEntries((d.usage_records ?? []).map((x) => [x.start_date, Math.abs(Number(x.price) || 0)])), at);
       } else this.o.log?.(`metrics: Twilio usage unavailable (${r?.status ?? "no answer"})`);
     }
     if (this.o.steelKey) {
@@ -171,14 +166,16 @@ export class Metrics {
         for (const s of d.sessions ?? []) if (s.createdAt.slice(0, 10) >= from) steel[this.day(s.createdAt)] = (steel[this.day(s.createdAt)] ?? 0) + ((s.duration ?? 0) / HOUR) * rate;
         const oldest = d.sessions?.at(-1)?.createdAt.slice(0, 10) ?? "";
         if (!d.nextCursor || oldest < from) {
-          fresh.steel = steel;
+          this.db.setProviderDays("steel", steel, at);
           break;
         }
         cursor = d.nextCursor;
       }
     }
-    this.cache = fresh;
-    return fresh;
+    // What answered is in the database; what didn't stays as it was last fetched, or not available.
+    const twilio = this.o.twilio ? this.db.providerDays("twilio")?.days : undefined;
+    const steel = this.o.steelKey ? this.db.providerDays("steel")?.days : undefined;
+    return { ...(twilio ? { twilio } : {}), ...(steel ? { steel } : {}) };
   }
 
   private calls(): Array<{ id: string; callSid: string; phone: string; channel: string; startedAt: string; endedAt?: string }> {
@@ -194,16 +191,8 @@ export class Metrics {
     });
   }
 
-  private savedFile(): string {
-    return join(this.dir, "saved.json");
-  }
-
   private saved(): Record<string, number> {
-    try {
-      return JSON.parse(readFileSync(this.savedFile(), "utf8")) as Record<string, number>;
-    } catch {
-      return {};
-    }
+    return this.db.saved();
   }
 
   /** Estimate time saved for finished requests that don't have one yet (a few at a time). */
@@ -217,10 +206,8 @@ export class Metrics {
       for (const e of ledger) if (e.issue === i.id) { const k = actionKind(e); if (k && k !== "messages" && k !== "reactions") actions[k] = (actions[k] ?? 0) + 1; }
       const result = i.prs.at(-1)?.body ?? i.thread.at(-1)?.text ?? "";
       const minutes = await this.jevMinutes(i.request, result, actions).catch((e: Error) => (this.o.log?.(`metrics: estimate for #${i.id} failed: ${e.message}`), undefined));
-      if (minutes !== undefined) saved[i.id] = minutes;
+      if (minutes !== undefined) this.db.setSaved(i.id, minutes);
     }
-    mkdirSync(dirname(this.savedFile()), { recursive: true });
-    writeFileSync(this.savedFile(), JSON.stringify(saved));
     return todo.length;
   }
 
@@ -251,7 +238,7 @@ export class Metrics {
     const now = this.now();
     const dates = Array.from({ length: daysBack }, (_, k) => this.day(now.getTime() - (daysBack - 1 - k) * 86_400_000));
     const from = dates[0]!;
-    const [prov, sess] = [await this.providers(from), this.sessions()];
+    const [prov, sess] = [await this.providers(from), this.sessions(from)];
     const or = this.openrouterByDay();
     const issues = this.o.issues().filter((i) => !i.purpose);
     const ledger = this.o.ledger();

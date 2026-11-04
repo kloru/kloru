@@ -929,7 +929,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
         log,
       });
       const m = metrics;
-      const tick = () => void m.snapshot().then(() => m.estimate()).catch((e: Error) => log(`metrics: ${e.message}`));
+      const tick = () => void m.snapshot().then(() => m.ingest()).then(() => m.estimate()).catch((e: Error) => log(`metrics: ${e.message}`));
       setTimeout(tick, 60_000).unref?.();
       metricsTimer = setInterval(tick, 3_600_000);
       metricsTimer.unref?.();
