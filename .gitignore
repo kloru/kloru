@@ -1,0 +1,37 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.instinct/
+.instinct-*/
+*.log
+.DS_Store
+coverage/
+.pnpm-store/
+
+# voice service
+voice/.env
+voice/.venv/
+__pycache__/
+.pytest_cache/
+.instinct.env
+.kloru/
+.kloru.env
+.kloru.cloud.env
+.kloru.langfuse.env
+voice/voice/bench/runs/
+
+# Per-family generated secrets (deploy/family/provision.py); BACKUP_KEY reads that family's backups.
+.families/
+
+# Built by packages/web/scripts/build-editor.mjs
+packages/web/static/editor.js
+packages/web/static/editor.css
+packages/web/static/editor-*
+.kloru.vault.env
+.kloru.steel.env
+.kloru.link.env
+kloru.env
+.selfhost/

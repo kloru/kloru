@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm -r typecheck
+      - run: pnpm -r test
+      - run: pnpm smoke
+      - name: No leftover secrets or personal identifiers
+        run: |
+          ! grep -rIn --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git -E "ApiKey_[0-9a-f]{8}-[0-9a-f]{4}|sk-ant-[A-Za-z0-9_-]{20,}|mk_[A-Za-z0-9_-]{30,}|liwl(token|refresh)_" . | grep -vE "test/|\.gitleaks\.toml"
+
+  windows-inkbox:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @kloru/core build
+      - run: pnpm --filter @kloru/inkbox build
+      - run: pnpm exec vitest run packages/inkbox/test/inbox.test.ts

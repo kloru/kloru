@@ -1,0 +1,46 @@
+# Inside the Fly machine: Fly's edge terminates TLS and forwards plain HTTP to :8000.
+{
+	admin off
+	auto_https off
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+:8000 {
+	handle /healthz {
+		rewrite * /health
+		reverse_proxy 127.0.0.1:8790
+	}
+
+	@voice host voice.kloru.com
+	handle @voice {
+		# Twilio's webhook and the live call audio (WebSocket upgrades pass through).
+		reverse_proxy 127.0.0.1:8765
+	}
+
+	# A family deployment serves everything from one host (<family>.kloru.com): calls by path.
+	handle /twilio/* {
+		reverse_proxy 127.0.0.1:8765
+	}
+
+	# Inkbox (texts) and Resend (email) post to the agent itself.
+	handle /webhooks/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# Stripe Link sends the owner back here after they connect their wallet.
+	handle /oauth/link/callback {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# kloru.com is the first family's site; www and app send people there.
+	@alias host www.kloru.com app.kloru.com
+	handle @alias {
+		redir https://kloru.com{uri} permanent
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:8790
+	}
+}

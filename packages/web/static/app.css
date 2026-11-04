@@ -1,0 +1,198 @@
+/* Kloru: one column of serif text, soft underlines, almost nothing else. */
+:root {
+  --paper: #fdfcfa;
+  --ink: #1a1816;
+  --soft: #6f6a64;
+  --rule: #ebe6df;
+  --underline: #e8cdb9;
+  --underline-strong: #c99a7a;
+  --ok: #3d6b4f;
+  --error: #9b3b2e;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+  --sans: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #141312;
+    --ink: #ece8e2;
+    --soft: #9d968e;
+    --rule: #2a2724;
+    --underline: #5c4536;
+    --underline-strong: #a87c5e;
+    --ok: #8fc2a1;
+    --error: #e59a8c;
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 20px/1.42 var(--serif);
+  -webkit-font-smoothing: antialiased;
+}
+header, main, footer { width: 100%; max-width: 640px; padding-left: 30px; padding-right: 30px; }
+@media (max-width: 520px) { header, main, footer { padding-left: 18px; padding-right: 18px; } body { font-size: 18px; } }
+
+/* Header: the mark, and a quiet row of words once signed in. */
+header { padding-top: 30px; display: flex; flex-direction: column; gap: 18px; }
+.brand { color: var(--ink); display: inline-block; width: fit-content; }
+.mark { display: block; }
+nav { display: flex; flex-wrap: wrap; gap: 4px 18px; font: 15px/1.5 var(--sans); }
+nav a { color: var(--soft); text-decoration: none; }
+nav a:hover, nav a[aria-current="page"] { color: var(--ink); }
+nav a[aria-current="page"] { text-decoration: underline; text-decoration-color: var(--underline); text-decoration-thickness: 2px; text-underline-offset: 4px; }
+.who { color: var(--soft); }
+.who a { color: var(--soft); }
+
+main { flex: 1; padding-top: 40px; padding-bottom: 64px; }
+h1 { font-size: 26px; font-weight: 500; margin: 0 0 6px; letter-spacing: -0.01em; }
+h2 { font-size: 20px; font-weight: 500; margin: 36px 0 8px; }
+p { margin: 0 0 22px; }
+.prose { max-width: 560px; }
+.lead { font-weight: 500; }
+.muted { color: var(--soft); }
+.small { font-size: 16px; }
+.u { text-decoration: underline; text-decoration-color: var(--underline); text-decoration-thickness: 1px; text-underline-offset: 4px; }
+
+/* Links read like text with a soft underline. */
+a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--underline); text-decoration-thickness: 2px; text-underline-offset: 4px; }
+a:hover { text-decoration-color: var(--underline-strong); }
+
+/* The chevron list: "Start a group ›". */
+ul.go { list-style: none; padding: 0; margin: 34px 0 0; display: grid; gap: 10px; }
+ul.go a::after, button.go::after { content: " ›"; display: inline-block; margin-left: 4px; text-decoration: none; }
+
+/* Buttons are words. */
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+button.go, button.link {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--underline);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+button.go:hover, button.link:hover { text-decoration-color: var(--underline-strong); }
+button.link { font-size: inherit; }
+
+/* Banners are a sentence in color. */
+.banner { margin: 0 0 24px; padding-left: 14px; border-left: 2px solid currentColor; }
+.banner.ok { color: var(--ok); }
+.banner.error { color: var(--error); }
+
+/* Forms: a label, a line to write on. */
+form.inline { display: inline; margin: 0; }
+form.signin, form.stack { display: grid; gap: 18px; max-width: 420px; margin: 8px 0 20px; }
+form.signin label, form.stack label { display: grid; gap: 4px; }
+form label > span { font: 15px/1.4 var(--sans); color: var(--soft); }
+input:not([type="radio"]):not([type="checkbox"]), select {
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  padding: 6px 0;
+  max-width: 100%;
+  outline: none;
+}
+input:focus, select:focus { border-bottom-color: var(--underline-strong); }
+form.signin input { font-size: 24px; letter-spacing: 0.01em; }
+form.signin button.go, form.stack button.go, form.stack button.link { justify-self: start; }
+select { appearance: none; padding-right: 14px; cursor: pointer; text-decoration: underline; text-decoration-color: var(--underline); text-underline-offset: 4px; border-bottom: 0; }
+
+/* Lists of things: one per line, separated by space. */
+ul.rows { list-style: none; padding: 0; margin: 20px 0; display: grid; gap: 18px; }
+.name { font-weight: 500; }
+.state { color: var(--soft); font-style: italic; }
+.state.ok { color: var(--ok); font-style: normal; }
+.state.warn { color: var(--error); font-style: normal; }
+section.app ul.rows { margin: 8px 0 14px; gap: 10px; }
+section.app p.muted { margin-bottom: 14px; }
+section.app .name { overflow-wrap: anywhere; }
+form.tier { margin-left: 8px; font-size: 17px; }
+.grants { margin: 6px 0 0; padding-left: 18px; font-size: 17px; }
+details { margin-top: 6px; font-size: 17px; }
+summary { cursor: pointer; color: var(--soft); list-style: none; width: fit-content; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 4px; }
+summary::-webkit-details-marker { display: none; }
+.checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 16px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 16px; }
+
+/* Permissions: the label, then three words; the chosen one is underlined. */
+form.perm { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 18px; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+.choices { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 17px; }
+label.choice { cursor: pointer; color: var(--soft); }
+label.choice input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+label.choice input:checked + span { color: var(--ink); text-decoration: underline; text-decoration-color: var(--underline-strong); text-decoration-thickness: 2px; text-underline-offset: 4px; }
+label.choice input:focus-visible + span { outline: 2px solid var(--underline-strong); outline-offset: 2px; }
+
+/* Legal pages: comfortable reading. */
+article.legal { max-width: 600px; font-size: 18px; }
+article.legal h2 { font-size: 19px; margin-top: 30px; }
+article.legal ul { padding-left: 20px; margin: 0 0 22px; }
+article.legal li { margin-bottom: 8px; }
+
+footer { padding-top: 24px; padding-bottom: 28px; display: flex; flex-wrap: wrap; gap: 6px 20px; font: 13px/1.5 var(--sans); color: var(--soft); }
+footer a { color: var(--soft); text-decoration: none; }
+footer a:hover { color: var(--ink); }
+
+/* Admin call log: a turned-away call from the owner's number stands out. */
+li.call.warn { padding-left: 12px; border-left: 2px solid var(--error); }
+li.call.warn .state { color: var(--error); font-style: normal; }
+
+/* Call transcripts: who spoke, and the background work in a quieter voice. */
+ul.transcript { gap: 10px; }
+ul.transcript li.task { font-size: 16px; color: var(--soft); padding-left: 12px; border-left: 2px solid var(--rule); }
+
+/* A setting: a checkbox and its label on one line. */
+label.check { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+label.check input { width: 18px; height: 18px; accent-color: var(--underline-strong); }
+form.signin label.check.consent { display: flex; align-items: flex-start; gap: 10px; }
+form.signin label.check.consent input { flex: none; width: 18px; height: 18px; margin-top: 2px; font-size: inherit; }
+pre.code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.45; margin: 8px 0 0; }
+body.artifact main { max-width: 760px; margin: 0 auto; padding: 56px 20px 64px; }
+body.artifact table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 16px; }
+body.artifact th, body.artifact td { text-align: left; padding: 6px 10px; border-bottom: 1px solid currentColor; vertical-align: top; }
+body.artifact th { font-weight: 600; }
+body.artifact article { overflow-x: auto; }
+body.artifact main { max-width: 860px; }
+body.artifact .bn-editor { background: transparent; }
+body.artifact #kloru-editor { margin-inline: -54px; }
+@media (max-width: 760px) { body.artifact #kloru-editor { margin-inline: -20px; } body.artifact .bn-editor { padding-inline: 20px; } }
+body.artifact iframe.kloru-pdf { width: 100%; height: 75vh; border: 1px solid currentColor; border-radius: 8px; opacity: 0.95; }
+body.artifact .kloru-status { font-size: 13px; opacity: 0.6; min-height: 1em; }
+body.artifact article img, body.artifact article video { max-width: 100%; border-radius: 8px; }
+
+section.more ul.apps { list-style: none; padding: 0; margin: 10px 0 24px; display: grid; gap: 10px; }
+section.more ul.apps .muted { font-size: 0.92em; }
+
+/* /admin/metrics: numbers first, then a daily cost chart and plain tables. */
+.m-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 16px 0; }
+.m-stat { border-top: 1px solid var(--rule); padding-top: 8px; }
+.m-stat b { display: block; font: 500 1.5rem/1.2 var(--sans); font-variant-numeric: tabular-nums; }
+.m-stat span { color: var(--soft); font-size: 0.85rem; }
+.m-chart { width: 100%; height: auto; max-width: 720px; display: block; margin: 8px 0 4px; }
+.m-grid { stroke: var(--rule); stroke-width: 1; }
+.m-axis { fill: var(--soft); font: 10px var(--sans); }
+.m-models { fill: #8a5a3c; } .m-phone { fill: #3d6b4f; } .m-browser { fill: #4a6a8f; } .m-speech { fill: #b08a3e; } .m-hosting { fill: #9d968e; }
+@media (prefers-color-scheme: dark) { .m-models { fill: #c99a7a; } .m-phone { fill: #8fc2a1; } .m-browser { fill: #8fb0d8; } .m-speech { fill: #d9b56a; } .m-hosting { fill: #6f6a64; } }
+.m-legend { display: flex; flex-wrap: wrap; gap: 14px; font: 0.85rem var(--sans); color: var(--soft); margin: 0 0 8px; }
+.m-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.m-legend svg { width: 10px; height: 10px; }
+.m-note, .m-soft { color: var(--soft); font-size: 0.9rem; }
+.m-table { overflow-x: auto; margin: 8px 0 20px; }
+.m-table table { border-collapse: collapse; width: 100%; font: 0.9rem var(--sans); }
+.m-table th { text-align: left; color: var(--soft); font-weight: 500; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 10px 6px 0; }
+.m-table td { border-top: 1px solid var(--rule); padding: 7px 10px 7px 0; vertical-align: top; font-variant-numeric: tabular-nums; }
+.m-sources { color: var(--soft); font-size: 0.9rem; padding-left: 18px; }
+
+/* /start: a new family's checklist. */
+.start { list-style: none; padding: 0; margin: 16px 0; max-width: 560px; display: grid; gap: 14px; }
+.start li { border-top: 1px solid var(--rule); padding-top: 10px; }
+.start li p { margin: 4px 0 0; }
+.start li.done b { color: var(--soft); }

@@ -1,0 +1,45 @@
+{
+  "name": "@kloru/cli",
+  "version": "0.1.0",
+  "description": "instinct CLI: init, dev, deploy to Maritime, connect, invite, trust, status",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "dev": "node --import tsx src/bin.ts dev"
+  },
+  "dependencies": {
+    "@kloru/core": "workspace:*",
+    "@kloru/inkbox": "workspace:*",
+    "@kloru/server": "workspace:*",
+    "@inkbox/sdk": "^0.7.13",
+    "maritime-sdk": "^0.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4",
+    "tsx": "^4.19.0"
+  },
+  "bin": {
+    "instinct": "./dist/bin.js"
+  }
+}

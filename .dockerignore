@@ -1,0 +1,23 @@
+# Build context for deploy/Dockerfile.*. Dependencies are installed inside the image.
+node_modules
+**/node_modules
+**/dist
+.git
+.instinct
+.instinct-*
+.env
+.env.*
+!.env.example
+coverage
+*.log
+.DS_Store
+docs/research
+# Local secrets and state: never in an image
+.instinct.env
+.kloru
+.kloru.env
+voice/.env
+voice/.venv
+**/__pycache__
+**/.pytest_cache
+.superpowers

@@ -1,0 +1,28 @@
+{
+  "name": "@kloru/desk",
+  "version": "0.1.0",
+  "description": "Kloru's desk: the conversation as a codebase. Calls file issues; a technical PM triages and merges; engineers read and draft; ops make every real-world change.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist"],
+  "engines": { "node": ">=22.19.0" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@kloru/core": "workspace:*",
+    "@kloru/apps": "workspace:*",
+    "@earendil-works/pi-agent-core": "^1.0.1",
+    "@earendil-works/pi-ai": "^1.0.1",
+    "pdf-parse": "1.1.1",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": { "@types/node": "^22.15.0", "typescript": "^5.8.3", "vitest": "^3.2.4" }
+}
