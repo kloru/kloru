@@ -8,9 +8,13 @@
  *   node dist/backup.js          back up KLORU_BACKUP_DIR (default /data) now
  *   node dist/backup.js restore <dest>   restore the newest backup into <dest>
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { closeSync, createReadStream, createWriteStream, mkdirSync, mkdtempSync, openSync, readSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
@@ -38,6 +42,41 @@ export function decrypt(key: Buffer, box: Buffer): Buffer {
   return Buffer.concat([decipher.update(box.subarray(MAGIC.length + 12, box.length - 16)), decipher.final()]);
 }
 
+/** encrypt(), streamed into a file: the archive never sits in memory, whatever the disk holds. */
+export async function encryptTo(key: Buffer, input: Readable, file: string): Promise<void> {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  await pipeline(
+    input,
+    cipher,
+    async function* (sealed: AsyncIterable<Buffer>) {
+      yield Buffer.concat([MAGIC, iv]);
+      for await (const chunk of sealed) yield chunk;
+      yield cipher.getAuthTag();
+    },
+    createWriteStream(file),
+  );
+}
+
+/** decrypt(), file to file; throws (and the output must not be used) if the box was altered. */
+export async function decryptFile(key: Buffer, box: string, out: string): Promise<void> {
+  const size = statSync(box).size;
+  const head = Buffer.alloc(MAGIC.length + 12);
+  const tag = Buffer.alloc(16);
+  const fd = openSync(box, "r");
+  try {
+    if (size < MAGIC.length + 28) throw new Error("not a Kloru backup");
+    readSync(fd, head, 0, head.length, 0);
+    readSync(fd, tag, 0, 16, size - 16);
+  } finally {
+    closeSync(fd);
+  }
+  if (!head.subarray(0, MAGIC.length).equals(MAGIC)) throw new Error("not a Kloru backup");
+  const decipher = createDecipheriv("aes-256-gcm", key, head.subarray(MAGIC.length));
+  decipher.setAuthTag(tag);
+  await pipeline(createReadStream(box, { start: head.length, end: size - 17 }), decipher, createWriteStream(out));
+}
+
 /** A family's short name (KLORU_FAMILY): lowercase, starts with a letter, so it never looks like a year. */
 export const FAMILY = /^[a-z][a-z0-9-]{1,30}$/;
 
@@ -60,8 +99,10 @@ export function backupPrefix(family?: string): string {
 }
 
 export interface ObjectStore {
-  put(key: string, body: Buffer): Promise<void>;
-  get(key: string): Promise<Buffer>;
+  /** Upload a file's contents. */
+  put(key: string, file: string): Promise<void>;
+  /** Download an object into a file. */
+  get(key: string, file: string): Promise<void>;
   /** The greatest key under a prefix (keys sort by time). */
   latest(prefix: string): Promise<string | undefined>;
 }
@@ -77,13 +118,13 @@ export class R2Store implements ObjectStore {
     });
   }
 
-  async put(key: string, body: Buffer): Promise<void> {
-    await this.s3.send(new PutObjectCommand({ Bucket: this.o.bucket, Key: key, Body: body, ContentType: "application/octet-stream" }));
+  async put(key: string, file: string): Promise<void> {
+    await this.s3.send(new PutObjectCommand({ Bucket: this.o.bucket, Key: key, Body: createReadStream(file), ContentLength: statSync(file).size, ContentType: "application/octet-stream" }));
   }
 
-  async get(key: string): Promise<Buffer> {
+  async get(key: string, file: string): Promise<void> {
     const res = await this.s3.send(new GetObjectCommand({ Bucket: this.o.bucket, Key: key }));
-    return Buffer.from(await res.Body!.transformToByteArray());
+    await pipeline(res.Body as Readable, createWriteStream(file));
   }
 
   async latest(prefix: string): Promise<string | undefined> {
@@ -107,21 +148,43 @@ export function tarCreate(dir: string, platform: NodeJS.Platform = process.platf
   return { args: ["czf", "-", "-C", dir, "."], env: process.env };
 }
 
+/**
+ * Streams tar through the cipher into a temp file outside the data directory, then uploads it.
+ * Memory stays flat: holding the archive in memory (twice, once sealed) ran a 2 GB machine out.
+ */
 export async function runBackup(o: { dir: string; store: ObjectStore; encryptionKey: string; now?: Date; family?: string }): Promise<string> {
-  const tar = tarCreate(o.dir);
-  const archive = execFileSync("tar", tar.args, { env: tar.env, maxBuffer: 2 * 1024 * 1024 * 1024 });
+  const encryptionKey = keyFromHex(o.encryptionKey);
   const key = backupKey(o.now ?? new Date(), o.family);
-  await o.store.put(key, encrypt(keyFromHex(o.encryptionKey), archive));
-  return key;
+  const work = mkdtempSync(join(tmpdir(), "kloru-backup-"));
+  try {
+    const sealed = join(work, "backup.enc");
+    const tar = tarCreate(o.dir);
+    const child = spawn("tar", tar.args, { env: tar.env, stdio: ["ignore", "pipe", "inherit"] });
+    const exited = new Promise<number | null>((resolve, reject) => child.on("error", reject).on("close", resolve));
+    await encryptTo(encryptionKey, child.stdout, sealed);
+    const code = await exited;
+    if (code !== 0) throw new Error(`tar exited with ${code}`);
+    await o.store.put(key, sealed);
+    return key;
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 }
 
 export async function restore(o: { dest: string; store: ObjectStore; encryptionKey: string; key?: string; family?: string }): Promise<string> {
   const key = o.key ?? (await o.store.latest(backupPrefix(o.family)));
   if (!key) throw new Error("no backups found");
-  const archive = decrypt(keyFromHex(o.encryptionKey), await o.store.get(key));
-  mkdirSync(o.dest, { recursive: true });
-  execFileSync("tar", ["xzf", "-", "-C", o.dest], { input: archive });
-  return key;
+  const work = mkdtempSync(join(tmpdir(), "kloru-restore-"));
+  try {
+    await o.store.get(key, join(work, "backup.enc"));
+    // Verified before tar sees a byte of it.
+    await decryptFile(keyFromHex(o.encryptionKey), join(work, "backup.enc"), join(work, "backup.tar.gz"));
+    mkdirSync(o.dest, { recursive: true });
+    execFileSync("tar", ["xzf", join(work, "backup.tar.gz"), "-C", o.dest]);
+    return key;
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 }
 
 function storeFromEnv(env: NodeJS.ProcessEnv): R2Store {

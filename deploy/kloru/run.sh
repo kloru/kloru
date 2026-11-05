@@ -30,10 +30,12 @@ pids+=($!)
 # Nightly encrypted backup of /data to R2, first one 10 minutes after boot.
 if [ -n "${R2_BUCKET:-}" ] && [ -n "${BACKUP_KEY:-}" ]; then
   (sleep 600; while true; do KLORU_BACKUP_DIR=/data node packages/web/dist/backup.js || echo "[backup] will retry tomorrow"; sleep 86400; done) &
+  backup=$!
 fi
 
 # Every service stops on its own, then everything they wrote reaches the disk before the machine goes.
-stop() { kill "${pids[@]}" 2>/dev/null; wait; sync; }
+# Wait on the services only: the backup loop sleeps for a day, and waiting on it kept a dead machine up.
+stop() { kill "${pids[@]}" ${backup:-} 2>/dev/null; wait "${pids[@]}"; sync; }
 trap 'stop; exit 0' TERM INT
 
 wait -n "${pids[@]}"

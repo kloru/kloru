@@ -1,15 +1,16 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { backupKey, backupPrefix, decrypt, encrypt, keyFromHex, restore, runBackup, tarCreate, type ObjectStore } from "../src/backup.js";
+import { backupKey, backupPrefix, decrypt, decryptFile, encrypt, encryptTo, keyFromHex, restore, runBackup, tarCreate, type ObjectStore } from "../src/backup.js";
 
 const KEY = "11".repeat(32);
 
 class MemoryStore implements ObjectStore {
   objects = new Map<string, Buffer>();
-  async put(key: string, body: Buffer) { this.objects.set(key, body); }
-  async get(key: string) { const b = this.objects.get(key); if (!b) throw new Error("missing"); return b; }
+  async put(key: string, file: string) { this.objects.set(key, readFileSync(file)); }
+  async get(key: string, file: string) { const b = this.objects.get(key); if (!b) throw new Error("missing"); writeFileSync(file, b); }
   async latest(prefix: string) { return [...this.objects.keys()].filter((k) => k.startsWith(prefix)).sort().at(-1); }
 }
 
@@ -23,6 +24,21 @@ describe("backup", () => {
     expect(() => decrypt(key, bad)).toThrow();
     expect(() => decrypt(keyFromHex("22".repeat(32)), box)).toThrow();
     expect(() => keyFromHex("abc")).toThrow(/64 hex/);
+  });
+
+  it("the streamed format is the same box, and a tampered one never decrypts", async () => {
+    const key = keyFromHex(KEY);
+    const dir = mkdtempSync(join(tmpdir(), "bk-stream-"));
+    const plain = Buffer.alloc(3 * 1024 * 1024 + 7, 0x61);
+    await encryptTo(key, Readable.from([plain.subarray(0, 1000), plain.subarray(1000)]), join(dir, "box"));
+    const box = readFileSync(join(dir, "box"));
+    expect(decrypt(key, box).equals(plain)).toBe(true);
+    await decryptFile(key, join(dir, "box"), join(dir, "out"));
+    expect(readFileSync(join(dir, "out")).equals(plain)).toBe(true);
+    box[100] ^= 1;
+    writeFileSync(join(dir, "bad"), box);
+    await expect(decryptFile(key, join(dir, "bad"), join(dir, "out2"))).rejects.toThrow();
+    await expect(decryptFile(keyFromHex("22".repeat(32)), join(dir, "box"), join(dir, "out3"))).rejects.toThrow();
   });
 
   it("on macOS, archives plain file contents a Linux tar can read", () => {
