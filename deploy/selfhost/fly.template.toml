@@ -4,8 +4,7 @@ primary_region = "{region}"
 # Time to stop cleanly on a deploy: services close, then run.sh syncs the disk (memory commits were cut off at 5 s).
 kill_timeout = "30s"
 
-[build]
-  dockerfile = "deploy/kloru/Dockerfile"
+# No [build]: Fly would read the Dockerfile's path from this file's folder. setup.py passes it.
 
 [env]
   KLORU_PUBLIC_URL = "https://{domain}"

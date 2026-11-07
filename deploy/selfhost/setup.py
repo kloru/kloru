@@ -252,7 +252,8 @@ def deploy(app: str, config: Path, image: str | None = None) -> bool:
         args = ["fly", "deploy", "-c", str(config), "--image", image]
     else:
         v = version()
-        args = ["fly", "deploy", "-c", str(config), "--dockerfile", "deploy/kloru/Dockerfile", "--image-label", v, "--env", f"KLORU_VERSION={v}", "."]
+        # Absolute: Fly reads a relative Dockerfile path from the config's folder (.selfhost/<app>/).
+        args = ["fly", "deploy", "-c", str(config), "--dockerfile", str(ROOT / "deploy" / "kloru" / "Dockerfile"), "--image-label", v, "--env", f"KLORU_VERSION={v}", str(ROOT)]
     return subprocess.run(args, cwd=ROOT).returncode == 0
 
 
@@ -340,7 +341,7 @@ def update(app: str | None, *, now: bool) -> int:
     raise SystemExit(f"Update failed and was rolled back. `fly logs -a {app}` shows why.")
 
 
-def plan(app: str, region: str, domain: str, owner: Owner, *, number: str | None, area_code: str | None, values: dict[str, str]) -> list[Step]:
+def plan(app: str, region: str, domain: str, owner: Owner, *, number: str | None, area_code: str | None, values: dict[str, str], org: str | None = None) -> list[Step]:
     config = ROOT / ".selfhost" / app / "fly.toml"
     voice_url = f"https://{domain}/twilio/voice"
     sid, token = values.get("TWILIO_ACCOUNT_SID", ""), values.get("TWILIO_AUTH_TOKEN", "")
@@ -401,7 +402,7 @@ def plan(app: str, region: str, domain: str, owner: Owner, *, number: str | None
         return "kloru_data exists" if any(v.get("name") == "kloru_data" for v in vols) else None
 
     steps = [
-        Step("create the Fly app", f"fly apps create {app} (free; the machine is billed once it's deployed)", run=lambda: sh("fly", "apps", "create", app),
+        Step("create the Fly app", f"fly apps create {app}{f' in {org}' if org else ''} (free; the machine is billed once it's deployed)", run=lambda: sh("fly", "apps", "create", app, *(["--org", org] if org else [])),
              done=lambda: f"{app} exists" if ok("fly", "status", "-a", app) else None),
         Step("create the data volume", f"10 GB volume kloru_data in {region} (about $1.50/month)", costs=True, run=lambda: sh("fly", "volumes", "create", "kloru_data", "-a", app, "-r", region, "-s", "10", "--yes"),
              done=volume_exists),
@@ -441,6 +442,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--domain", help="where Kloru lives, e.g. kloru.example.com")
     ap.add_argument("--app", help="Fly app name (default from the domain)")
     ap.add_argument("--region", default="sjc", help="Fly region near you (default sjc, San Jose)")
+    ap.add_argument("--org", help="Fly organization, if your account has more than one (`fly orgs list`)")
     ap.add_argument("--owner-name")
     ap.add_argument("--owner-phone")
     ap.add_argument("--owner-email")
@@ -477,13 +479,13 @@ def main(argv: list[str]) -> int:
     e164(owner.phone)
     generated = load_or_generate(app) if a.apply else generate_secrets()
     values = secrets_for(owner, keys, generated, handle_for(app))
-    steps = plan(app, a.region, domain, owner, number=a.number and e164(a.number), area_code=a.area_code, values=values)
+    steps = plan(app, a.region, domain, owner, number=a.number and e164(a.number), area_code=a.area_code, values=values, org=a.org)
     print(f"Your Kloru: app {app} in {a.region}, https://{domain}, owner {owner.name} {e164(owner.phone)}")
     for i, s in enumerate(steps, 1):
         print(f"{i:2}. {s.name}{'  [costs money]' if s.costs else ''}\n    {s.detail}")
     if not a.apply:
         print("   (steps already done are skipped when it runs)")
-    print("Then, by you: add the DNS records it prints; for texts by SMS, register the number for A2P in Twilio (iMessage and calls work without it).")
+    print(("Then, by you: " if on_fly(domain) else "Then, by you: add the DNS records it prints; ") + "for texts by SMS, register the number for A2P in Twilio (iMessage and calls work without it).")
     if not a.apply:
         print("\nNothing was done. Add --apply to run these steps.")
         return 0
