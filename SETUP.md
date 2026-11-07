@@ -20,7 +20,7 @@ section tells it how.
 |---|---|
 | Fly.io machine (2 shared CPUs, 2 GB) and a 10 GB disk | $17 / month |
 | Phone number (Twilio) | $1.15 / month, plus about a cent a minute for calls |
-| Models (OpenRouter) | $2–15 / day, depending on how much your family uses it |
+| Models (OpenRouter) | about $1–5 / day on the default (Luna), depending on how much your family uses it |
 | Speech (Deepgram, Cartesia) | a few cents per call |
 | iMessage (Inkbox) | Inkbox's plan for one identity |
 | A domain | $10–15 / year, if you don't already have one |
@@ -49,7 +49,8 @@ out of chats, emails and screenshots: paste them only into `kloru.env`.
 
 1. **Fly.io** ([fly.io](https://fly.io)): sign up, add a card, then run `fly auth login`.
 2. **A domain:** use one you own, or buy one (Cloudflare Registrar is simplest). Kloru will live
-   at a subdomain such as `kloru.example.com`; you'll add one DNS record at the end.
+   at a subdomain such as `kloru.example.com`; you'll add one DNS record at the end. No domain?
+   Use `--domain <app>.fly.dev` (for example `kloru-sam.fly.dev`): Fly's own address, no DNS.
 3. **OpenRouter** ([openrouter.ai](https://openrouter.ai)): add about $20 of credit, then
    **Keys → Create**. Copy the key into `OPENROUTER_API_KEY`.
 4. **Twilio** ([twilio.com](https://www.twilio.com)): upgrade from the trial (needed to buy a
@@ -114,6 +115,9 @@ to pick a Fly region near you (`fly platform regions` lists them). When the plan
 5. Add the TLS certificate and **print the DNS records you need**.
 6. Build and deploy, then wait until it answers.
 
+If a step fails, fix what it says and run the same command again: steps already done are skipped,
+and nothing is bought twice.
+
 Generated secrets are saved in `.selfhost/<app>.env`. **Keep a copy somewhere safe**: the backup
 and vault keys can't be recovered, and without them your backups and saved cards are unreadable.
 
@@ -152,7 +156,12 @@ your number. Your Kloru already serves the privacy policy, terms and opt-in page
 
 ## Day to day
 
-- **Update to the latest Kloru:** `git pull && fly deploy -c .selfhost/<app>/fly.toml --dockerfile deploy/kloru/Dockerfile .`
+- **Update to the latest Kloru:** `python3 deploy/selfhost/setup.py --update`. It pulls the latest
+  code, shows what's new, waits for calls and requests in progress to finish, deploys, and puts the
+  previous release back if the new one doesn't come up. **Admin** shows the version you run.
+- **Models:** engineers run on OpenAI's Luna, the cheapest. For harder errands (research, long
+  drafts), set `KLORU_ENGINEER_MODEL = "openrouter/openai/gpt-6.1-terra"` in
+  `.selfhost/<app>/fly.toml` and update: smarter, at about 10× the price.
 - **Logs:** `fly logs -a <app>`. A shell on the machine: `fly ssh console -a <app>`.
 - **Costs and activity:** your site's **Admin → Metrics**.
 - **Change a key:** edit `kloru.env` and run setup again with `--apply`. It skips what exists

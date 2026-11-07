@@ -1,6 +1,6 @@
 ---
 name: setup-kloru
-description: Use when someone asks to set up, install, deploy or self-host their own Kloru (their own accounts and domain). Walks them through SETUP.md, with them making every account, keys going only into kloru.env, and a yes before anything is bought.
+description: Use when someone asks to set up, install, deploy, self-host or update their own Kloru (their own accounts and domain). Walks them through SETUP.md, with them making every account, keys going only into kloru.env, and a yes before anything is bought.
 ---
 
 # Set up Kloru
@@ -19,3 +19,7 @@ printed), the plan is shown before `--apply`, and DNS is theirs to add.
    `fly certs show` until the certificate is issued.
 7. Confirm `/healthz` and `desk: ready`, then send them to sign in at their domain. The Get
    started page takes it from there.
+
+**Updating** ("update my Kloru"): run `python3 deploy/selfhost/setup.py --update` and tell them
+what's new from its output. It waits for calls in progress and rolls back on its own if the new
+release doesn't come up; if it says it rolled back, read `fly logs -a <app>` with them.

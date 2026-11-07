@@ -443,7 +443,7 @@ export function settingsPage(improve: boolean, csrf: string): string {
     `<button class="go">Save</button></form>`;
 }
 
-export function adminPage(users: ConsoleUser[], invites: Invite[], csrf: string, calls?: CallSummary, transcripts = false, desk = false): string {
+export function adminPage(users: ConsoleUser[], invites: Invite[], csrf: string, calls?: CallSummary, transcripts = false, desk = false, version?: string): string {
   const userRows = users.map((u) => `<li><span class="name">${esc(u.phone)}</span>${u.name ? ` ${esc(u.name)}` : ""} <span class="muted small">${u.agent ? esc(u.agent.kind === "direct" ? `agent at ${u.agent.url}` : `Maritime ${u.agent.agentId}`) : "no agent yet"}</span></li>`).join("");
   const inviteRows = invites
     .map((i) => `<li><span class="name">${esc(i.phone)}</span> <span class="muted small">invited by ${esc(i.invitedBy)}</span> · <form method="post" action="/admin/uninvite" class="inline">${csrfField(csrf)}<input type="hidden" name="phone" value="${esc(i.phone)}"><button class="link">remove</button></form></li>`)
@@ -452,7 +452,8 @@ export function adminPage(users: ConsoleUser[], invites: Invite[], csrf: string,
     `<p class="muted small">They sign in with a code texted to that number.</p></section>` +
     `<section><h2>Invites</h2>${inviteRows ? `<ul class="rows">${inviteRows}</ul>` : "<p>None.</p>"}</section>` +
     `<section><h2>People</h2>${userRows ? `<ul class="rows">${userRows}</ul>` : "<p>None yet.</p>"}</section>` +
-    callsSection(calls, transcripts);
+    callsSection(calls, transcripts) +
+    (version ? `<p class="muted small">Running ${esc(version)}. Update with <code>python3 deploy/selfhost/setup.py --update</code>.</p>` : "");
 }
 
 // ---------------------------------------------------------------------------

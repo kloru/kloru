@@ -4,20 +4,22 @@
  *
  * - Models: OpenRouter's own usage for Kloru's keys, recorded hourly (it keeps no daily history for
  *   an ordinary key), and before that the cost each desk session recorded per reply. Both live in
- *   metrics.db (metrics-db.ts), where session costs are read in as they're written.
+ *   metrics.db (metrics-db.ts), where session costs are read in as they're written, each reply priced
+ *   from its tokens at OpenRouter's listed prices (fetched daily).
  * - Phone: Twilio's daily usage. Browser: Steel session minutes. Speech: voice minutes at a set rate.
  *   Hosting: a set amount a day. A provider that can't be reached shows as not available, never $0.
  * - Time saved: Jev estimates once, per finished request, how long it would have taken them by hand.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { MetricsDb } from "./metrics-db.js";
+import { MetricsDb, type Price } from "./metrics-db.js";
 import type { Issue, LedgerEntry } from "@kloru/desk";
 
 const DECISIONS = "https://openrouter.ai/api/alpha/decisions";
 const JEV = "typesafe/jev-1.14";
 const FINISHED = new Set(["done", "resolved", "merged"]);
 const HOUR = 3_600_000;
+const MODELS = "https://openrouter.ai/api/v1/models";
 
 export interface MetricsOptions {
   /** /data/instinct: sessions/, repo/ (issues, calls, ledger), metrics/ (what this keeps). */
@@ -75,6 +77,7 @@ export class Metrics {
   private readonly fetch: typeof fetch;
   private readonly dir: string;
   readonly db: MetricsDb;
+  private prices: { at: number; byModel: Map<string, Price> } | undefined;
 
   constructor(private readonly o: MetricsOptions) {
     this.now = o.now ?? (() => new Date());
@@ -119,21 +122,44 @@ export class Metrics {
   }
 
   /** What each session recorded per model reply, read in incrementally: by day, by role, by request and by call. */
-  private sessions(from: string): { byDay: Record<string, number>; byRole: Record<string, Record<string, number>>; byIssue: Record<number, number>; byCall: Record<string, number> } {
-    this.ingest();
+  private async sessions(from: string): Promise<{ byDay: Record<string, number>; byRole: Record<string, Record<string, number>>; byIssue: Record<number, number>; byCall: Record<string, number> }> {
+    await this.ingest();
     return { byDay: this.db.costsByDay(from), byRole: this.db.costsByRole(from), byIssue: this.db.costsByIssue(), byCall: this.db.costsByCall() };
   }
 
+  /** OpenRouter's price for each model, fetched at most daily; the last good list when it can't be reached. */
+  private async loadPrices(): Promise<Map<string, Price>> {
+    if (this.prices && this.now().getTime() - this.prices.at < 24 * HOUR) return this.prices.byModel;
+    const r = await this.fetch(MODELS, { signal: AbortSignal.timeout(15_000) }).catch(() => undefined);
+    const d = r?.ok ? ((await r.json().catch(() => undefined)) as { data?: Array<{ id: string; pricing?: Record<string, string> }> } | undefined) : undefined;
+    if (!d?.data?.length) {
+      this.o.log?.(`metrics: OpenRouter prices unavailable (${r?.status ?? "no answer"})`);
+      return this.prices?.byModel ?? new Map();
+    }
+    const n = (v: string | undefined) => Number(v) || 0;
+    const byModel = new Map<string, Price>();
+    for (const m of d.data) {
+      const p = m.pricing ?? {};
+      // A model with no cache prices charges cached tokens as input.
+      byModel.set(m.id, { input: n(p.prompt), output: n(p.completion), cacheRead: p.input_cache_read ? n(p.input_cache_read) : n(p.prompt), cacheWrite: p.input_cache_write ? n(p.input_cache_write) : n(p.prompt) });
+    }
+    this.prices = { at: this.now().getTime(), byModel };
+    return byModel;
+  }
+
   /** Read the lines added to the session logs since last time. */
-  ingest(): number {
+  async ingest(): Promise<number> {
+    const prices = await this.loadPrices();
     return this.db.ingestSessions(
       join(this.o.dataDir, "sessions"),
       (f) => {
         const key = decodeURIComponent(f.replace(/\.jsonl$/, ""));
         const m = /^desk:issue:(\d+):(\w+)/.exec(key);
-        return { role: m ? m[2]! : key.startsWith("chat:voice:") ? "voice" : key.startsWith("scheduled:") ? "automations" : "other", issue: m ? Number(m[1]) : null, call: /^chat:voice:(CA\w+)/.exec(key)?.[1] ?? null };
+        return { role: m ? m[2]! : key === "desk:pm" ? "pm" : key.startsWith("chat:voice:") ? "voice" : key.startsWith("scheduled:") ? "automations" : "other", issue: m ? Number(m[1]) : null, call: /^chat:voice:(CA\w+)/.exec(key)?.[1] ?? null };
       },
       (ms) => this.day(ms),
+      // Session logs name the model without its provider (openai/gpt-6.1-terra).
+      (model) => prices.get(model),
     );
   }
 
@@ -238,7 +264,7 @@ export class Metrics {
     const now = this.now();
     const dates = Array.from({ length: daysBack }, (_, k) => this.day(now.getTime() - (daysBack - 1 - k) * 86_400_000));
     const from = dates[0]!;
-    const [prov, sess] = [await this.providers(from), this.sessions(from)];
+    const [prov, sess] = [await this.providers(from), await this.sessions(from)];
     const or = this.openrouterByDay();
     const issues = this.o.issues().filter((i) => !i.purpose);
     const ledger = this.o.ledger();

@@ -6,6 +6,10 @@
         --owner-name "Sam Lee" --owner-phone "+1 415 555 0100" --owner-email sam@example.com \\
         --area-code 415                                          # print the plan; nothing happens
     ... --apply                                                  # do it (paid steps are marked)
+    python3 deploy/selfhost/setup.py --update                    # the latest Kloru, rolled back if it fails
+
+Every step checks what already exists, so running it again picks up where it stopped (or applies a
+changed key) without buying anything twice. A domain of <app>.fly.dev needs no DNS at all.
 
 Keys come from kloru.env (copy kloru.env.example). Generated secrets are made once and kept in
 .selfhost/<app>.env (git-ignored): keep that file, it holds the backup and vault keys, which can't
@@ -55,6 +59,8 @@ class Step:
     detail: str
     costs: bool = False
     run: object = field(default=None, repr=False)
+    # Returns what already exists ("kloru_data exists"), so the step is skipped; None to run it.
+    done: object = field(default=None, repr=False)
 
 
 def e164(phone: str) -> str:
@@ -73,8 +79,15 @@ def check_domain(domain: str) -> str:
     return d
 
 
+def on_fly(domain: str) -> bool:
+    """<app>.fly.dev: Fly's own address, with its certificate; no domain or DNS needed."""
+    return domain.endswith(".fly.dev") and domain.count(".") == 2
+
+
 def default_app(domain: str) -> str:
     """kloru.example.com → kloru-example; Fly app names are global, so a clash is caught at create."""
+    if on_fly(domain):
+        return domain.split(".")[0]
     labels = domain.split(".")
     base = "-".join(labels[:-1])[:40] if len(labels) > 1 else domain
     return re.sub(r"[^a-z0-9-]", "-", base if base.startswith("kloru") else f"kloru-{base}").strip("-")
@@ -144,7 +157,24 @@ def render_fly_toml(app: str, region: str, domain: str, text_number: str, operat
 
 
 def sh(*args: str, stdin: str | None = None) -> str:
-    return subprocess.run(args, input=stdin, capture_output=True, text=True, check=True).stdout
+    """Run a command; on failure, stop with what it said (its output never holds a key's value)."""
+    r = subprocess.run(args, input=stdin, capture_output=True, text=True)
+    if r.returncode != 0:
+        said = (r.stderr.strip() or r.stdout.strip())[-1500:]
+        raise SystemExit(f"`{' '.join(args[:4])}` failed:\n{said}")
+    return r.stdout
+
+
+def ok(*args: str) -> bool:
+    return subprocess.run(args, capture_output=True, text=True).returncode == 0
+
+
+def fly_json(*args: str):
+    r = subprocess.run(["fly", *args, "--json"], capture_output=True, text=True)
+    try:
+        return json.loads(r.stdout) if r.returncode == 0 else None
+    except json.JSONDecodeError:
+        return None
 
 
 def http(method: str, url: str, *, headers: dict[str, str], body: dict | None = None, form: dict | None = None) -> tuple[int, dict]:
@@ -192,6 +222,124 @@ def preflight(keys: dict[str, str]) -> list[str]:
     return problems
 
 
+# Deploying and updating --------------------------------------------------------------------
+
+# What's running on the machine: calls not yet ended (started in the last two hours, so one that
+# crashed doesn't block forever) and requests a worker is doing right now.
+BUSY_JS = (
+    'const fs=require("fs"),R="/data/instinct/repo",now=Date.now();let calls=0,work=0;'
+    'const read=(f)=>{try{return JSON.parse(fs.readFileSync(f,"utf8"))}catch{return undefined}};'
+    'try{for(const d of fs.readdirSync(R+"/calls")){const c=read(R+"/calls/"+d+"/call.json");'
+    'if(c&&!c.endedAt&&now-Date.parse(c.startedAt)<72e5)calls++}}catch{}'
+    'try{for(const f of fs.readdirSync(R+"/issues")){const i=read(R+"/issues/"+f);'
+    'if(i&&i.status==="executing"&&!i.purpose)work++}}catch{}'
+    'console.log(JSON.stringify({calls,work}))'
+)
+
+
+def git(*args: str) -> str:
+    return sh("git", "-C", str(ROOT), *args).strip()
+
+
+def version() -> str:
+    """This checkout's release name: git-<commit>, the image label and the Admin page's version."""
+    return f"git-{git('rev-parse', 'HEAD')[:12]}"
+
+
+def deploy(app: str, config: Path, image: str | None = None) -> bool:
+    """Build this checkout (or redeploy an earlier image) and wait for Fly's health checks."""
+    if image:
+        args = ["fly", "deploy", "-c", str(config), "--image", image]
+    else:
+        v = version()
+        args = ["fly", "deploy", "-c", str(config), "--dockerfile", "deploy/kloru/Dockerfile", "--image-label", v, "--env", f"KLORU_VERSION={v}", "."]
+    return subprocess.run(args, cwd=ROOT).returncode == 0
+
+
+def wait_until_up(app: str, domain: str, tries: int = 40) -> bool:
+    for _ in range(tries):
+        try:
+            with urllib.request.urlopen(f"https://{app}.fly.dev/healthz", timeout=10) as r:
+                if r.status == 200:
+                    print(f"   up at https://{app}.fly.dev" + ("" if on_fly(domain) else f" (and https://{domain} once DNS is in)"))
+                    return True
+        except (urllib.error.URLError, TimeoutError):
+            pass
+        time.sleep(15)
+    print(f"   not answering yet: check `fly logs -a {app}`")
+    return False
+
+
+def busy(app: str) -> dict | None:
+    r = subprocess.run(["fly", "ssh", "console", "-a", app, "-C", f"node -e '{BUSY_JS}'"], capture_output=True, text=True)
+    line = next((l for l in reversed(r.stdout.splitlines()) if l.startswith("{")), "")
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError:
+        return None
+
+
+def wait_until_idle(app: str, minutes: int = 30) -> bool:
+    for i in range(minutes * 2):
+        b = busy(app)
+        if b is None:
+            print("   couldn't see what's running (the machine may be down); updating anyway")
+            return True
+        if not b["calls"] and not b["work"]:
+            return True
+        if i == 0:
+            print(f"   waiting: {b['calls']} call(s) and {b['work']} request(s) in progress")
+        time.sleep(30)
+    return False
+
+
+def releases(app: str) -> list[dict]:
+    return [r for r in (fly_json("releases", "-a", app, "--image") or []) if r.get("Status") == "complete" and r.get("ImageRef")]
+
+
+def configs() -> list[Path]:
+    return sorted((ROOT / ".selfhost").glob("*/fly.toml"))
+
+
+def update(app: str | None, *, now: bool) -> int:
+    """Pull the latest Kloru and deploy it; if it doesn't come up, put the previous release back."""
+    found = [c for c in configs() if app in (None, c.parent.name)]
+    if len(found) != 1:
+        names = ", ".join(c.parent.name for c in configs()) or "none"
+        raise SystemExit(f"which Kloru? pass --app (set up here: {names})" if found else f"no Kloru set up here for {app or 'this checkout'} (set up here: {names})")
+    config = found[0]
+    app = config.parent.name
+    if git("status", "--porcelain", "--untracked-files=no"):
+        raise SystemExit("this checkout has local changes; commit or stash them first (`git stash`), then update")
+    before = git("rev-parse", "HEAD")
+    print(f"→ pulling the latest Kloru")
+    sh("git", "-C", str(ROOT), "pull", "--ff-only")
+    after = git("rev-parse", "HEAD")
+    history = releases(app)
+    running = next((r["ImageRef"].rsplit(":", 1)[-1] for r in history), "")
+    if running == version():
+        print(f"Already up to date: {app} runs {running}.")
+        return 0
+    since = running.removeprefix("git-") if running.startswith("git-") else before
+    changes = subprocess.run(["git", "-C", str(ROOT), "log", "--oneline", "--no-decorate", f"{since}..{after}"], capture_output=True, text=True).stdout.strip()
+    print("  What's new:\n" + ("\n".join(f"   {l}" for l in changes.splitlines()[:30]) or "   (a rebuild of the same code)"))
+    if not now:
+        print("→ waiting for calls and requests to finish (--now skips this)")
+        if not wait_until_idle(app):
+            raise SystemExit("still busy after 30 minutes; run it again later, or add --now")
+    print(f"→ deploying {version()}")
+    if deploy(app, config) and wait_until_up(app, app + ".fly.dev", tries=8):
+        print(f"\nUpdated {app} to {version()}.")
+        return 0
+    previous = history[0]["ImageRef"] if history else None
+    if not previous:
+        raise SystemExit("the new release didn't come up, and there's no earlier one to go back to; check `fly logs`")
+    print(f"→ the new release didn't come up; going back to {previous.rsplit(':', 1)[-1]}")
+    deploy(app, config, image=previous)
+    wait_until_up(app, app + ".fly.dev", tries=8)
+    raise SystemExit(f"Update failed and was rolled back. `fly logs -a {app}` shows why.")
+
+
 def plan(app: str, region: str, domain: str, owner: Owner, *, number: str | None, area_code: str | None, values: dict[str, str]) -> list[Step]:
     config = ROOT / ".selfhost" / app / "fly.toml"
     voice_url = f"https://{domain}/twilio/voice"
@@ -215,6 +363,13 @@ def plan(app: str, region: str, domain: str, owner: Owner, *, number: str | None
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text(render_fly_toml(app, region, domain, state.get("text_number", ""), owner.name, owner.email))
 
+    def our_number() -> str | None:
+        """A number an earlier run bought for this Kloru (named "Kloru <app>")."""
+        if not (sid and token):
+            return None
+        got = twilio("GET", f"IncomingPhoneNumbers.json?FriendlyName={urllib.parse.quote(f'Kloru {app}')}", sid=sid, token=token)
+        return next((n["phone_number"] for n in got.get("incoming_phone_numbers", [])), None)
+
     def buy():
         found = twilio("GET", f"AvailablePhoneNumbers/US/Local.json?AreaCode={area_code}&VoiceEnabled=true&SmsEnabled=true&PageSize=1", sid=sid, token=token)
         if not found.get("available_phone_numbers"):
@@ -229,8 +384,9 @@ def plan(app: str, region: str, domain: str, owner: Owner, *, number: str | None
         twilio("POST", f"IncomingPhoneNumbers/{found['incoming_phone_numbers'][0]['sid']}.json", {"VoiceUrl": voice_url, "VoiceMethod": "POST", "FriendlyName": f"Kloru {app}"}, sid=sid, token=token)
 
     def certificate():
-        sh("fly", "certs", "add", domain, "-a", app)
-        print("   Add these DNS records where your domain is managed:")
+        if not ok("fly", "certs", "show", domain, "-a", app):
+            sh("fly", "certs", "add", domain, "-a", app)
+        print("   Add these DNS records where your domain is managed (skip any already there):")
         try:
             ips = json.loads(sh("fly", "ips", "list", "-a", app, "--json"))
         except (subprocess.CalledProcessError, json.JSONDecodeError):
@@ -240,21 +396,15 @@ def plan(app: str, region: str, domain: str, owner: Owner, *, number: str | None
         for ip in ips:
             print(f"     {'AAAA' if ':' in ip.get('Address', '') else 'A'}  {domain}  →  {ip.get('Address')}")
 
-    def wait_until_up():
-        for _ in range(40):
-            try:
-                with urllib.request.urlopen(f"https://{app}.fly.dev/healthz", timeout=10) as r:
-                    if r.status == 200:
-                        print(f"   up at https://{app}.fly.dev (and https://{domain} once DNS is in)")
-                        return
-            except (urllib.error.URLError, TimeoutError):
-                pass
-            time.sleep(15)
-        print(f"   not answering yet: check `fly logs -a {app}`")
+    def volume_exists() -> str | None:
+        vols = fly_json("volumes", "list", "-a", app) or []
+        return "kloru_data exists" if any(v.get("name") == "kloru_data" for v in vols) else None
 
     steps = [
-        Step("create the Fly app", f"fly apps create {app} (free; the machine is billed once it's deployed)", run=lambda: sh("fly", "apps", "create", app)),
-        Step("create the data volume", f"10 GB volume kloru_data in {region} (about $1.50/month)", costs=True, run=lambda: sh("fly", "volumes", "create", "kloru_data", "-a", app, "-r", region, "-s", "10", "--yes")),
+        Step("create the Fly app", f"fly apps create {app} (free; the machine is billed once it's deployed)", run=lambda: sh("fly", "apps", "create", app),
+             done=lambda: f"{app} exists" if ok("fly", "status", "-a", app) else None),
+        Step("create the data volume", f"10 GB volume kloru_data in {region} (about $1.50/month)", costs=True, run=lambda: sh("fly", "volumes", "create", "kloru_data", "-a", app, "-r", region, "-s", "10", "--yes"),
+             done=volume_exists),
         Step("create Kloru's iMessage identity", f"@{handle} on Inkbox, and look up the number people text", run=inkbox_identity),
         Step("write your fly.toml", str(config.relative_to(ROOT)), run=write_config),
         Step("stage secrets", f"{len([k for k in values if k not in GENERATED])} keys and your details, {len(GENERATED)} generated (values never printed)", run=lambda: sh("fly", "secrets", "import", "--app", app, "--stage", stdin="".join(f"{k}={v}\n" for k, v in values.items()))),
@@ -262,13 +412,27 @@ def plan(app: str, region: str, domain: str, owner: Owner, *, number: str | None
     if number:
         steps.append(Step("point your number at Kloru", f"{number} → {voice_url}", run=point))
     else:
-        steps.append(Step("buy a phone number", f"a local {area_code} number (about $1.15/month), calls → {voice_url}", costs=True, run=buy))
+        steps.append(Step("buy a phone number", f"a local {area_code} number (about $1.15/month), calls → {voice_url}", costs=True, run=buy,
+                          done=lambda: (lambda n: f"{n} was bought for this Kloru" if n else None)(our_number())))
+    if not on_fly(domain):
+        steps.append(Step("add the TLS certificate", f"fly certs add {domain}, then print the DNS records to add", run=certificate))
     steps += [
-        Step("add the TLS certificate", f"fly certs add {domain}, then print the DNS records to add", run=certificate),
-        Step("deploy", f"build and start Kloru (shared-cpu-2x, 2 GB: about $15/month)", costs=True, run=lambda: subprocess.run(["fly", "deploy", "-c", str(config), "--dockerfile", "deploy/kloru/Dockerfile", "."], cwd=ROOT, check=True)),
-        Step("check it's up", f"https://{app}.fly.dev/healthz", run=wait_until_up),
+        Step("deploy", f"build and start Kloru (shared-cpu-2x, 2 GB: about $15/month)", costs=True, run=lambda: deploy(app, config)),
+        Step("check it's up", f"https://{app}.fly.dev/healthz", run=lambda: wait_until_up(app, domain)),
     ]
     return steps
+
+
+def run_steps(steps: list[Step]) -> None:
+    """Each step in turn, skipping what an earlier run already did."""
+    for i, s in enumerate(steps, 1):
+        already = s.done() if s.done else None
+        if already:
+            print(f"→ {i}. {s.name}: already done ({already})")
+            continue
+        print(f"→ {i}. {s.name}")
+        if s.run() is False:
+            raise SystemExit(f"{s.name} failed; fix what it says above and run this again (finished steps are skipped)")
 
 
 def main(argv: list[str]) -> int:
@@ -286,7 +450,11 @@ def main(argv: list[str]) -> int:
     g.add_argument("--number", help="use a number your Twilio account already owns")
     ap.add_argument("--env", default=str(ROOT / "kloru.env"), help="your keys (default kloru.env)")
     ap.add_argument("--apply", action="store_true", help="do it (otherwise only print the plan)")
+    ap.add_argument("--update", action="store_true", help="pull the latest Kloru and deploy it, rolled back if it doesn't come up")
+    ap.add_argument("--now", action="store_true", help="with --update: don't wait for calls and requests to finish")
     a = ap.parse_args(argv)
+    if a.update:
+        return update(a.app, now=a.now)
     keys = read_env(Path(a.env))
 
     problems = preflight(keys)
@@ -313,13 +481,13 @@ def main(argv: list[str]) -> int:
     print(f"Your Kloru: app {app} in {a.region}, https://{domain}, owner {owner.name} {e164(owner.phone)}")
     for i, s in enumerate(steps, 1):
         print(f"{i:2}. {s.name}{'  [costs money]' if s.costs else ''}\n    {s.detail}")
+    if not a.apply:
+        print("   (steps already done are skipped when it runs)")
     print("Then, by you: add the DNS records it prints; for texts by SMS, register the number for A2P in Twilio (iMessage and calls work without it).")
     if not a.apply:
         print("\nNothing was done. Add --apply to run these steps.")
         return 0
-    for i, s in enumerate(steps, 1):
-        print(f"→ {i}. {s.name}")
-        s.run()
+    run_steps(steps)
     print(f"\nDone. Sign in at https://{domain} with {e164(owner.phone)}; the Get started page walks you through the rest.")
     print(f"Generated secrets are in {generated_path(app).relative_to(ROOT)}: keep a copy somewhere safe (the backup and vault keys can't be recovered).")
     return 0

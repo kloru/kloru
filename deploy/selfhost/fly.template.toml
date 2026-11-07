@@ -19,8 +19,9 @@ kill_timeout = "30s"
   VOICE_DESK = "on"
   # Start Kloru's reply at Deepgram Flux's predicted end of turn (talking latency); "off" to compare.
   VOICE_EAGER_EOT = "on"
-  # Engineers (reading, research, drafting) run on a smarter model; ops and the PM use the agent model.
-  KLORU_ENGINEER_MODEL = "openrouter/openai/gpt-6.1-terra"
+  # Engineers, scouts and memory (reading, research, drafting): Luna by default, the cheapest.
+  # Terra ("openrouter/openai/gpt-6.1-terra") is smarter for hard errands, at 10× the price.
+  KLORU_ENGINEER_MODEL = "openrouter/openai/gpt-6-luna"
   # What the agent calls itself in every message (never the framework's name).
   INSTINCT_AGENT_NAME = "Kloru"
   # The models: the agent and voice on OpenAI's Luna, the PM on Gemini Flash (all through OpenRouter).

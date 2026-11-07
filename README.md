@@ -33,12 +33,13 @@ python3 deploy/selfhost/setup.py --domain kloru.example.com \
   --owner-name "Sam Lee" --owner-phone "+1 415 555 0100" --owner-email sam@example.com \
   --area-code 415                                    # shows the plan
 ...add --apply                                       # does it
+python3 deploy/selfhost/setup.py --update            # later: the latest Kloru
 ```
 
 **You'll need:**
 - **A domain**, and accounts with **Fly.io** (hosting), **OpenRouter** (models), **Twilio** (the phone number and sign-in codes), **Deepgram** and **Cartesia** (speech), **Inkbox** (iMessage) and **Composio** (Gmail, Calendar and other apps).
 - **Optional:** **Resend** (email), **Steel** (a cloud browser for checkouts), **Stripe Link** (one-time cards), **Langfuse** (traces) and **Cloudflare R2** (backups).
-- **Cost:** about $18 a month for hosting and the number, plus $2–15 a day in model use, depending on how much your family leans on it. [SETUP.md](SETUP.md#what-it-costs) has the breakdown, and your Kloru's **Admin → Metrics** page shows the real numbers.
+- **Cost:** about $18 a month for hosting and the number, plus about $1–5 a day in model use, depending on how much your family leans on it. [SETUP.md](SETUP.md#what-it-costs) has the breakdown, and your Kloru's **Admin → Metrics** page shows the real numbers.
 
 ## How it works
 

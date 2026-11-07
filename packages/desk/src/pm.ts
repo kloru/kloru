@@ -238,6 +238,8 @@ export interface TechnicalPMOptions {
   getApiKey?: (provider: string) => string | undefined | Promise<string | undefined>;
   thinking?: "off" | "minimal" | "low" | "medium" | "high";
   log?: (m: string) => void;
+  /** Each model reply's usage, for the metrics (the PM keeps no session log of its own). */
+  onReply?: (reply: { model: string; usage: unknown; timestamp: number }) => void;
 }
 
 export class TechnicalPM implements Planner {
@@ -273,6 +275,7 @@ export class TechnicalPM implements Planner {
     await agent.prompt(snapshot(desk, triggers, desk.now(), only ? { only } : {}));
     await agent.waitForIdle();
     const fresh = agent.state.messages.slice(before) as AgentMessage[];
+    for (const m of fresh) if (m.role === "assistant" && m.usage) this.o.onReply?.({ model: m.model, usage: m.usage, timestamp: m.timestamp });
     const last = [...fresh].reverse().find((m) => m.role === "assistant");
     if (last && last.role === "assistant" && (last.stopReason === "error" || last.stopReason === "aborted")) {
       const why = last.errorMessage || `PM run ${last.stopReason}`;

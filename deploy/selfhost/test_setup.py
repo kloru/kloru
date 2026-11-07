@@ -56,3 +56,54 @@ def test_preflight_says_what_to_do(monkeypatch):
     problems = setup.preflight({"OPENROUTER_API_KEY": "x"})
     assert any("Install the Fly CLI" in p for p in problems)
     assert any("missing TWILIO_ACCOUNT_SID" in p for p in problems)
+
+
+def test_a_fly_dev_address_needs_no_domain_or_certificate():
+    assert setup.on_fly("kloru-sam.fly.dev") and not setup.on_fly("kloru.example.com")
+    assert setup.default_app("kloru-sam.fly.dev") == "kloru-sam"
+    steps = setup.plan("kloru-sam", "sjc", "kloru-sam.fly.dev", OWNER, number=None, area_code="415", values=KEYS)
+    assert not any("certificate" in s.name for s in steps)
+    assert any("certificate" in s.name for s in setup.plan("kloru-example", "sjc", "kloru.example.com", OWNER, number=None, area_code="415", values=KEYS))
+
+
+def test_a_second_run_skips_what_exists_and_buys_nothing_twice():
+    ran = []
+    steps = [
+        setup.Step("create the Fly app", "", run=lambda: ran.append("app"), done=lambda: "kloru-example exists"),
+        setup.Step("buy a phone number", "", costs=True, run=lambda: ran.append("buy"), done=lambda: "+14155550123 was bought for this Kloru"),
+        setup.Step("deploy", "", costs=True, run=lambda: ran.append("deploy")),
+    ]
+    setup.run_steps(steps)
+    assert ran == ["deploy"]
+    with pytest.raises(SystemExit, match="run this again"):
+        setup.run_steps([setup.Step("deploy", "", run=lambda: False)])
+
+
+def _update_world(monkeypatch, tmp_path, *, comes_up):
+    config = tmp_path / ".selfhost" / "kloru-example" / "fly.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text("")
+    heads = iter(["aaa", "bbb"])
+    deploys = []
+    monkeypatch.setattr(setup, "configs", lambda: [config])
+    monkeypatch.setattr(setup, "git", lambda *a: "" if a[0] == "status" else next(heads))
+    monkeypatch.setattr(setup, "sh", lambda *a, **k: "")
+    monkeypatch.setattr(setup, "version", lambda: "git-bbb")
+    monkeypatch.setattr(setup, "releases", lambda app: [{"ImageRef": "registry.fly.io/kloru-example:git-aaa", "Status": "complete"}])
+    monkeypatch.setattr(setup, "wait_until_idle", lambda app: True)
+    monkeypatch.setattr(setup, "deploy", lambda app, config, image=None: deploys.append(image) or True)
+    monkeypatch.setattr(setup, "wait_until_up", lambda app, domain, tries=40: comes_up or deploys[-1] is not None)
+    return deploys
+
+
+def test_an_update_deploys_the_new_release(monkeypatch, tmp_path):
+    deploys = _update_world(monkeypatch, tmp_path, comes_up=True)
+    assert setup.update(None, now=False) == 0
+    assert deploys == [None]
+
+
+def test_an_update_that_doesnt_come_up_puts_the_previous_release_back(monkeypatch, tmp_path):
+    deploys = _update_world(monkeypatch, tmp_path, comes_up=False)
+    with pytest.raises(SystemExit, match="rolled back"):
+        setup.update(None, now=True)
+    assert deploys == [None, "registry.fly.io/kloru-example:git-aaa"]

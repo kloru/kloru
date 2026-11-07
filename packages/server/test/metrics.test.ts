@@ -66,16 +66,38 @@ describe("metrics.db (2026-11-04)", () => {
     const { m, dir } = setup((async () => new Response("", { status: 500 })) as unknown as typeof fetch);
     const log = join(dir, "sessions", `${encodeURIComponent("desk:issue:1:engineer")}.jsonl`);
     const { appendFileSync } = await import("node:fs");
-    expect(m.ingest()).toBe(2);
-    expect(m.ingest()).toBe(0);
+    expect(await m.ingest()).toBe(2);
+    expect(await m.ingest()).toBe(0);
     appendFileSync(log, `${line(0.25, "2026-11-03T19:00:00Z")}\n${line(1, "2026-11-03T19:05:00Z").slice(0, 20)}`);
-    expect(m.ingest()).toBe(1);
+    expect(await m.ingest()).toBe(1);
     appendFileSync(log, `${line(1, "2026-11-03T19:05:00Z").slice(20)}\n`);
-    expect(m.ingest()).toBe(1);
+    expect(await m.ingest()).toBe(1);
     expect(m.db.costsByIssue()[1]).toBeCloseTo(1.75);
     writeFileSync(log, `${line(0.1, "2026-11-03T18:10:00Z")}\n`);
-    m.ingest();
+    await m.ingest();
     expect(m.db.costsByIssue()[1]).toBeCloseTo(0.1);
+  });
+
+  it("prices each reply from its tokens at OpenRouter's price, counts the PM, and re-reads costs kept the old way", async () => {
+    const prices = { data: [{ id: "openai/gpt-6.1-terra", pricing: { prompt: "0.000001", completion: "0.000005", input_cache_read: "0.0000001" } }] };
+    const fetchImpl = (async (url: string) => (url.endsWith("/api/v1/models") ? new Response(JSON.stringify(prices)) : new Response("", { status: 500 }))) as typeof fetch;
+    const { m, dir } = setup(fetchImpl);
+    // Pi's own figure for this reply borrowed another model's prices: 0.05, twice the real cost.
+    const reply = { role: "assistant", model: "openai/gpt-6.1-terra", usage: { input: 1000, output: 2000, cacheRead: 10_000, cacheWrite: 10_000, cost: { total: 0.05 } }, timestamp: Date.parse("2026-11-03T19:00:00Z") };
+    writeFileSync(join(dir, "sessions", `${encodeURIComponent("desk:pm")}.jsonl`), `${JSON.stringify(reply)}\n`);
+    expect(await m.ingest()).toBe(3);
+    // 1000 × $1/M + 2000 × $5/M + 10k cached × $0.10/M + 10k written at the input price.
+    expect(m.db.costsByRole("2026-11-03")["2026-11-03"]!.pm).toBeCloseTo(0.001 + 0.01 + 0.001 + 0.01);
+    // Unpriced models keep the cost their session recorded.
+    expect(m.db.costsByRole("2026-11-03")["2026-11-03"]!.engineer).toBeCloseTo(0.5);
+    m.db.close();
+    const { DatabaseSync } = await import("node:sqlite");
+    const raw = new DatabaseSync(join(dir, "metrics", "metrics.db"));
+    raw.exec("UPDATE meta SET value = '1' WHERE key = 'costs_version'");
+    raw.close();
+    const again = new Metrics({ dataDir: dir, issues: () => [], ledger: () => [], nameOf: () => undefined, timezone: "America/Los_Angeles", openrouterKeys: {}, fetchImpl, now: () => NOW });
+    expect(again.db.costsByIssue()).toEqual({});
+    expect(await again.ingest()).toBe(3);
   });
 
   it("brings in the first version's files once", async () => {

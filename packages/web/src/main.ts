@@ -24,6 +24,7 @@ export interface ConsoleEnv {
   /** The voice service's call transcripts, for the Admin page. */
   transcriptsDir?: string;
   deskDir?: string;
+  version?: string;
   alertsPath?: string;
   revokedArtifactsPath?: string;
   /** Per-person voice preferences, shared with the voice service. */
@@ -56,6 +57,7 @@ export function loadConsoleEnv(env: NodeJS.ProcessEnv): ConsoleEnv {
     ...(env.KLORU_CALL_LOG?.trim() ? { callLogPath: env.KLORU_CALL_LOG.trim() } : {}),
     ...(env.KLORU_TRANSCRIPTS?.trim() ? { transcriptsDir: env.KLORU_TRANSCRIPTS.trim() } : {}),
     ...(env.KLORU_DESK_DIR?.trim() ? { deskDir: env.KLORU_DESK_DIR.trim() } : {}),
+    ...(env.KLORU_VERSION?.trim() ? { version: env.KLORU_VERSION.trim() } : {}),
     ...(env.KLORU_ALERTS?.trim() ? { alertsPath: env.KLORU_ALERTS.trim() } : {}),
     ...(env.KLORU_DATA_DIR?.trim() ? { revokedArtifactsPath: `${env.KLORU_DATA_DIR.trim()}/revoked-artifacts.json` } : {}),
     ...(env.KLORU_VOICE_PREFS?.trim() ? { prefsPath: env.KLORU_VOICE_PREFS.trim() } : {}),

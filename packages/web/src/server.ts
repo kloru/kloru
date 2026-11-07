@@ -81,6 +81,8 @@ export interface ConsoleOptions {
   transcriptsDir?: string;
   /** The agent's desk repository (calls, issues, ledger, memory), read-only on Admin › Desk. */
   deskDir?: string;
+  /** The release this Kloru runs (git-<commit>, set by setup.py's deploys), shown on the Admin page. */
+  version?: string;
   /** Failed after-call checks (voice/checks.py), shown on Admin › Desk. */
   alertsPath?: string;
   /** Artifact ids an admin took down; the website's own file (it never writes the desk). */
@@ -603,7 +605,7 @@ export function createConsole(o: ConsoleOptions): http.Server {
       }
       if (path === "/admin") {
         if (!isAdmin(ctx.user)) return page(ctx, 403, "Admin", messageBody("Admins only", "This page is for Kloru admins."));
-        return page(ctx, 200, "Admin", adminPage(await o.store.users(), await o.store.invites(), ctx.csrf!, o.callLogPath ? readCalls(o.callLogPath) : undefined, !!o.transcriptsDir, !!o.deskDir), banner, "/admin");
+        return page(ctx, 200, "Admin", adminPage(await o.store.users(), await o.store.invites(), ctx.csrf!, o.callLogPath ? readCalls(o.callLogPath) : undefined, !!o.transcriptsDir, !!o.deskDir, o.version), banner, "/admin");
       }
       return page(ctx, 404, "Not found", messageBody("Not found", "There's nothing here."));
     }
@@ -700,7 +702,7 @@ export function createConsole(o: ConsoleOptions): http.Server {
       case "/admin/uninvite": {
         if (!isAdmin(ctx.user)) return page(ctx, 403, "Admin", messageBody("Admins only", "This page is for Kloru admins."));
         const phone = form.get("phone") ?? "";
-        if (!isPhone(phone)) return page(ctx, 200, "Admin", adminPage(await o.store.users(), await o.store.invites(), ctx.csrf!, o.callLogPath ? readCalls(o.callLogPath) : undefined, !!o.transcriptsDir, !!o.deskDir), { kind: "error", text: "That doesn't look like a phone number. Include the area code." }, "/admin");
+        if (!isPhone(phone)) return page(ctx, 200, "Admin", adminPage(await o.store.users(), await o.store.invites(), ctx.csrf!, o.callLogPath ? readCalls(o.callLogPath) : undefined, !!o.transcriptsDir, !!o.deskDir, o.version), { kind: "error", text: "That doesn't look like a phone number. Include the area code." }, "/admin");
         if (path === "/admin/invite") await o.store.invite(phone, ctx.user.phone);
         else await o.store.removeInvite(phone);
         return redirect(res, 303, `/admin?done=${path === "/admin/invite" ? "invited" : "uninvited"}`);

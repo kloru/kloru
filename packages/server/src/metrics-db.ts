@@ -5,6 +5,9 @@
  * Model costs come in incrementally: for each session log, the database keeps how far it has read,
  * and each pass reads only the lines added since. A log that shrank was rewritten, so its costs are
  * dropped and it's read again from the start.
+ *
+ * A reply's cost is its tokens at the model's price on OpenRouter when that's known: Pi borrows a
+ * listed model's prices for one it doesn't list (Terra was counted at twice its price).
  */
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
@@ -17,6 +20,31 @@ export interface CostRow {
   call: string | null;
   usd: number;
 }
+
+/** USD per token, as OpenRouter lists them. */
+export interface Price {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+interface Usage {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  cost?: { total?: number };
+}
+
+/** Its tokens at this price, or what the session recorded when the price isn't known. */
+export function costOf(usage: Usage, price: Price | undefined): number {
+  if (!price) return usage.cost?.total ?? 0;
+  return (usage.input ?? 0) * price.input + (usage.output ?? 0) * price.output + (usage.cacheRead ?? 0) * price.cacheRead + (usage.cacheWrite ?? 0) * price.cacheWrite;
+}
+
+/** Bumped when costs must be read again from the logs (2: priced from tokens). */
+const COSTS_VERSION = 2;
 
 export class MetricsDb {
   private readonly db: DatabaseSync;
@@ -41,7 +69,14 @@ export class MetricsDb {
       CREATE INDEX IF NOT EXISTS usage_at ON usage_readings (at);
       CREATE TABLE IF NOT EXISTS provider_days (provider TEXT NOT NULL, day TEXT NOT NULL, usd REAL NOT NULL, fetched_at TEXT NOT NULL, PRIMARY KEY (provider, day));
       CREATE TABLE IF NOT EXISTS saved (issue INTEGER PRIMARY KEY, minutes REAL NOT NULL);
+      CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
+    const version = Number((this.db.prepare("SELECT value FROM meta WHERE key = 'costs_version'").get() as { value?: string } | undefined)?.value ?? 1);
+    if (version < COSTS_VERSION) {
+      this.db.exec("BEGIN; DELETE FROM costs; DELETE FROM ingested;");
+      this.db.prepare("INSERT INTO meta (key, value) VALUES ('costs_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(COSTS_VERSION));
+      this.db.exec("COMMIT");
+    }
   }
 
   close(): void {
@@ -50,9 +85,10 @@ export class MetricsDb {
 
   /**
    * Read what's new in every session log under `dir`. `classify` names a file's role, issue and
-   * call; `day` turns a timestamp into the family's local day. Returns how many costs were added.
+   * call; `day` turns a timestamp into the family's local day; `price` is a model's price, when known.
+   * Returns how many costs were added.
    */
-  ingestSessions(dir: string, classify: (file: string) => { role: string; issue: number | null; call: string | null }, day: (ms: number) => string): number {
+  ingestSessions(dir: string, classify: (file: string) => { role: string; issue: number | null; call: string | null }, day: (ms: number) => string, price: (model: string) => Price | undefined = () => undefined): number {
     if (!existsSync(dir)) return 0;
     const getOffset = this.db.prepare("SELECT bytes FROM ingested WHERE file = ?");
     const setOffset = this.db.prepare("INSERT INTO ingested (file, bytes) VALUES (?, ?) ON CONFLICT(file) DO UPDATE SET bytes = excluded.bytes");
@@ -89,14 +125,15 @@ export class MetricsDb {
         const { role, issue, call } = classify(f);
         for (const line of buf.subarray(0, end).toString("utf8").split("\n")) {
           if (!line.includes('"usage"')) continue;
-          let o: { usage?: { cost?: { total?: number } }; timestamp?: number };
+          let o: { model?: string; usage?: Usage; timestamp?: number };
           try {
             o = JSON.parse(line);
           } catch {
             continue;
           }
-          const c = o.usage?.cost?.total;
-          if (!c || !o.timestamp) continue;
+          if (!o.usage || !o.timestamp) continue;
+          const c = costOf(o.usage, o.model ? price(o.model) : undefined);
+          if (!c) continue;
           insert.run(f, new Date(o.timestamp).toISOString(), day(o.timestamp), role, issue, call, c);
           added++;
         }

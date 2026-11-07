@@ -16,7 +16,7 @@ import { Desk, MediaStore, Memory, Vault, type DraftCheck, vaultTools, type Vaul
 import { mediaIngest } from "./media-ingest.js";
 import { RuntimeWorkerHost } from "./desk-host.js";
 import { langfuseFromEnv, prefsAllowContent } from "./telemetry.js";
-import { readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { Model } from "@earendil-works/pi-ai";
@@ -860,7 +860,21 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
         const p = resolvePrincipal({ channel: "sms", from: phone } as InboundMessage, config, contacts);
         return p.kind === "owner" ? undefined : p;
       }),
-      planner: new TechnicalPM({ model: pmModel, streamFn: opts.streamFn ?? (streamSimple as StreamFn), getApiKey: (provider: string) => apiKeyFor(provider, env), log }),
+      planner: new TechnicalPM({
+        model: pmModel,
+        streamFn: opts.streamFn ?? (streamSimple as StreamFn),
+        getApiKey: (provider: string) => apiKeyFor(provider, env),
+        log,
+        // The PM's replies go where the metrics read session costs, as desk:pm.
+        onReply: (r) => {
+          try {
+            mkdirSync(state.path("sessions"), { recursive: true });
+            appendFileSync(join(state.path("sessions"), `${encodeURIComponent("desk:pm")}.jsonl`), `${JSON.stringify({ role: "assistant", ...r })}\n`);
+          } catch (e) {
+            log(`metrics: PM cost not recorded: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        },
+      }),
       log,
       ...(langfuse ? { telemetry: langfuse.telemetry } : {}),
       contentAllowed: prefsAllowContent(env.KLORU_VOICE_PREFS?.trim()),
