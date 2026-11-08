@@ -99,6 +99,12 @@ const CASES: Array<[string, MessageCheck, string[], string?]> = [
     "imessage",
   ],
   [
+    // Nov 8, #515: the daily spam job's question for his yes was dropped as "already have this", so he was never asked.
+    "the daily spam job's question for his yes reaches him, though the job didn't ask for a question",
+    base({ from: "pm", conversation: "schedule", request: "Daily sales-spam cleanup: Review the inboxes for evan@personal.example.com and evan@work.example.com. Delete only clearly identifiable sales spam.", text: "May I read evan@personal.example.com to clean up sales spam and list borderline emails for review?", call: "", running: ["Research how divorce probability changes with jobs where you travel 4+ months a year"], recent: ["08:11 UTC sent (imessage to +14155550190): Here is Cara's work schedule for next week: Mon, Wed, Fri."] }),
+    ["send", "ask"],
+  ],
+  [
     "a report he asked for by email, emailed back",
     base({ conversation: "email", defaultChannel: "email", to: "evan@personal.example.com", channels: [], action: "GMAIL_REPLY_TO_THREAD", subject: "Re: Daycare options", request: "Research daycares near Rockridge", text: "Here are the three daycares with openings: …", call: "Caller (by email): Can you research daycares near Rockridge with infant openings?" }),
     ["send"],

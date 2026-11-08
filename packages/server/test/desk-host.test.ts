@@ -9,6 +9,7 @@ class FakeConv {
   runs: string[] = [];
   release: (() => void) | undefined;
   constructor(readonly role: WorkerRole) {}
+  key = "";
   agent = { abort: () => { this.aborted++; } };
   steer(t: string) { this.steered.push(t); }
   async run(prompt: string): Promise<string> {
@@ -25,11 +26,15 @@ function fakeRuntime() {
   const runtime = {
     created: [] as string[],
     principals: [] as unknown[],
+    retire(key: string) {
+      convs.delete(key);
+    },
     worker(key: string, role: WorkerRole, principal?: unknown) {
       runtime.principals.push(principal);
       let c = convs.get(key);
       if (!c) {
         c = new FakeConv(role);
+        c.key = key;
         convs.set(key, c);
         runtime.created.push(key);
       }
@@ -97,13 +102,32 @@ describe("RuntimeWorkerHost", () => {
     void host.run(2, role, "x");
     await tick();
     expect(host.steer(2, "new detail")).toBe(true);
-    host.stop(2);
     const conv = convs.get("desk:issue:2:engineer")!;
+    host.stop(2);
     expect(conv.steered).toEqual(["new detail"]);
     expect(conv.aborted).toBe(1);
     conv.release!();
     await tick();
     expect(host.steer(2, "late")).toBe(false);
+  });
+});
+
+describe("RuntimeWorkerHost: a hung worker", () => {
+  it("#493: a stopped run that never finishes doesn't hold up the next one, which starts in a fresh conversation", async () => {
+    const { runtime, convs } = fakeRuntime();
+    const host = new RuntimeWorkerHost(runtime);
+    void host.run(493, role, "research"); // hangs: a browser call that ignores abort
+    await tick();
+    const hung = convs.get("desk:issue:493:engineer")!;
+    host.stop(493);
+    expect(hung.aborted).toBe(1);
+    const next = host.run(493, role, "research again");
+    await tick();
+    const fresh = convs.get("desk:issue:493:engineer")!;
+    expect(fresh).not.toBe(hung);
+    expect(fresh.runs).toEqual(["research again"]);
+    fresh.release!();
+    expect(await next).toBe("done:research again");
   });
 });
 

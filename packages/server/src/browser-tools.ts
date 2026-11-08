@@ -25,6 +25,22 @@ const IDLE_MS = 10 * 60_000;
 const CAPTCHA = /recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile|arkoselabs|funcaptcha/i;
 const PLAYWRIGHT = pathToFileURL(createRequire(import.meta.url).resolve("playwright-core")).href;
 
+/**
+ * A browser step that can hang (a page stuck on a Cloudflare check never answers page.title(), #493):
+ * it ends at its deadline, or as soon as the worker's run is stopped. Without this a stopped worker
+ * waited on the page forever, and every later run on its issue waited behind it.
+ */
+export function bounded<T>(p: Promise<T>, ms: number, signal?: AbortSignal, what = "the browser"): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error("stopped"));
+    const done = () => (clearTimeout(timer), signal?.removeEventListener("abort", stop));
+    const stop = () => (done(), reject(new Error("stopped")));
+    const timer = setTimeout(() => (done(), reject(new Error(`${what} didn't answer within ${Math.round(ms / 1000)} s`))), ms);
+    signal?.addEventListener("abort", stop, { once: true });
+    p.then((v) => (done(), resolve(v)), (e: unknown) => (done(), reject(e)));
+  });
+}
+
 /** The child: connects to this person's browser, finds this task's page, runs the worker's code. */
 const RUNNER = `
 const pw = await import(process.env.KLORU_PW);
@@ -292,7 +308,15 @@ export function browserTools(o: BrowserOptions): { tools: RegisteredTool[]; pool
   const pool = new BrowserPool(o);
   const issueOf = (ctx?: { conversationKey?: string }) => o.desk.issueOfKey(ctx?.conversationKey);
   const scrub = (t: string) => (o.vault ? o.vault.scrub(t) : t);
-  const guard = <T>(f: () => Promise<T>) => f().catch((e: unknown) => failed(`The browser couldn't do that: ${scrub(e instanceof Error ? e.message : String(e))}`.slice(0, 1500)));
+  /** Every tool call ends: at its deadline or when the run is stopped, and a tab that stopped answering is closed so the next call opens a fresh one. */
+  const guard = <T>(issue: Issue, ms: number, signal: AbortSignal | undefined, f: () => Promise<T>) =>
+    bounded(f(), ms, signal).catch((e: unknown) => {
+      const why = e instanceof Error ? e.message : String(e);
+      if (/stopped|didn't answer/.test(why)) void bounded(pool.closeIssue(issue.id), 5_000).catch(() => undefined);
+      return failed(`The browser couldn't do that: ${scrub(why)}`.slice(0, 1500));
+    });
+  /** What page the tab is on, and whether a human check shows; a page that won't say is skipped. */
+  const whereNow = async (page: Page) => `(page: ${await bounded(page.title(), 5_000).catch(() => "")} — ${page.url()})${await bounded(captchaNote(page), 10_000).catch(() => "")}`;
 
   /** A login's value into a field, asked for by a script: only the asker's own, only on its own site. */
   async function fillSecret(issue: Issue, page: Page, selector: string, ref: string): Promise<string> {
@@ -334,15 +358,15 @@ export function browserTools(o: BrowserOptions): { tools: RegisteredTool[]; pool
         timeout_seconds: Type.Optional(Type.Number({ description: "default 60, at most 300" })),
       }),
       meta: { capabilities: ["computer.use" as const], group: "web" as const },
-      execute: async ({ code, timeout_seconds }, ctx) => {
+      execute: async ({ code, timeout_seconds }, ctx, signal) => {
         const issue = issueOf(ctx);
         if (!issue) return failed("Only desk workers use the browser.");
-        return guard(async () => {
-          const { page, cdp, target } = await pool.attach(issue);
+        const timeout = Math.min(Math.max(timeout_seconds ?? 60, 1), 300) * 1000;
+        return guard(issue, timeout + 60_000, signal, async () => {
+          const { page, cdp, target } = await bounded(pool.attach(issue), 30_000, signal, "the tab");
           const dir = mkdtempSync(join(o.profilesDir, ".run-"));
           writeFileSync(join(dir, "runner.mjs"), RUNNER);
           writeFileSync(join(dir, "code.js"), code);
-          const timeout = Math.min(Math.max(timeout_seconds ?? 60, 1), 300) * 1000;
           // No environment but what it needs: none of Kloru's own keys.
           const child = fork(join(dir, "runner.mjs"), [join(dir, "code.js")], {
             cwd: dir,
@@ -350,6 +374,8 @@ export function browserTools(o: BrowserOptions): { tools: RegisteredTool[]; pool
             stdio: ["ignore", "pipe", "pipe", "ipc"],
             execArgv: [],
           });
+          const kill = () => child.kill("SIGKILL");
+          signal?.addEventListener("abort", kill, { once: true });
           let logs = "";
           child.stdout?.on("data", (b: Buffer) => (logs += b.toString()));
           child.stderr?.on("data", (b: Buffer) => (logs += b.toString()));
@@ -365,9 +391,11 @@ export function browserTools(o: BrowserOptions): { tools: RegisteredTool[]; pool
             });
             child.on("exit", (c) => (clearTimeout(timer), resolve({ error: `the script exited (${c}) before finishing` })));
           });
+          signal?.removeEventListener("abort", kill);
           child.kill();
           rmSync(dir, { recursive: true, force: true });
-          const where = `\n\n(page: ${await page.title().catch(() => "")} — ${page.url()})${await captchaNote(page)}`;
+          if (signal?.aborted) throw new Error("stopped");
+          const where = `\n\n${await whereNow(page)}`;
           const body = scrub(`${result.error ? `Error: ${result.error}` : result.value || "(returned nothing)"}${logs.trim() ? `\n\nconsole:\n${logs.trim()}` : ""}`).slice(0, MAX_OUT);
           return result.error ? failed(body + scrub(where)) : textResult(body + scrub(where));
         });
@@ -380,18 +408,18 @@ export function browserTools(o: BrowserOptions): { tools: RegisteredTool[]; pool
         "For a step only the person can do in this tab (a CAPTCHA they'd see, a code sent to their phone, a bank's card check): texts them a link to this tab, waits until they've done it (up to 10 minutes), then you carry on with browser_run.",
       parameters: Type.Object({ reason: Type.String({ description: "what they need to do, e.g. 'SFO parking needs you to tick the I'm-not-a-robot box'" }) }),
       meta: { capabilities: ["computer.use" as const], group: "web" as const },
-      execute: async ({ reason }, ctx) => {
+      execute: async ({ reason }, ctx, signal) => {
         const issue = issueOf(ctx);
         const page = issue ? pool.existing(issue) : undefined;
         if (!issue || !page) return failed("No page is open; open it with browser_run first.");
-        return guard(async () => {
-          const hadCaptcha = !!(await captchaNote(page));
+        return guard(issue, TAKEOVER_MS + 60_000, signal, async () => {
+          const hadCaptcha = !!(await bounded(captchaNote(page), 10_000).catch(() => ""));
           const t = await pool.startTakeover(issue, reason);
           const url = `${(o.publicUrl ?? "https://kloru.com").replace(/\/+$/, "")}/b/${t.token}`;
           const told = o.desk.needsPerson(issue.id, `${reason}. Open ${url} on your phone (it's Kloru's browser, signed in as you), do that step, then tap Done.`);
           if (!told.ok) return failed(told.error);
           const how = await pool.waitTakeover(t, page, hadCaptcha);
-          const where = `(page: ${await page.title().catch(() => "")} — ${page.url()})${await captchaNote(page)}`;
+          const where = await whereNow(page);
           return how === "expired"
             ? failed(scrub(`They didn't finish it within 10 minutes; the link has expired. Tell them where it stands. ${where}`))
             : textResult(scrub(`${how === "cleared" ? "The check is cleared" : "They tapped Done"}. Carry on in this tab with browser_run. ${where}`));
@@ -415,7 +443,7 @@ export function browserTools(o: BrowserOptions): { tools: RegisteredTool[]; pool
         zip: Type.Optional(Type.String({ description: "selector of the billing ZIP field" })),
       }),
       meta: { capabilities: ["purchase" as const], group: "web" as const, amountUsd: (a: unknown) => Number((a as { total_usd?: number }).total_usd) || undefined },
-      execute: async (a, ctx) => {
+      execute: async (a, ctx, signal) => {
         const issue = issueOf(ctx);
         const page = issue ? pool.existing(issue) : undefined;
         if (!issue || !page) return failed("No page is open; open the checkout with browser_run first.");
@@ -451,7 +479,7 @@ export function browserTools(o: BrowserOptions): { tools: RegisteredTool[]; pool
           }
         }
         const fields: Array<[string | undefined, string]> = [[a.number, "number"], [a.exp, "exp"], [a.cvc, "cvc"], [a.name, "name"], [a.zip, "zip"]];
-        return guard(async () => {
+        return guard(issue, 2 * 60_000, signal, async () => {
           for (const [selector, field] of fields) {
             if (!selector) continue;
             const value = o.vault!.value(a.card, field);

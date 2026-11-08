@@ -41,6 +41,8 @@ function setup(clock?: () => Date, notify?: (n: Notice) => Promise<boolean>, dec
   return { host, desk, call, logs };
 }
 
+const isClosedStatus = (s: string) => ["resolved", "wont_do", "not_planned", "superseded", "failed", "done", "merged"].includes(s);
+
 /** Wait until the PM has nothing queued and the condition holds. */
 async function until(f: () => boolean, ms = 60_000) {
   const end = Date.now() + ms;
@@ -235,6 +237,26 @@ describe.skipIf(!key)("PM on real-call situations", () => {
     if (process.env.SHOW && !host.finishers.has(1)) console.log("MISS", desk.repo.issue(1)!.kind, desk.repo.issue(1)!.status, JSON.stringify(desk.repo.issue(1)!.thread.map((t) => `${t.by}: ${t.text}`), null, 1), JSON.stringify(desk.repo.inbox(call.id, 0)));
     expect(host.finishers.has(1)).toBe(true);
   }, 120_000);
+
+  it("#493 (Nov 8): research whose worker keeps getting stuck is told to the caller honestly, not reassigned all day", async () => {
+    const sent: string[] = [];
+    const { host, desk, logs, call: voice } = setup(undefined, async (n) => (sent.push(JSON.stringify(n)), true));
+    desk.endCall(voice.id);
+    const { call } = desk.startCall({ callSid: "imessage:evt493", phone: "+14155550190", channel: "imessage" });
+    desk.addTurn(call.id, { role: "caller", text: "Research how divorce probability changes with taking jobs where you travel 4 months or more in a year" });
+    desk.fileIssue(call.id, "Research how divorce probability changes with taking jobs where you travel 4 months or more in a year");
+    await until(() => host.finishers.has(1));
+    desk.endCall(call.id);
+    const told = () => [...desk.repo.inbox(call.id, 0).map((m) => m.text), ...sent, ...desk.repo.ledger().filter((e) => e.tool === "tell_caller").map((e) => JSON.stringify(e.args))];
+    for (let i = 0; i < 3 && !told().length; i++) {
+      host.finishers.clear();
+      desk.sweep(new Date(Date.now() + 40 * 60_000)); // its worker ran far too long, again
+      await until(() => host.finishers.has(1) || told().length > 0 || isClosedStatus(desk.repo.issue(1)!.status));
+    }
+    await until(() => told().length > 0, 10_000);
+    if (process.env.SHOW) console.log(told(), logs.filter((l) => l.startsWith("pm")), JSON.stringify(desk.repo.issue(1)!.thread.map((t) => `${t.by}: ${t.text}`), null, 1));
+    expect(told().join(" ")).toMatch(/stuck|trouble|delay|longer|problem|couldn't|can't|not able|unable|snag|issue/i);
+  }, 240_000);
 
   it("a result with a page link is spoken without the link", async () => {
     const { host, desk, call } = setup();

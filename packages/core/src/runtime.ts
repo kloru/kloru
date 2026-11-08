@@ -206,6 +206,8 @@ export class Conversation {
   /** True while the current run was started by the owner's own direct message (see ToolContext.ownerTurn). */
   ownerTurn = false;
   busy = false;
+  /** Replaced by a fresh conversation on its key (a stopped worker): a late finish never overwrites the new transcript. */
+  retired = false;
   /** Set for desk workers; undefined for every other conversation. */
   readonly role: WorkerRole | undefined;
   private readonly sessionFile: string;
@@ -257,6 +259,7 @@ export class Conversation {
 
   /** Write the transcript (without system messages, which are rebuilt) as JSON lines. */
   persist(): void {
+    if (this.retired) return;
     writeSession(this.sessionFile, this.agent.state.messages);
   }
 
@@ -347,6 +350,14 @@ export class AgentRuntime {
     const sessionFile = join(this.sessionsDir, `${encodeURIComponent(key)}.jsonl`);
     // Another person's worker on this key never hands its transcript over.
     return this.createConversation(key, principal, { role }, existing ? [] : readSession(sessionFile));
+  }
+
+  /** Forget a stopped worker's conversation, so the next run on its key starts from its saved transcript. */
+  retire(key: string): void {
+    const c = this.conversations.get(key);
+    if (!c) return;
+    c.retired = true;
+    this.conversations.delete(key);
   }
 
   /**

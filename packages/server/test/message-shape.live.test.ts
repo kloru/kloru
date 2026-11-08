@@ -35,6 +35,9 @@ const CASES: Case[] = [
   { name: "someone who wanted it shorter gets one line", input: { kind: "result", theirMessage: "Book SFO long-term parking", content: "Booked: SFO Long-Term, Nov 3 11 AM to Nov 6 1 AM, $78, confirmation SFO483920.", preferences: '- Wanted it shorter for "book parking" (2026-11-02)' }, forms: ["one_line"] },
   { name: "asked for the link, gets the link", input: { kind: "result", theirMessage: "Send me the link to the parking page", content: `Here's the SFO parking page: ${PAGE}`, hasPage: true }, forms: ["one_line", "short"], link: true },
   { name: "someone who doesn't want links for bookings gets none", input: { kind: "result", theirMessage: "Book a table at Nopa Friday 7pm", content: `Booked: Nopa, Friday 7 PM, 2 people, confirmation RSY-48KQ. Page: ${PAGE}`, hasPage: true, preferences: '- Didn\'t want the link for "book parking" (2026-11-03)' }, forms: ["one_line", "short"], link: false },
+  // Asking about earlier work: a status gets words, never a reaction alone (2026-11-08).
+  { name: "'did you do it?' about stuck work gets words", input: { kind: "their_message", theirMessage: "Did you do the divorce analysis thing I asked for? I turned down a very high paying job and this was my reasoning.", recent: ["Them: Research how divorce probability changes with jobs where you travel 4+ months a year"], open: ["issue 493, working on it for 12 h, its worker got stuck 24 times: Research how divorce probability changes with jobs where you travel 4+ months a year"] }, forms: ["one_line", "short"] },
+  { name: "'is it done yet?' gets words", input: { kind: "their_message", theirMessage: "Is it done yet?", recent: ["Them: What's going on?", "Kloru: I'm still pulling together the studies on high-travel jobs and divorce."], open: ["issue 493, working on it for 13 h, its worker got stuck 26 times: Research how divorce probability changes with jobs where you travel 4+ months a year"] }, forms: ["one_line", "short"] },
   // Questions for them.
   { name: "a purchase question is short", input: { kind: "question", theirMessage: "Buy the lavender Lumos knitting light, use BLACK30", content: "Question for the caller: the total with BLACK30 is $38.33 shipped to Oakland. Buy it?" }, forms: ["one_line", "short"] },
   // Email reads like a text.
@@ -46,8 +49,9 @@ describe.skipIf(!key)("message shape on Jev, real situations", () => {
   for (const c of CASES) {
     it(c.name, async () => {
       const s = await decide({ channel: "imessage", hasPage: false, preferences: "", recent: [], ...c.input } as ShapeInput);
-      expect(c.forms, `got ${s.form} (${s.p?.toFixed(2)})`).toContain(s.form);
-      if (c.link !== undefined) expect(s.link, `link ${s.link}`).toBe(c.link);
+      // Unsure leaves it to the talker: a miss here, since each case has a clear answer.
+      expect(c.forms, s ? `got ${s.form} (${s.p?.toFixed(2)})` : "unsure").toContain(s?.form);
+      if (c.link !== undefined) expect(s?.link, `link ${s?.link}`).toBe(c.link);
     }, 20_000);
   }
 });

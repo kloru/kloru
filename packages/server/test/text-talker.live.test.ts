@@ -32,6 +32,17 @@ describe.skipIf(!key)("the text talker, live", () => {
     expect(reply).toBe("");
   }, 60_000);
 
+  // Nov 8: "Did you do it?" and "Is it done yet?" about research stuck for 13 hours got only 👀, then "still working on it".
+  const STUCK = ["issue 493, in progress for 13 h, its worker got stuck 26 times: Research how divorce probability changes with jobs where you travel 4+ months a year"];
+  it("'is it done yet?' about stuck work gets an honest answer in words, nothing filed again", async () => {
+    const { t, calls } = tools();
+    const reply = await talk({ brief: BRIEF, channel: "imessage", thread: [{ role: "caller", text: "Did you do the divorce analysis thing I asked for?" }, { role: "caller", text: "Is it done yet?" }], open: STUCK, tools: t, timezone: "America/Los_Angeles" });
+    console.log(reply, calls);
+    expect(reply.length).toBeGreaterThan(0);
+    expect(reply).toMatch(/stuck|delay|roadblock|trouble|problem|snag|longer than|sorry|restart/i);
+    expect(calls.some((c) => c.startsWith("file:"))).toBe(false);
+  }, 60_000);
+
   it("an email is acknowledged in a few words, a bigger job in a minute or two", async () => {
     const { t } = tools();
     delete t.react;

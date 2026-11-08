@@ -10,7 +10,7 @@
  * only when it passed DMARC (email is easy to forge, and these conversations act with their powers).
  */
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { luhnNumbers, mediaNote, type ConversationSend, type Desk, type MediaItem, type Merge } from "@kloru/desk";
+import { luhnNumbers, mediaNote, type ConversationSend, type Desk, type Issue, type MediaItem, type Merge } from "@kloru/desk";
 import { normalizePhone } from "@kloru/core";
 import type { Caller } from "./desk-routes.js";
 import type { TalkerTurn } from "./text-talker.js";
@@ -89,7 +89,7 @@ export interface TextDeskOptions {
   timezone: string;
   log: (m: string) => void;
   /** How a written message should look for this person (message-shape.ts), decided before it's written. */
-  shape?: (s: ShapeInput) => Promise<MessageShape>;
+  shape?: (s: ShapeInput) => Promise<MessageShape | undefined>;
   /** Whether a written draft fits how they like messages; anything else sends it back once to be redrafted. */
   checkDraft?: (d: DraftInput) => Promise<{ verdict: DraftVerdict; p?: number }>;
   /** What their reply says about how the last message was written: a line for their messages.md. */
@@ -370,7 +370,7 @@ export class TextDesk {
     const kind = !merges.length ? "their_message" : merges.some((m) => m.draft || /^Question for the caller/.test(m.text)) ? "question" : "result";
     const recent = this.threadText(t);
     const shape = await this.o
-      .shape({ channel: t.channel === "email" ? "email" : "imessage", kind, theirMessage: replyingTo ?? t.lastAsk ?? "", ...(content ? { content } : {}), hasPage: /\/a\/[A-Za-z0-9_-]{22}/.test(content), preferences: this.o.desk.messagePreferences(t.phone), recent })
+      .shape({ channel: t.channel === "email" ? "email" : "imessage", kind, theirMessage: replyingTo ?? t.lastAsk ?? "", ...(content ? { content } : {}), hasPage: /\/a\/[A-Za-z0-9_-]{22}/.test(content), preferences: this.o.desk.messagePreferences(t.phone), recent, open: this.openFor(t) })
       .catch((e: Error) => (this.o.log(`text: message shape failed: ${e.message}`), undefined));
     if (shape) this.o.log(`text: ${t.callId} ${kind} → ${shape.form}${shape.link ? " with link" : ""}${shape.p !== undefined ? ` (${shape.p.toFixed(2)})` : ""}`);
     return shape;
@@ -402,13 +402,14 @@ export class TextDesk {
     return !!sent;
   }
 
-  /** Their own requests still being worked on, newest last. */
+  /** Their own requests still being worked on, newest last, each with how it's going so a status question gets a true answer. */
   private openFor(t: Thread): string[] {
+    const now = this.o.desk.now().getTime();
     return this.o.desk
       .openIssues()
       .filter((i) => !i.purpose && samePhone(i.filedBy.phone, t.phone))
       .slice(-8)
-      .map((i) => `issue ${i.id}: ${i.request.slice(0, 160)}`);
+      .map((i) => `issue ${i.id}, ${progress(i, now)}: ${i.request.slice(0, 160)}`);
   }
 
   private pending(t: Thread): string[] {
@@ -425,6 +426,14 @@ export class TextDesk {
 
 /** The label the email route puts on forwarded text (http.ts latestReply). */
 export const FORWARDED_LABEL = "[Forwarded or quoted, not written by them";
+
+/** "in progress for 13 h, its worker got stuck 26 times": what's true about a request, in words. */
+function progress(i: Issue, now: number): string {
+  const min = Math.max(0, Math.round((now - Date.parse(i.createdAt)) / 60_000));
+  const age = min < 60 ? `${min} min` : `${Math.round(min / 60)} h`;
+  const stuck = i.thread.filter((e) => e.by === "system" && e.text.startsWith("Stuck")).length;
+  return `${i.status.replace(/_/g, " ")} for ${age}${stuck ? `, its worker got stuck ${stuck} time${stuck === 1 ? "" : "s"}` : ""}`;
+}
 
 const samePhone = (a: string, b: string) => a.replace(/\D/g, "").slice(-10) === b.replace(/\D/g, "").slice(-10);
 

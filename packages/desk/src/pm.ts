@@ -54,7 +54,7 @@ For each trigger, act with your tools:
   ops to save an automation with the request it should run each time.
 - stuck: first decide if it still matters (yesterday's "news for right now" doesn't; a newer issue may have
   overtaken it). Done, outdated or overtaken: close it (resolved, wont_do or superseded, with why).
-  Otherwise take its next step now.
+  Otherwise take its next step now. Stuck twice already: also tell the caller honestly what's in the way.
 - conflict: two open issues touch the same thing. If they're the same request, close the older one as
   superseded. If two different people's work collides, tell each what the other is doing (merge with call).
   Otherwise do nothing.
@@ -96,6 +96,8 @@ function issueLine(i: Issue, pageTitle: (id: string) => string | undefined = () 
   if (i.confirmation) parts.push(`waiting for a yes on: ${i.confirmation.draft}${i.confirmation.confirmedBy ? " (confirmed)" : ""}`);
   const sentBack = i.thread.filter((e) => e.by === "pm" && e.text.startsWith("Sent back:")).length;
   if (sentBack > 1) parts.push(`sent back ${sentBack} times already`);
+  const stuck = i.thread.filter((e) => e.by === "system" && e.text.startsWith("Stuck")).length;
+  if (stuck > 1) parts.push(`stuck ${stuck} times already`);
   const open = i.prs.filter((p) => p.status === "open").at(-1);
   if (open) parts.push(`open PR (based on turn ${open.baseTurn}): ${open.body}`);
   const merged = i.prs.filter((p) => p.status === "merged").at(-1);

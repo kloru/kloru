@@ -21,7 +21,7 @@ export class RuntimeWorkerHost implements WorkerHost {
 
   /** `principalFor`: who a phone number is (undefined: the owner). */
   constructor(
-    private readonly runtime: Pick<AgentRuntime, "worker">,
+    private readonly runtime: Pick<AgentRuntime, "worker" | "retire">,
     private readonly principalFor: (phone: string) => Principal | undefined = () => undefined,
   ) {}
 
@@ -55,7 +55,15 @@ export class RuntimeWorkerHost implements WorkerHost {
     return true;
   }
 
+  /**
+   * Abort the run, and let the next one start fresh: a tool that ignores the abort (a browser call
+   * stuck on a Cloudflare check, #493) would otherwise hold every later run behind it forever.
+   */
   stop(issue: number): void {
-    this.running(issue)?.agent.abort();
+    const conv = this.running(issue);
+    if (!conv) return;
+    conv.agent.abort();
+    this.runtime.retire(conv.key);
+    this.chains.delete(issue);
   }
 }

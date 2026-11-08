@@ -435,7 +435,9 @@ describe("follow-ups and questions (SFO parking, 2026-11-03)", () => {
     await text.receive(imsg("m1", "Book SFO long-term parking"));
     const [open] = desk.openIssues();
     await text.receive(imsg("m2", "Use the card I just added"));
-    expect(turns.at(-1)!.open).toEqual([`issue ${open!.id}: ${open!.request}`]);
+    // With how it's going, so "is it done yet?" gets a true answer (#493).
+    expect(turns.at(-1)!.open).toEqual([expect.stringMatching(new RegExp(`^issue ${open!.id}, \\w[\\w ]* for \\d+ (min|h): `))]);
+    expect(turns.at(-1)!.open![0]).toContain(open!.request);
   });
 
   it("a question from the PM goes out at once, even when the check would hold it", async () => {

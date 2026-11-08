@@ -32,10 +32,12 @@ export interface ShapeInput {
   preferences: string;
   /** The whole conversation so far, oldest first. */
   recent: string[];
+  /** Their requests still open, with how they're going, so a status question is answered. */
+  open?: string[];
 }
 
 const FORMS: Record<MessageForm, string> = {
-  emoji: "Just a reaction on their message (👀 got it, 👍 done): a request Kloru is now on, a chore done, a thanks. Nothing needs saying.",
+  emoji: "Just a reaction on their message (👀 got it, 👍 done): a request Kloru is now on, a chore done, a thanks. Not for a question about earlier work: that gets an answer.",
   one_line: "One line: the outcome or the one fact they need (a time, a date, a confirmation number).",
   short: "A sentence or two: the outcome and the few details that matter.",
   detailed: "The whole answer: only when they asked for everything or for detail, or their preferences want detail.",
@@ -45,8 +47,8 @@ const LINKS = {
   no: "No link: the message says it all (a date, a booking with its confirmation number), or their preferences say no links.",
 };
 
-/** The shape to write in; on any failure, a sentence or two with no link. */
-export function shapeDecider(o: { apiKey: string; fetchImpl?: typeof fetch; model?: string; timeoutMs?: number }): (s: ShapeInput) => Promise<MessageShape> {
+/** The shape to write in; undefined when unsure, so the talker's own judgment decides. */
+export function shapeDecider(o: { apiKey: string; fetchImpl?: typeof fetch; model?: string; timeoutMs?: number }): (s: ShapeInput) => Promise<MessageShape | undefined> {
   return async (s) => {
     const questions: Record<string, unknown> = {
       form: {
@@ -63,6 +65,7 @@ export function shapeDecider(o: { apiKey: string; fetchImpl?: typeof fetch; mode
       ...(s.content ? { to_pass_on: s.content } : {}),
       their_preferences_come_first: s.preferences || "(none yet)",
       conversation_so_far: s.recent,
+      ...(s.open?.length ? { their_open_requests: s.open } : {}),
     };
     const res = await (o.fetchImpl ?? fetch)(URL, {
       method: "POST",
@@ -75,8 +78,8 @@ export function shapeDecider(o: { apiKey: string; fetchImpl?: typeof fetch; mode
     const form = data.answers?.form;
     if (form?.type !== "choice" || !form.choice || !(form.choice in FORMS)) throw new Error(`no form in ${JSON.stringify(data).slice(0, 200)}`);
     const p = form.probabilities?.[form.choice];
-    // Unsure is the safe default for this kind of message: a reaction to show it's heard, else a sentence or two without a link.
-    if (p !== undefined && p < 0.5) return { form: s.kind === "their_message" ? "emoji" : "short", link: false, p };
+    // Unsure: no shape, and the talker decides. A forced reaction left "Is it done yet?" with only 👀 (2026-11-08).
+    if (p !== undefined && p < 0.5) return undefined;
     return { form: form.choice as MessageForm, link: data.answers?.link?.choice === "yes", ...(p !== undefined ? { p } : {}) };
   };
 }

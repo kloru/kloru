@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Desk, Vault, type Planner, type WorkerHost } from "@kloru/desk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { browserTools, findChromium, sameSite } from "../src/browser-tools.js";
+import { bounded, browserTools, findChromium, sameSite } from "../src/browser-tools.js";
 
 const chrome = findChromium(process.env);
 const EVAN = "+14155550190";
@@ -28,6 +28,18 @@ class Host implements WorkerHost {
   }
   stop(): void {}
 }
+
+describe("a browser step that hangs (#493: a page stuck on a Cloudflare check)", () => {
+  it("ends at its deadline, or as soon as the run is stopped", async () => {
+    const never = new Promise<string>(() => {});
+    await expect(bounded(never, 30, undefined, "the page")).rejects.toThrow(/the page didn't answer within/);
+    const stop = new AbortController();
+    const waiting = bounded(never, 60_000, stop.signal);
+    stop.abort();
+    await expect(waiting).rejects.toThrow(/stopped/);
+    expect(await bounded(Promise.resolve("ok"), 30)).toBe("ok");
+  });
+});
 
 describe("which site a login belongs to", () => {
   it("matches the site and its subdomains, not lookalikes", () => {
@@ -116,4 +128,25 @@ describe.skipIf(!chrome)("browser tools on a real Chromium", () => {
       await pool.closeAll();
     }
   }, 90_000);
+
+  it("a run that never returns ends when the worker is stopped, not minutes later", async () => {
+    const root = mkdtempSync(join(tmpdir(), "browser-"));
+    const desk = new Desk({ root, host: new Host(), planner: { handle: async () => {} } as Planner, ownerPhone: EVAN });
+    const { tools, pool } = browserTools({ desk, profilesDir: join(root, "browser"), executablePath: chrome!, log: () => {} });
+    const run = tools.find((x) => x.spec.name === "browser_run")!;
+    const { call } = desk.startCall({ callSid: "CA2", phone: EVAN, channel: "voice" });
+    const issue = desk.fileIssue(call.id, "Read a page");
+    const ctx = { conversationKey: `desk:issue:${issue.id}:engineer` } as never;
+    try {
+      await run.spec.execute({ code: `await page.goto(${JSON.stringify(base)})` }, ctx);
+      const stop = new AbortController();
+      const started = Date.now();
+      const hung = run.spec.execute({ code: "await new Promise(() => {})", timeout_seconds: 300 }, ctx, stop.signal);
+      setTimeout(() => stop.abort(), 500);
+      expect(JSON.stringify(await hung)).toMatch(/stopped/);
+      expect(Date.now() - started).toBeLessThan(10_000);
+    } finally {
+      await pool.closeAll();
+    }
+  }, 60_000);
 });
