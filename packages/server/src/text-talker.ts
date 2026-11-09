@@ -39,7 +39,7 @@ export interface TalkerTurn {
   /** A draft that went back before sending, and why: write it again. */
   redraft?: { draft: string; why: string };
   /** How this message should look for them, decided from their preferences (message-shape.ts). */
-  shape?: { form: "emoji" | "one_line" | "short" | "detailed"; link: boolean };
+  shape?: { form: "emoji" | "one_line" | "short" | "detailed"; /** Kloru's page link; unset: no page. */ link?: boolean };
   tools: TalkerTools;
   timezone: string;
 }
@@ -65,8 +65,9 @@ const SHAPES = {
   short: "For this reply: a sentence or two.",
   detailed: "For this reply: the whole answer, as long as it takes.",
 };
+// Only the page link is decided; any other link (a sign-in link, a booking page) is part of the answer.
 const shapeLine = (s: NonNullable<TalkerTurn["shape"]>, canReact: boolean) =>
-  `${s.form === "emoji" && !canReact ? SHAPES.one_line : SHAPES[s.form]} ${s.link ? "Include the page link." : "No link."}`;
+  `${s.form === "emoji" && !canReact ? SHAPES.one_line : SHAPES[s.form]}${s.link === undefined ? "" : s.link ? " Include the page link." : " Leave out the page link."}`;
 
 const ON_IT = {
   react: "When they ask for something new, react eyes and reply [quiet]; the result is the message.",

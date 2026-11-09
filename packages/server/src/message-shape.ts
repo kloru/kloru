@@ -14,7 +14,8 @@ const MODEL = "typesafe/jev-1.14";
 export type MessageForm = "emoji" | "one_line" | "short" | "detailed";
 export interface MessageShape {
   form: MessageForm;
-  link: boolean;
+  /** Whether to include Kloru's page link; unset when there's no page (any other link is the writer's call). */
+  link?: boolean;
   p?: number;
 }
 
@@ -80,7 +81,7 @@ export function shapeDecider(o: { apiKey: string; fetchImpl?: typeof fetch; mode
     const p = form.probabilities?.[form.choice];
     // Unsure: no shape, and the talker decides. A forced reaction left "Is it done yet?" with only 👀 (2026-11-08).
     if (p !== undefined && p < 0.5) return undefined;
-    return { form: form.choice as MessageForm, link: data.answers?.link?.choice === "yes", ...(p !== undefined ? { p } : {}) };
+    return { form: form.choice as MessageForm, ...(s.hasPage ? { link: data.answers?.link?.choice === "yes" } : {}), ...(p !== undefined ? { p } : {}) };
   };
 }
 
@@ -119,7 +120,7 @@ export function feedbackDecider(o: { apiKey: string; fetchImpl?: typeof fetch; m
       body: JSON.stringify({
         model: o.model ?? MODEL,
         provider: { zdr: true },
-        state: { they_asked: f.asked, kloru_sent: f.sent, how_it_was_written: `${FORMS[f.shape.form]} ${f.shape.link ? "With the page link." : "No link."}`, their_reply: f.reply },
+        state: { they_asked: f.asked, kloru_sent: f.sent, how_it_was_written: `${FORMS[f.shape.form]}${f.shape.link ? " With the page link." : " No link."}`, their_reply: f.reply },
         questions: { lesson: { type: "choice", instructions: "Does their reply say anything about how Kloru's last message was written?", criteria: LESSONS } },
       }),
     });

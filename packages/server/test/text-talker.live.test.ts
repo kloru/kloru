@@ -61,6 +61,24 @@ Recent tasks (newest first; what each found):
     expect(calls.some((c) => c.startsWith("file:"))).toBe(true);
   }, 60_000);
 
+  // Nov 9, 08:11: the GitHub sign-in link came back from the desk; the reply offered to email it instead,
+  // then said Kloru was "blocked from sending links over text" (the shape line said "No link.").
+  it("a sign-in link in a result is texted, not swapped for an offer to email it", async () => {
+    const { t, calls } = tools();
+    const reply = await talk({
+      brief: BRIEF,
+      channel: "imessage",
+      thread: [{ role: "caller", text: "Can you connect to my GitHub?" }],
+      event: "<info>GitHub isn't connected yet. You can connect it here: https://connect.composio.dev/link/lk_M9yuh9Thv23J. Just sign in and authorize the connection.</info>",
+      tools: t,
+      shape: { form: "short" },
+      timezone: "America/Los_Angeles",
+    });
+    console.log(reply, calls);
+    expect(reply).toContain("https://connect.composio.dev/link/lk_M9yuh9Thv23J");
+    expect(reply).not.toMatch(/email|blocked/i);
+  }, 60_000);
+
   // Nov 8: "Did you do it?" and "Is it done yet?" about research stuck for 13 hours got only 👀, then "still working on it".
   const STUCK = ["issue 493, in progress for 13 h, its worker got stuck 26 times: Research how divorce probability changes with jobs where you travel 4+ months a year"];
   it("'is it done yet?' about stuck work gets an honest answer in words, nothing filed again", async () => {
