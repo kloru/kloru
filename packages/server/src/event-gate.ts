@@ -37,6 +37,7 @@ export function eventGate(o: { apiKey: string; fetchImpl?: typeof fetch; model?:
       signal: AbortSignal.timeout(o.timeoutMs ?? 5000),
       body: JSON.stringify({
         model: o.model ?? MODEL,
+        provider: { zdr: true },
         state: {
           automation: g.automation,
           what_it_does_each_time: g.request,

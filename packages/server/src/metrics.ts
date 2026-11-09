@@ -251,7 +251,7 @@ export class Metrics {
       method: "POST",
       headers: { Authorization: `Bearer ${this.o.decisionKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(10_000),
-      body: JSON.stringify({ model: JEV, state: { request, result: result.slice(0, 1500), actions_done: actions }, questions: { minutes: { type: "choice", instructions: "How long would this have taken the person to do themselves, by hand?", criteria } } }),
+      body: JSON.stringify({ model: JEV, provider: { zdr: true }, state: { request, result: result.slice(0, 1500), actions_done: actions }, questions: { minutes: { type: "choice", instructions: "How long would this have taken the person to do themselves, by hand?", criteria } } }),
     });
     if (!r.ok) throw new Error(`decision model ${r.status}`);
     const d = (await r.json()) as { answers?: { minutes?: { choice?: string } } };

@@ -1,6 +1,6 @@
 /**
  * One chat completion on OpenRouter, for the small model calls Kloru makes itself (fast path,
- * decisions, the after-call email, steering). A 429 or 5xx is tried once more after Retry-After,
+ * decisions, the after-call email, steering), always to zero-data-retention providers. A 429 or 5xx is tried once more after Retry-After,
  * capped at maxWaitMs, since a caller may be waiting (#22). Returns the message text.
  */
 export interface ChatOptions {
@@ -31,7 +31,8 @@ export async function chatMessage(o: ChatOptions, body: Record<string, unknown>)
       method: "POST",
       headers: { Authorization: `Bearer ${o.apiKey}`, "Content-Type": "application/json" },
       ...(o.timeoutMs ? { signal: AbortSignal.timeout(o.timeoutMs) } : {}),
-      body: JSON.stringify(body),
+      // Family data: zero-data-retention providers only.
+      body: JSON.stringify({ ...body, provider: { ...(body.provider as Record<string, unknown> | undefined), zdr: true } }),
     });
     if (res.ok) {
       const data = (await res.json()) as { choices?: Array<{ message?: { content?: string; tool_calls?: ToolCall[] } }> };

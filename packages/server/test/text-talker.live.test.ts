@@ -21,7 +21,8 @@ function tools() {
 }
 
 describe.skipIf(!key)("the text talker, live", () => {
-  const talk = textTalker({ apiKey: key ?? "" });
+  // TEXT_MODEL tries another model (the model-selection skill); unset, production's.
+  const talk = textTalker({ apiKey: key ?? "", ...(process.env.TEXT_MODEL ? { model: process.env.TEXT_MODEL } : {}) });
 
   it("a request in a text is filed and acknowledged with eyes, no words", async () => {
     const { t, calls } = tools();

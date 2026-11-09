@@ -71,7 +71,7 @@ export function shapeDecider(o: { apiKey: string; fetchImpl?: typeof fetch; mode
       method: "POST",
       headers: { Authorization: `Bearer ${o.apiKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(o.timeoutMs ?? 3000),
-      body: JSON.stringify({ model: o.model ?? MODEL, state, questions }),
+      body: JSON.stringify({ model: o.model ?? MODEL, provider: { zdr: true }, state, questions }),
     });
     if (!res.ok) throw new Error(`decision model ${res.status}`);
     const data = (await res.json()) as { answers?: Record<string, { type?: string; choice?: string; probabilities?: Record<string, number> }> };
@@ -118,6 +118,7 @@ export function feedbackDecider(o: { apiKey: string; fetchImpl?: typeof fetch; m
       signal: AbortSignal.timeout(o.timeoutMs ?? 3000),
       body: JSON.stringify({
         model: o.model ?? MODEL,
+        provider: { zdr: true },
         state: { they_asked: f.asked, kloru_sent: f.sent, how_it_was_written: `${FORMS[f.shape.form]} ${f.shape.link ? "With the page link." : "No link."}`, their_reply: f.reply },
         questions: { lesson: { type: "choice", instructions: "Does their reply say anything about how Kloru's last message was written?", criteria: LESSONS } },
       }),
@@ -188,7 +189,7 @@ export function draftChecker(o: { apiKey: string; fetchImpl?: typeof fetch; mode
       method: "POST",
       headers: { Authorization: `Bearer ${o.apiKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(o.timeoutMs ?? 3000),
-      body: JSON.stringify({ model: o.model ?? MODEL, state, questions: { verdict: { type: "choice", instructions: "Does this draft fit this person? What they asked for in their message comes first (asked for everything: the full answer fits), then their preferences; otherwise as short as fits.", criteria } } }),
+      body: JSON.stringify({ model: o.model ?? MODEL, provider: { zdr: true }, state, questions: { verdict: { type: "choice", instructions: "Does this draft fit this person? What they asked for in their message comes first (asked for everything: the full answer fits), then their preferences; otherwise as short as fits.", criteria } } }),
     });
     if (!res.ok) throw new Error(`decision model ${res.status}`);
     const data = (await res.json()) as { answers?: Record<string, { choice?: string; probabilities?: Record<string, number> }> };

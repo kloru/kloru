@@ -54,3 +54,13 @@ describe("resolveModel: OpenRouter models newer than the catalog", () => {
     expect(() => resolveModel("nope/thing")).toThrow(/unknown provider/);
   });
 });
+
+describe("zero data retention", () => {
+  it("every OpenRouter model asks for zero-data-retention providers; others are untouched", async () => {
+    const { resolveModel } = await import("../src/model.js");
+    for (const spec of ["openrouter/google/gemini-3.5-flash", "openrouter/openai/gpt-6.1-terra"]) {
+      expect((resolveModel(spec).compat as { openRouterRouting?: { zdr?: boolean } }).openRouterRouting?.zdr).toBe(true);
+    }
+    expect((resolveModel("openai-compatible/llama", { OPENAI_BASE_URL: "http://localhost:11434/v1" }).compat as { openRouterRouting?: unknown } | undefined)?.openRouterRouting).toBeUndefined();
+  });
+});

@@ -602,7 +602,8 @@ function imageGenerateTool({ workspaceDir, images, fetchImpl }: CoreToolDeps): R
         res = await doFetch(`${base}/images/generations`, {
           method: "POST",
           headers: { Authorization: `Bearer ${images.apiKey}`, "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ model: images.model ?? DEFAULT_IMAGE_MODEL, prompt, size: size ?? "1024x1024", n: 1 }),
+          // Through OpenRouter: zero-data-retention providers only.
+          body: JSON.stringify({ model: images.model ?? DEFAULT_IMAGE_MODEL, prompt, size: size ?? "1024x1024", n: 1, ...(base.includes("openrouter.ai") ? { provider: { zdr: true } } : {}) }),
           signal: signal ?? AbortSignal.timeout(IMAGE_TIMEOUT_MS),
         });
       } catch (err) {

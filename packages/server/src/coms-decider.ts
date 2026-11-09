@@ -64,7 +64,7 @@ export function comsDecider(o: { apiKey: string; fetchImpl?: typeof fetch; model
       method: "POST",
       headers: { Authorization: `Bearer ${o.apiKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(o.timeoutMs ?? 3000),
-      body: JSON.stringify({ model: o.model ?? MODEL, state, questions }),
+      body: JSON.stringify({ model: o.model ?? MODEL, provider: { zdr: true }, state, questions }),
     });
     if (!res.ok) throw new Error(`decision model ${res.status}`);
     const data = (await res.json()) as { answers?: Record<string, { type?: string; choice?: string; probabilities?: Record<string, number> }> };

@@ -41,6 +41,7 @@ def openrouter_chat(client: httpx.AsyncClient, api_key: str, model: str, reasoni
             body["tools"] = tools
         if reasoning:
             body["reasoning"] = {"effort": reasoning}
+        body["provider"] = {"zdr": True}  # as production: zero-data-retention providers only
         for attempt in range(4):
             try:
                 res = await client.post("https://openrouter.ai/api/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=body, timeout=90)

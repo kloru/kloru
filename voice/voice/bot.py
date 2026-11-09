@@ -94,7 +94,8 @@ def llm_settings(cfg: Config, prompt: str) -> OpenRouterLLMService.Settings:
     return OpenRouterLLMService.Settings(
         model=cfg.voice_model,
         system_instruction=prompt,
-        extra={"extra_body": {"reasoning": {"effort": cfg.voice_reasoning_effort}}},
+        # Zero-data-retention providers only: calls carry family data.
+        extra={"extra_body": {"reasoning": {"effort": cfg.voice_reasoning_effort}, "provider": {"zdr": True}}},
     )
 
 

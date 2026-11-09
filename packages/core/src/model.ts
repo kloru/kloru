@@ -18,6 +18,20 @@ const EXAMPLES = [
 ];
 
 export function resolveModel(spec: string, env: NodeJS.ProcessEnv = {}): Model<any> {
+  return zeroRetention(resolveListed(spec, env));
+}
+
+/**
+ * Family data goes only to providers that keep none: every request through OpenRouter asks for
+ * zero-data-retention endpoints (pi-ai sends compat.openRouterRouting as the `provider` field).
+ */
+export function zeroRetention(model: Model<any>): Model<any> {
+  if (model.provider !== "openrouter" && !String(model.baseUrl ?? "").includes("openrouter.ai")) return model;
+  const compat = (model.compat ?? {}) as { openRouterRouting?: Record<string, unknown> };
+  return { ...model, compat: { ...compat, openRouterRouting: { ...compat.openRouterRouting, zdr: true } } };
+}
+
+function resolveListed(spec: string, env: NodeJS.ProcessEnv): Model<any> {
   const trimmed = spec.trim();
   const slash = trimmed.indexOf("/");
   if (slash <= 0 || slash === trimmed.length - 1) {

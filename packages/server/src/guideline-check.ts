@@ -14,6 +14,7 @@ export function guidelineCheck(o: { apiKey: string; fetchImpl?: typeof fetch; mo
       signal: AbortSignal.timeout(o.timeoutMs ?? 3000),
       body: JSON.stringify({
         model: o.model ?? MODEL,
+        provider: { zdr: true },
         state: { what_they_said: text },
         questions: {
           guideline: {
