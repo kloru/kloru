@@ -60,7 +60,7 @@ const REACT = fn("react", "React to their last message: eyes for on it, like for
 /** How to show they're heard: a tapback where the thread has them, else a few words. */
 /** The shape decided for this message, in words the talker follows. */
 const SHAPES = {
-  emoji: "For this reply, a reaction is enough: react (eyes for on it, like for done) and reply [quiet].",
+  emoji: "For this reply: file_issue anything new they asked first; then a reaction is enough: react (eyes for on it, like for done) and reply [quiet].",
   one_line: "For this reply: one line.",
   short: "For this reply: a sentence or two.",
   detailed: "For this reply: the whole answer, as long as it takes.",

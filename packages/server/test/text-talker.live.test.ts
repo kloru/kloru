@@ -32,6 +32,34 @@ describe.skipIf(!key)("the text talker, live", () => {
     expect(reply).toBe("");
   }, 60_000);
 
+  // Nov 9: with the reply shape at emoji, a new request got 👀 and was never filed.
+  it("a new request with an emoji reply shape is still filed, then acknowledged with eyes", async () => {
+    const { t, calls } = tools();
+    const text = "Everytime I get an email can you mark it as read? If it requires an action or is from someone important like my wife, leave it unread and text me a quick summary";
+    // As on Nov 9: his guidelines mention email alerts, and the spam cleanup (#515) waits on his yes.
+    const brief = `How they want Kloru to work (their guidelines, which win):
+- Be eager: do the whole thing. Check with me first only before something reaches another person, spends money, or can't be undone.
+- For email response alerts, do not text before 7 AM or at or after 7 PM Pacific; continue checking email every 15 minutes.
+- Keep all messages and writing concise; say each thing once and don't recap work I already know about.
+- Delete clearly promotional email without asking; show borderline messages and ask.
+${BRIEF}
+Recent tasks (newest first; what each found):
+- Daily spam cleanup of the inbox: cleaned the work inbox; asked for a yes to read the personal Gmail.`;
+    const reply = await talk({ brief, channel: "imessage", thread: [{ role: "caller", text }], tools: t, shape: { form: "emoji", link: false }, pending: ["issue 515, draft d1: May I read your personal Gmail (evangeorgemarshall@gmail.com) for the daily spam cleanup too?"], open: ["issue 515, waiting for their yes, 15 h: Every day, clean spam out of my inboxes"], timezone: "America/Los_Angeles" });
+    console.log(reply, calls);
+    expect(calls.some((c) => c.startsWith("file:"))).toBe(true);
+    expect(calls).toContain("react eyes");
+  }, 60_000);
+
+  it("asked again after an 'on it' with nothing filed, it files", async () => {
+    const { t, calls } = tools();
+    const { react: _r, ...noReact } = t;
+    const text = "Everytime I get an email can you mark it as read? If it requires an action or is from someone important like my wife, leave it unread and text me a quick summary";
+    const reply = await talk({ brief: BRIEF, channel: "imessage", thread: [{ role: "caller", text }], tools: noReact, shape: { form: "emoji", link: false }, redraft: { draft: "(only the eyes reaction)", why: "You reacted eyes (on it) but filed nothing, so nothing will happen. file_issue what they asked, or if there's nothing to do, say so in words." }, timezone: "America/Los_Angeles" });
+    console.log(reply, calls);
+    expect(calls.some((c) => c.startsWith("file:"))).toBe(true);
+  }, 60_000);
+
   // Nov 8: "Did you do it?" and "Is it done yet?" about research stuck for 13 hours got only 👀, then "still working on it".
   const STUCK = ["issue 493, in progress for 13 h, its worker got stuck 26 times: Research how divorce probability changes with jobs where you travel 4+ months a year"];
   it("'is it done yet?' about stuck work gets an honest answer in words, nothing filed again", async () => {

@@ -393,6 +393,45 @@ describe("a text that starts work gets a reaction, not a message", () => {
     expect(sent).toEqual([`imessage ${EVAN}: On it.`]);
   });
 
+  // Nov 9: 👀 on "every time I get an email…" and nothing filed, so nothing ran.
+  it("an 'on it' reaction with nothing filed gets one more turn, which files it", async () => {
+    const planner: Planner = { handle: async () => {} };
+    const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "textdesk-")), host: new Host(), planner });
+    const turns: TalkerTurn[] = [];
+    const reacted: string[] = [];
+    const text = new TextDesk({
+      desk,
+      callers: () => ({ allowed: true, name: "Evan", tier: "owner" }),
+      emailPerson: () => undefined,
+      talker: async (t) => {
+        turns.push(t);
+        if (!t.redraft) return (t.tools.react?.("eyes"), "");
+        t.tools.fileIssue(t.thread.at(-1)!.text);
+        return "";
+      },
+      send: { imessage: async () => true, react: async (_c, _m, r) => (reacted.push(r), true) },
+      idleMs: 10_000,
+      burstMs: 10,
+      timezone: "America/Los_Angeles",
+      log: () => {},
+    });
+    await text.receive({ ...imsg("m1", "Every time I get an email, mark it read"), reactTo });
+    await settle();
+    expect(reacted).toEqual(["eyes"]);
+    expect(turns).toHaveLength(2);
+    expect(turns[1]!.redraft?.why).toMatch(/filed nothing/);
+    expect(turns[1]!.tools.react).toBeUndefined();
+    expect(desk.openIssues().map((i) => i.request)).toEqual(["Every time I get an email, mark it read"]);
+  });
+
+  it("an 'on it' reaction with the request filed isn't asked again", async () => {
+    const { text, turns, desk } = setup({ reply: onIt, react: async () => true });
+    await text.receive({ ...imsg("m1", "Delete sales spam every morning"), reactTo });
+    await settle();
+    expect(turns).toHaveLength(1);
+    expect(desk.openIssues()).toHaveLength(1);
+  });
+
   it("without the message's ids (or by email) there's no react tool", async () => {
     const { text, turns } = setup({ react: async () => true });
     await text.receive(imsg("m1", "What's on tomorrow?"));

@@ -299,7 +299,9 @@ export class TextDesk {
     const shape = await this.shapeFor(t, merges, replyingTo);
     // A reaction goes on their message: the one this answers, or for a result, the one that asked.
     const target = reactTo ?? (merges.length ? t.reactTo : undefined);
-    const reacted = { done: false };
+    const reacted = { done: false, eyes: false };
+    // Whether the turn put anything on the desk: an "on it" with nothing filed promises work no one will do.
+    const acted = { done: false };
     const turn = {
       brief: t.brief,
       channel: t.channel,
@@ -308,9 +310,10 @@ export class TextDesk {
       pending: this.pending(t),
       open: this.openFor(t),
       tools: {
-        fileIssue: (request) => `Filed #${this.o.desk.fileIssue(t.callId, request).id}.`,
-        updateIssue: (issue, text) => (this.o.desk.comment(issue, t.callId, text), "Updated."),
+        fileIssue: (request) => ((acted.done = true), `Filed #${this.o.desk.fileIssue(t.callId, request).id}.`),
+        updateIssue: (issue, text) => ((acted.done = true), this.o.desk.comment(issue, t.callId, text), "Updated."),
         confirm: (issue, draft) => {
+          acted.done = true;
           // A yes has to be in their own words: never in a message that carries a forward.
           const last = this.o.desk.repo.turns(t.callId, 0).filter((x) => x.role === "caller").at(-1)?.text ?? "";
           if (last.includes(FORWARDED_LABEL)) return "Not confirmed: a yes has to come in their own words, not in a forwarded message. Ask them.";
@@ -319,12 +322,18 @@ export class TextDesk {
         },
         // How they want Kloru to work goes into their guidelines now; other facts wait for the end-of-call memory.
         remember: (text) => (void this.o.desk.rememberNow(t.callId, text).catch((e: Error) => this.o.log(`text: remember failed: ${e.message}`)), "Noted."),
-        ...(target && this.o.send.react ? { react: (r: Reaction) => ((reacted.done = true), void this.react(t, target, r, replyingTo ?? t.lastAsk ?? ""), "Reacted.") } : {}),
+        ...(target && this.o.send.react ? { react: (r: Reaction) => ((reacted.done = true), (reacted.eyes ||= r === "eyes"), void this.react(t, target, r, replyingTo ?? t.lastAsk ?? ""), "Reacted.") } : {}),
       },
       ...(shape ? { shape } : {}),
       timezone: this.o.timezone,
     } satisfies TalkerTurn;
     let reply = await this.o.talker(turn);
+    // 👀 on their new message with nothing filed (Nov 9): one more turn to file it, or say in words why not.
+    if (reacted.eyes && !acted.done && !merges.length) {
+      this.o.log(`text: ${t.callId} reacted on it but filed nothing; asking again`);
+      const { react: _sent, ...rest } = turn.tools;
+      reply = await this.o.talker({ ...turn, tools: rest, redraft: { draft: reply || "(only the eyes reaction)", why: "You reacted eyes (on it) but filed nothing, so nothing will happen. file_issue what they asked, or if there's nothing to do, say so in words." } });
+    }
     // The draft, weighed against how they like messages; a clear miss goes back once with the reason.
     const why = reply ? await this.redraftReason(t, merges, replyingTo, shape, reply, !!turn.tools.react) : undefined;
     if (why) {
