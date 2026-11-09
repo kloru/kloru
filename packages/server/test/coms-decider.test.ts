@@ -44,13 +44,14 @@ describe("the message check on Jev", () => {
     expect(Object.keys(seen[0]!.body.questions.action.criteria)).toEqual(["send", "drop"]);
   });
 
-  it("the note after a conversation is offered no hold when nothing else is running", async () => {
+  // Nov 9: an automation's 11 PM note went out because nothing told the check the time, and hold wasn't offered.
+  it("the note after a conversation can be held (their hours), and the check is told their time", async () => {
     const seen: Array<{ url: string; body: Record<string, any> }> = [];
-    const decide = comsDecider({ apiKey: "k", fetchImpl: fake({ action: { type: "choice", choice: "send", probabilities: { send: 0.9 } } }, seen) });
+    const decide = comsDecider({ apiKey: "k", timezone: "America/Los_Angeles", now: () => new Date("2026-11-09T07:08:00Z"), fetchImpl: fake({ action: { type: "choice", choice: "send", probabilities: { send: 0.9 } } }, seen) });
     await decide({ ...check, from: "pm", running: [] });
-    await decide({ ...check, from: "pm", running: ["Find a cheaper hotel"] });
-    expect(Object.keys(seen[0]!.body.questions.action.criteria)).not.toContain("hold");
-    expect(Object.keys(seen[1]!.body.questions.action.criteria)).toContain("hold");
+    expect(Object.keys(seen[0]!.body.questions.action.criteria)).toContain("hold");
+    expect(seen[0]!.body.state.their_time_now).toBe("Sunday 11:08 PM (America/Los_Angeles)");
+    expect(seen[0]!.body.provider).toEqual({ zdr: true });
   });
 
   it("tells Jev which linked pages changed since they got the link", async () => {
@@ -68,7 +69,7 @@ describe("the message check on Jev", () => {
     expect(await decide(check)).toEqual({ action: "drop", channel: "imessage", p: 0.92 });
     expect(seen[0]!.url).toBe("https://openrouter.ai/api/alpha/decisions");
     expect(seen[0]!.body.model).toBe("typesafe/jev-1.14");
-    expect(Object.keys(seen[0]!.body.questions.action.criteria)).toEqual(["send", "drop", "ask"]);
+    expect(Object.keys(seen[0]!.body.questions.action.criteria)).toEqual(["send", "hold", "drop", "ask"]);
     expect(seen[0]!.body.state).toMatchObject({ message: { text: check.text }, already_sent_today: check.recent, their_guidelines: "Text me short updates." });
   });
 

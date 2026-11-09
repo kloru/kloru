@@ -11,14 +11,12 @@ const MODEL = "typesafe/jev-1.14";
 
 const ACTIONS = {
   send: "Send it now: they'd want it and don't have it yet (new results, even on a page they already have), or they asked for it.",
-  hold: "Not yet: more for them is still being worked on and this reads better together, or it can wait for their next conversation.",
-  drop: "Don't send: they already have this news (it was said, emailed or texted already), it only says another message was sent, or it isn't what they asked for.",
+  hold: "Not yet: more for them is still being worked on and this reads better together, it can wait for their next conversation, or their guidelines say not at this hour.",
+  drop: "Don't send: they already have this news (it was said, emailed or texted already), it only says another message was sent, it reports routine work they didn't ask to hear about, or it isn't what they asked for.",
   ask: "Ask the caller first: their guidelines ask for that, or it could embarrass them, commit them to something, or cost money.",
 };
 /** Kloru's own message in its conversation with them: it's to them, so only whether and when (they're here: holding only waits for what's still running). */
 const TALKER_ACTIONS = { send: ACTIONS.send, hold: "Not yet: more for them is still being worked on and this reads better together.", drop: ACTIONS.drop };
-/** The note after a conversation with nothing else running: there's nothing for it to wait for. */
-const { hold: _hold, ...withoutHold } = ACTIONS;
 /** Its direct answer to their message: they're waiting, so it goes now or not at all. */
 const REPLY_ACTIONS = { send: ACTIONS.send, drop: ACTIONS.drop };
 const DRAFTED_BY: Record<MessageCheck["from"], string> = {
@@ -34,13 +32,14 @@ const CHANNELS: Record<NoticeChannel, string> = {
   email: "An email: when they asked by email, or asked for email.",
 };
 
-export function comsDecider(o: { apiKey: string; fetchImpl?: typeof fetch; model?: string; timeoutMs?: number }): (c: MessageCheck) => Promise<MessageDecision> {
+export function comsDecider(o: { apiKey: string; fetchImpl?: typeof fetch; model?: string; timeoutMs?: number; /** The family's timezone: their guidelines about when to text need the time. */ timezone?: string; now?: () => Date }): (c: MessageCheck) => Promise<MessageDecision> {
+  const clock = (tz: string) => new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long", hour: "numeric", minute: "2-digit" }).format((o.now ?? (() => new Date()))());
   return async (c) => {
     const questions: Record<string, unknown> = {
       action: {
         type: "choice",
         instructions: `What should Kloru, a family's assistant, do with this ${c.toCaller ? "message to the person who asked" : "message to someone else on the caller's behalf"}? Their guidelines win.`,
-        criteria: c.from === "talker" ? (c.replyingTo || !c.running.length ? REPLY_ACTIONS : TALKER_ACTIONS) : { ...(c.from === "pm" && !c.running.length ? withoutHold : ACTIONS), ...(c.ownerGuidelines !== undefined ? { ask_owner: ASK_OWNER } : {}), ...(c.action && c.toCaller && c.defaultChannel === "imessage" ? { text_instead: TEXT_INSTEAD } : {}) },
+        criteria: c.from === "talker" ? (c.replyingTo || !c.running.length ? REPLY_ACTIONS : TALKER_ACTIONS) : { ...ACTIONS, ...(c.ownerGuidelines !== undefined ? { ask_owner: ASK_OWNER } : {}), ...(c.action && c.toCaller && c.defaultChannel === "imessage" ? { text_instead: TEXT_INSTEAD } : {}) },
       },
     };
     if (c.channels.length > 1) {
@@ -53,6 +52,7 @@ export function comsDecider(o: { apiKey: string; fetchImpl?: typeof fetch; model
       ...(c.conversation ? { conversation: CONVERSATION[c.conversation] ?? c.conversation } : {}),
       ...(c.defaultChannel ? { default_reply_channel: c.defaultChannel } : {}),
       what_was_said: c.call || "(none)",
+      ...(o.timezone ? { their_time_now: `${clock(o.timezone)} (${o.timezone})` } : {}),
       their_guidelines: c.guidelines || "(none)",
       ...(c.ownerGuidelines !== undefined ? { owner_guidelines: c.ownerGuidelines } : {}),
       on_a_call_with_kloru_now: c.onCall,

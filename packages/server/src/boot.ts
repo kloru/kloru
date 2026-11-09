@@ -924,7 +924,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       onWrite: (slug: string) => void storeRunner?.kick(slug).catch(() => undefined),
       // A model writes that email with only what wasn't heard on the call, or decides none is needed (#37).
       // Coms: every message passes one check (Jev) and lands in the ledger; the agent that drafted it sends it.
-      ...(fastKey && env.KLORU_COMS?.trim() !== "off" ? { decideMessage: comsDecider({ apiKey: fastKey }) } : {}),
+      ...(fastKey && env.KLORU_COMS?.trim() !== "off" ? { decideMessage: comsDecider({ apiKey: fastKey, timezone: config.owner.timezone ?? "America/Los_Angeles" }) } : {}),
       // A worker's or the PM's draft is weighed against how they like messages, and redrafted once on a clear miss.
       ...(fastKey && env.KLORU_MESSAGE_SHAPE?.trim() !== "off" ? { checkDraft: ((check) => async (d: DraftCheck) => { const v = await check(d); return v.verdict === "fits" ? { fits: true as const } : { fits: false as const, why: REDRAFT[v.verdict] }; })(draftChecker({ apiKey: fastKey })) } : {}),
       ...(router ? { notify: (n: Notice) => router.notify(n), channelsFor: (phone: string) => router.channelsFor(phone) } : apps && appsConnected?.includes("gmail") ? { notify: gmailNotifier({ apps, ownerPhones: config.owner.phones, ...(config.owner.emails[0] ? { ownerEmail: config.owner.emails[0] } : {}), people: (phone: string) => memberMail(phone), log }) } : {}),

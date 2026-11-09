@@ -122,3 +122,24 @@ describe.skipIf(!key)("the message check on Jev, live", () => {
     }, 15_000);
   }
 });
+
+// Nov 9, 07:08 UTC (11:08 PM Pacific): an email automation's run texted "it's quiet hours, so I didn't text you".
+describe.skipIf(!key)("the message check knows what time it is for them", () => {
+  const QUIET = `${GUIDELINES}\n- For email response alerts, do not text before 7 AM or at or after 7 PM Pacific; continue checking email every 15 minutes.`;
+  const TRIAGE = "Evan inbox triage — personal Gmail: For each new email, mark it read unless it clearly requires Evan's action or is from someone important (especially Cara); leave those unread and text Evan a concise summary. Respect his quiet hours: no texts before 7:00 AM or at/after 7:00 PM America/Los_Angeles.";
+  const at = (iso: string) => comsDecider({ apiKey: key ?? "", timeoutMs: 8000, timezone: "America/Los_Angeles", now: () => new Date(iso) });
+  const triage = (text: string) => base({ from: "pm", conversation: "schedule", channels: ["imessage", "email"], request: TRIAGE, guidelines: QUIET, call: "", text });
+  const CASES: Array<[string, string, MessageCheck, string[]]> = [
+    ["11:08 PM: a routine run's 'trashed a promo, stayed quiet' isn't sent", "2026-11-09T07:08:00Z", triage("I've moved the promotional email from GPTZero to trash. Since it is currently quiet hours, I didn't send any text alerts."), ["drop", "hold"]],
+    ["11:10 PM: an email from Cara that needs him waits for morning", "2026-11-09T07:10:00Z", triage("Cara emailed: can you pick up Maya at 4 tomorrow? I left it unread."), ["hold"]],
+    ["10:15 AM: the same email from Cara is texted", "2026-11-09T18:15:00Z", triage("Cara emailed: can you pick up Maya at 4 today? I left it unread."), ["send"]],
+    ["10:20 AM: a routine run's 'marked a receipt read' isn't sent", "2026-11-09T18:20:00Z", triage("I marked the Amazon order receipt as read; nothing needs you."), ["drop"]],
+  ];
+  for (const [name, iso, c, ok] of CASES) {
+    it(name, async () => {
+      const d = await at(iso)(c);
+      console.log(`${name}: ${d.action} (${d.p?.toFixed(2)})`);
+      expect(ok).toContain(d.action);
+    }, 15_000);
+  }
+});
