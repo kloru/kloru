@@ -24,7 +24,7 @@ kill_timeout = "30s"
   # What the agent calls itself in every message (never the framework's name).
   INSTINCT_AGENT_NAME = "Kloru"
   # Apps the family can connect (Composio, each with Composio's own sign-in; see packages/web APP_CATALOG).
-  COMPOSIO_TOOLKITS = "gmail,googlecalendar,outlook,googledrive,googledocs,googlesheets,googlephotos,googletasks,todoist,ticktick,notion,one_drive,dropbox,box,splitwise,calendly,zoom,slack,discord,youtube,linkedin,asana,trello,airtable"
+  COMPOSIO_TOOLKITS = "all"
   # The number people text (Inkbox's shared iMessage line); the opt-in is "connect @<INKBOX_AGENT_HANDLE>".
   KLORU_TEXT_NUMBER = "+16504849720"
   # Stripe Link sends the owner back to the agent through Caddy.
