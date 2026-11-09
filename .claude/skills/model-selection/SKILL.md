@@ -81,7 +81,11 @@ Point the role's model constant or env var at the winner, and keep the bench cas
 - **Texting model** (`packages/server/src/text-talker.ts`, `MODEL`): Gemini 3.5 Flash, minimal
   reasoning, since 2026-10-30, chosen for speed without a comparison. On 2026-11-09 it skipped filing
   2/5 with Evan's real context. After the prompt fix, Flash, gpt-6-luna, Gemini 3.8 Flash and GLM-5.3
-  all passed 15/15. Flash Lite failed; GLM-5.3-flash and DeepSeek V4 Flash missed some.
+  all passed 15/15. Flash Lite failed; GLM-5.3-flash and DeepSeek V4 Flash missed some. Calls go to
+  zero-data-retention providers only (`provider: { zdr: true }`, 11-09).
+  GLM-5.3 led on the data (agentic 53 vs 26, first token 0.3 s vs 1.5 s, a tenth of the price) and
+  filed 16/16, but said the delay on "is it done yet?" only 14/20 (3 with no words) vs Flash ~19/20.
+  Not switched: honest status matters more. Retry it after tuning the status line for it.
 - **PM** (`KLORU_PM_MODEL`): Gemini 3.5 Flash since 2026-10-30. Luna passed the same 8 of 9 cases
   in about twice the time.
 - **Fast path and action decider:** Gemini 3.5 Flash. Flash Lite missed items (10-29); Flash with
