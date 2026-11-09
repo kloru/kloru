@@ -26,6 +26,8 @@ export {
   type AppsState,
   type ToolkitStatus,
   type AppAccount,
+  type CatalogApp,
+  type CatalogToolkit,
   ACCOUNTS_STATE_FILE,
 } from "./composio.js";
 export { ComposioTriggers, WEBHOOK_STATE_FILE, type AppEvent, type TriggerTypeLike, type ComposioTriggersLike, type WebhookSubscriptionsLike } from "./triggers.js";
@@ -37,3 +39,4 @@ export { wrapMcpTool, wrapMcpTools, toolNameFor, describeCall, parametersFor, me
 export const DEFAULT_TOOLKITS: string[] = ["gmail", "googlecalendar", "googlecontacts"];
 export { callNotifiesSomeone, innerCalls, isReadSlug, isWriteCall, type InnerCall } from "./writes.js";
 export * from "./schemas.js";
+export { searchCatalog } from "./catalog.js";

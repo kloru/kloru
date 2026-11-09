@@ -11,6 +11,7 @@
 import { ALL_CAPABILITIES, DEFAULT_TIER_TABLE, SPEND_CAPABILITIES, verifyOwnerEnvelope } from "@kloru/core";
 import type { Approval, ApprovalStore, AuditLog, Capability, ContactStore, Permission, Policy, PolicyEngine, ScheduleEntry, Tier } from "@kloru/core";
 import { describeAutomation } from "@kloru/desk";
+import { searchCatalog, type CatalogApp } from "@kloru/apps";
 
 const TIERS: readonly Tier[] = ["owner", "staff", "partner", "family", "friend", "contact", "stranger"];
 const PERMISSIONS: readonly Permission[] = ["yes", "ask", "limit", "no", "intro", "partial"];
@@ -22,6 +23,8 @@ export interface OwnerApiApps {
   connectLink(toolkit: string, callbackUrl?: string, o?: { person?: string }): Promise<string | undefined>;
   disconnect(toolkit: string): Promise<number>;
   disconnectAccount(id: string): Promise<void>;
+  /** Every app Composio can connect with no setup, most used first. */
+  catalog?(): Promise<CatalogApp[]>;
 }
 
 export interface OwnerApiDeps {
@@ -181,6 +184,14 @@ export function createOwnerApi(deps: OwnerApiDeps): OwnerApi {
     "apps.list": async () => {
       const [status, accounts] = await Promise.all([apps().connectedToolkits(), apps().accounts()]);
       return ok(status.map((t) => ({ ...t, accounts: accounts.filter((a) => a.toolkit === t.slug).map(({ toolkit: _, ...a }) => a) })));
+    },
+    // The Connections page's search: the apps that match, best first, and how many matched.
+    "apps.catalog": async (a) => {
+      const catalog = apps().catalog;
+      if (!catalog) return fail(503, "this agent can't list apps");
+      const q = typeof a.q === "string" ? a.q.slice(0, 100) : "";
+      const limit = typeof a.limit === "number" && a.limit > 0 ? Math.min(a.limit, 100) : 30;
+      return ok(searchCatalog(await catalog.call(apps()), q, limit));
     },
     "apps.connect": async (a) => {
       const toolkit = str(a.toolkit, "toolkit");

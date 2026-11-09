@@ -196,3 +196,12 @@ section.more ul.apps .muted { font-size: 0.92em; }
 .start li { border-top: 1px solid var(--rule); padding-top: 10px; }
 .start li p { margin: 4px 0 0; }
 .start li.done b { color: var(--soft); }
+
+/* Connections: find an app by name or what it's for, then connect it. */
+form.search { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 16px; max-width: 520px; margin: 10px 0 18px; }
+form.search label { display: grid; gap: 4px; flex: 1 1 240px; min-width: 0; }
+form.search input { width: 100%; }
+ul.apps { list-style: none; padding: 0; margin: 8px 0 14px; display: grid; gap: 10px; }
+ul.apps li { overflow-wrap: anywhere; }
+ul.apps .muted { font-size: 17px; }
+section.more h3 { font: 600 15px/1.4 var(--sans); color: var(--soft); text-transform: uppercase; letter-spacing: 0.06em; margin: 18px 0 4px; }

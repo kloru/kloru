@@ -148,7 +148,29 @@ function paymentsPanel(p: PaymentsView | undefined, csrf: string): string {
 }
 
 /** Texting and payments, then each connected app with its accounts, then every other app to add. */
-export function connectionsPage(apps: AppStatus[], csrf: string, extra: { texting?: TextingView; payments?: PaymentsView } = {}): string {
+/** An app the search found, from the agent's catalog (apps.catalog). */
+export interface CatalogHit {
+  slug: string;
+  name: string;
+  description: string;
+  category?: string;
+}
+
+/** The Connections page's search: what was typed, what matched (best first), how many in all. */
+export interface AppSearch {
+  q: string;
+  apps: CatalogHit[];
+  total: number;
+  /** Set when the catalog couldn't be read. */
+  error?: string;
+}
+
+const firstSentence = (text: string, max = 110) => {
+  const s = text.split(/(?<=[.!?])\s/)[0] ?? text;
+  return s.length > max ? `${s.slice(0, s.lastIndexOf(" ", max)).replace(/[,;:]$/, "")}…` : s;
+};
+
+export function connectionsPage(apps: AppStatus[], csrf: string, extra: { texting?: TextingView; payments?: PaymentsView; search?: AppSearch } = {}): string {
   const accountsOf = (a: AppStatus) => a.accounts ?? (a.connected ? [{ id: "", status: "connected" as const }] : []);
   const order = (slug: string) => {
     const i = APP_CATALOG.findIndex((c) => c.slug === slug);
@@ -175,19 +197,32 @@ export function connectionsPage(apps: AppStatus[], csrf: string, extra: { textin
       return `<section class="app"><h2>${esc(name)}</h2><ul class="rows">${rows}</ul>${add}</section>`;
     })
     .join("");
-  const blurb = (slug: string) => APP_CATALOG.find((c) => c.slug === slug)?.blurb;
-  const more = others.length
-    ? `<section class="more"><h2>Add an app</h2><ul class="apps">${others
-        .map((a) => {
-          const name = toolkitName(a.slug);
-          const b = blurb(a.slug);
-          return `<li><form method="post" action="/connections/connect" class="inline">${csrfField(csrf)}<input type="hidden" name="toolkit" value="${esc(a.slug)}"><button class="link">${esc(`Connect ${name}`)}</button></form>${b ? ` <span class="muted">${esc(b)}</span>` : ""}</li>`;
-        })
-        .join("")}</ul></section>`
-    : "";
+  const connect = (slug: string, name: string, about?: string) =>
+    `<li><form method="post" action="/connections/connect" class="inline">${csrfField(csrf)}<input type="hidden" name="toolkit" value="${esc(slug)}"><button class="link">${esc(`Connect ${name}`)}</button></form>${about ? ` <span class="muted">${esc(about)}</span>` : ""}</li>`;
+  const have = new Set(mine.map((a) => a.slug));
+  const search = extra.search;
+  const q = search?.q ?? "";
+  const form =
+    `<form method="get" action="/connections" class="search" role="search"><label><span>Find an app</span>` +
+    `<input type="search" id="app-search" name="q" value="${esc(q)}" placeholder="GitHub, Slack, invoices…" autocomplete="off" maxlength="100"></label><button class="go">Search</button></form>`;
+  let found: string;
+  if (search?.error) {
+    found = `<p class="muted">${esc(`Searching apps didn't work just now (${search.error}). Try again in a moment.`)}</p>`;
+  } else if (q && search) {
+    found = search.apps.length
+      ? `<ul class="apps">${search.apps.map((a) => connect(a.slug, a.name, firstSentence(a.description) || a.category)).join("")}</ul>` +
+        (search.total > search.apps.length ? `<p class="muted">${esc(`Showing ${search.apps.length} of ${search.total}. Add a word to narrow it.`)}</p>` : "") +
+        `<p class="muted"><a href="/connections">Clear the search</a></p>`
+      : `<p class="muted">${esc(`No app matches “${q}”. Try another name, or what it's for, like “invoices” or “photos”.`)}</p>`;
+  } else {
+    // Nothing typed yet: the apps families use most, then the rest of the catalog is a search away.
+    const popular = [...APP_CATALOG.filter((c) => !have.has(c.slug)).map((c) => ({ slug: c.slug, name: c.name, about: c.blurb })), ...others.filter((a) => !APP_CATALOG.some((c) => c.slug === a.slug)).map((a) => ({ slug: a.slug, name: toolkitName(a.slug), about: undefined }))];
+    found = popular.length ? `<h3>Popular</h3><ul class="apps">${popular.map((a) => connect(a.slug, a.name, a.about)).join("")}</ul>` : "";
+  }
+  const more = `<section class="more"><h2>Add an app</h2><p class="muted">Kloru can connect to more than a thousand apps. Search by name or by what it's for.</p>${form}${found}</section>`;
   return `<h1>Connections</h1><p class="muted">The accounts Kloru can use for you. Add each one you want it to see, like a personal and a work Gmail; it uses the one a request is about.</p>` +
     textingPanel(extra.texting) + paymentsPanel(extra.payments, csrf) +
-    (apps.length ? sections + more : `<p>No apps are set up for your agent yet.</p>`);
+    sections + more;
 }
 
 // ---------------------------------------------------------------------------

@@ -164,10 +164,31 @@ export interface ComposioClientLike {
     list(query: { userIds: string[]; toolkitSlugs?: string[] }): Promise<{ items: Array<{ id: string; status?: string; toolkit?: { slug?: string }; createdAt?: string }> }>;
     delete(id: string): Promise<unknown>;
   };
+  /** The raw API's app list: the full catalog, page by page (the SDK's toolkits.get stops at 1,000). */
+  appList?: (query: { managed_by?: "composio" | "all" | "project"; limit?: number; cursor?: string }) => Promise<{ items: CatalogToolkit[]; next_cursor?: string | null }>;
   /** App events: watch one, and the project's webhook they're posted to. */
   triggers?: ComposioTriggersLike;
   webhooks?: { subscriptions: WebhookSubscriptionsLike };
 }
+
+/** One app in Composio's catalog, as its API lists it. */
+export interface CatalogToolkit {
+  slug: string;
+  name: string;
+  meta?: { description?: string; logo?: string; categories?: Array<{ name?: string }> };
+}
+
+/** An app anyone in the family can connect: Composio manages its sign-in, so no setup is needed. */
+export interface CatalogApp {
+  slug: string;
+  name: string;
+  description: string;
+  category?: string;
+  logo?: string;
+}
+
+/** How long the app catalog is kept before it's fetched again. */
+const CATALOG_MS = 24 * 3_600_000;
 
 /** Session create config. `toolkits` is left out in all mode: no allowlist means every toolkit. */
 export interface SessionCreateConfig {
@@ -195,6 +216,7 @@ export class ComposioApps {
   private readonly unavailable = new Set<string>();
   /** The accounts as last listed: execute's default account and the agents' accounts line. */
   private knownAccounts: AppAccount[] = [];
+  private catalogCache?: { at: number; apps: CatalogApp[] };
 
   constructor(opts: ComposioAppsOptions) {
     if (!opts.apiKey) throw new Error("ComposioApps needs an apiKey (COMPOSIO_API_KEY)");
@@ -403,6 +425,31 @@ export class ComposioApps {
     });
   }
 
+  /**
+   * Every app Composio can connect for this family with no setup (its managed sign-in), most used
+   * first, kept for a day. The website searches it; a failed fetch keeps the last list.
+   */
+  async catalog(): Promise<CatalogApp[]> {
+    if (this.catalogCache && Date.now() - this.catalogCache.at < CATALOG_MS) return this.catalogCache.apps;
+    const list = this.composio.appList;
+    if (!list) throw new Error("this Composio client cannot list apps");
+    const apps: CatalogApp[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      const r = await list({ managed_by: "composio", limit: 1000, ...(cursor ? { cursor } : {}) });
+      for (const t of r.items) {
+        // Composio's own toolkits are the agents' plumbing, not an app to connect.
+        if (!t.slug || !t.name || t.slug.toLowerCase().startsWith("composio")) continue;
+        const category = t.meta?.categories?.[0]?.name;
+        apps.push({ slug: t.slug.toLowerCase(), name: t.name, description: (t.meta?.description ?? "").trim(), ...(category ? { category } : {}), ...(t.meta?.logo ? { logo: t.meta.logo } : {}) });
+      }
+      cursor = r.next_cursor ?? undefined;
+      if (!cursor) break;
+    }
+    this.catalogCache = { at: Date.now(), apps };
+    return apps;
+  }
+
   /** The accounts as last listed (accounts()), without a network call. */
   connected(): AppAccount[] {
     return this.knownAccounts.filter((a) => a.status === "connected");
@@ -574,7 +621,10 @@ function escapeRegExp(s: string): string {
 
 function defaultCreateComposio(apiKey: string): ComposioClientLike {
   // The SDK's Session type is wider than ComposioSessionLike; the structural subset is all we call.
-  return new Composio({ apiKey });
+  const composio = new Composio({ apiKey });
+  // The raw API client is protected in the SDK's types; its list pages past 1,000 apps.
+  const raw = (composio as unknown as { client: { toolkits: { list: NonNullable<ComposioClientLike["appList"]> } } }).client;
+  return Object.assign(composio, { appList: (q: Parameters<NonNullable<ComposioClientLike["appList"]>>[0]) => raw.toolkits.list(q) });
 }
 
 async function defaultConnectMcp(mcp: McpEndpoint): Promise<McpToolSource> {

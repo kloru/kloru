@@ -148,6 +148,19 @@ describe("owner API", () => {
     expect((await setup().call("apps.list")).status).toBe(503);
   });
 
+  it("searches the apps that can be connected, best first, with how many matched", async () => {
+    const base = { connectedToolkits: async () => [], accounts: async () => [], connectLink: async () => undefined, disconnect: async () => 0, disconnectAccount: async () => undefined };
+    const catalog = [
+      { slug: "gmail", name: "Gmail", description: "Email", category: "email" },
+      { slug: "github", name: "GitHub", description: "Code hosting", category: "developer tools" },
+      { slug: "gitlab", name: "GitLab", description: "DevOps", category: "developer tools" },
+    ];
+    const { call } = setup({ apps: { ...base, catalog: async () => catalog } });
+    expect((await call("apps.catalog", { q: "git" })).result).toEqual({ apps: [catalog[1], catalog[2]], total: 2 });
+    expect((await call("apps.catalog", { q: "git", limit: 1 })).result).toEqual({ apps: [catalog[1]], total: 2 });
+    expect((await setup({ apps: base }).call("apps.catalog", { q: "git" })).status).toBe(503);
+  });
+
   it("an adapter failure is a 502 with its message, not a throw", async () => {
     const apps: OwnerApiApps = { connectedToolkits: async () => { throw new Error("composio down"); }, accounts: async () => [], connectLink: async () => undefined, disconnect: async () => 0, disconnectAccount: async () => undefined };
     expect(await setup({ apps }).call("apps.list")).toEqual({ status: 502, result: { error: "composio down" } });

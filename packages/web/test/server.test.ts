@@ -377,6 +377,44 @@ describe("console: connections", () => {
     expect(page).toMatch(/name="toolkit" value="notion"/);
   });
 
+  // Nov 9: with every Composio app allowed, apps.list holds only what's connected; the rest is a search away.
+  it("with nothing searched, Popular lists the common apps not yet connected", async () => {
+    const client = new FakeClient({ "apps.list": () => [{ slug: "gmail", connected: true, accounts: [{ id: "ca_1", email: "evan@gmail.com", status: "connected" }] }] });
+    const c = await start({ client });
+    const page = await (await c.get("/connections", (await c.signedIn()).cookie)).text();
+    expect(page).toContain('<form method="get" action="/connections" class="search" role="search">');
+    expect(page).toContain("Popular");
+    expect(page).toMatch(/name="toolkit" value="notion"/);
+    expect(page).not.toMatch(/Connect Gmail/);
+    expect(client.calls.some(([op]) => op === "apps.catalog")).toBe(false);
+  });
+
+  it("a search lists the matching apps, each one click from connecting, and says how many matched", async () => {
+    const client = new FakeClient({
+      "apps.list": () => [],
+      "apps.catalog": () => ({ apps: [{ slug: "github", name: "GitHub", description: "GitHub is a code hosting platform. It has issues and pull requests.", category: "developer tools" }, { slug: "gitlab", name: "GitLab", description: "", category: "developer tools" }], total: 7 }),
+    });
+    const c = await start({ client });
+    const page = await (await c.get("/connections?q=%20git%20", (await c.signedIn()).cookie)).text();
+    expect(client.calls.find(([op]) => op === "apps.catalog")![1]).toEqual({ q: "git" });
+    expect(page).toContain('value="git"');
+    expect(page).toMatch(/name="toolkit" value="github"><button class="link">Connect GitHub<\/button>/);
+    expect(page).toContain("GitHub is a code hosting platform.");
+    expect(page).not.toContain("It has issues");
+    expect(page).toContain("developer tools");
+    expect(page).toContain("Showing 2 of 7");
+    expect(page).not.toContain("Popular");
+  });
+
+  it("a search with no match, or a catalog that fails, says so plainly", async () => {
+    const none = await start({ client: new FakeClient({ "apps.list": () => [], "apps.catalog": () => ({ apps: [], total: 0 }) }) });
+    expect(await (await none.get("/connections?q=zzz", (await none.signedIn()).cookie)).text()).toContain("No app matches “zzz”");
+    const down = await start({ client: new FakeClient({ "apps.list": () => [], "apps.catalog": () => { throw new Error("composio down"); } }) });
+    const page = await (await down.get("/connections?q=git", (await down.signedIn()).cookie)).text();
+    expect(page).toMatch(/Searching apps didn(&#39;|')t work just now \(composio down\)/);
+    expect(page).toContain("<h1>Connections</h1>");
+  });
+
   it("shows Kloru's texting number and whether this person has texted with it", async () => {
     const yes = new FakeClient({ "apps.list": () => [], "texting.status": () => ({ number: "+16504849720", handle: "kloru-marshalls", texted: "2026-10-31T09:00:00Z" }) });
     const c = await start({ client: yes });

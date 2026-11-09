@@ -25,6 +25,8 @@ import { setupDone, startPage, type SetupStatus } from "./start-page.js";
 import { policyPage, takeoverPage, vaultPage, type VaultView,
   type ApprovalView,
   type AppStatus,
+  type AppSearch,
+  type CatalogHit,
   type ContactView,
   type PolicyView,
   adminPage,
@@ -269,7 +271,15 @@ export function createConsole(o: ConsoleOptions): http.Server {
           client.call<TextingView>("texting.status", { phone: ctx.user!.phone }).catch(() => undefined),
           client.call<PaymentsView>("payments.status").catch(() => undefined),
         ]);
-        body = connectionsPage(apps, csrf, { ...(texting ? { texting } : {}), ...(payments ? { payments } : {}) });
+        // The search box (?q=): the agent's catalog of every app it can connect.
+        const q = ctx.url.searchParams.get("q")?.trim().slice(0, 100) ?? "";
+        const search: AppSearch | undefined = q
+          ? await client.call<{ apps: CatalogHit[]; total: number }>("apps.catalog", { q }).then(
+              (r) => ({ q, ...r }),
+              (err: unknown) => ({ q, apps: [], total: 0, error: err instanceof Error ? err.message : String(err) }),
+            )
+          : undefined;
+        body = connectionsPage(apps, csrf, { ...(texting ? { texting } : {}), ...(payments ? { payments } : {}), ...(search ? { search } : {}) });
       } else if (section === "permissions") {
         body = permissionsPage(await client.call<PolicyView>("policy.get"), csrf);
       } else if (section === "approvals") {
