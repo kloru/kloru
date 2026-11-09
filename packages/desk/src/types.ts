@@ -79,6 +79,8 @@ export interface Issue {
   policyLine?: { line: string; draft: string };
   /** An issue the desk files itself: "memory" updates memory from a finished call; "scout" looks for what the caller will want next. */
   purpose?: "memory" | "scout";
+  /** What started an event automation (an email, a webhook's body): outside content, trimmed. */
+  event?: string;
   createdAt: string;
   updatedAt: string;
 }

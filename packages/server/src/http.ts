@@ -66,6 +66,8 @@ export interface HttpApp {
   textDesk?: { receive(m: TextIn): Promise<void> };
   /** True while a new family's line waits for its owner to claim it by text (the claim check lives in the chat runtime). */
   ownerUnclaimed?: () => boolean;
+  /** Event automations: app events from Composio and calls to an automation's own webhook URL. */
+  events?: { fromApp(body: string, headers: http.IncomingHttpHeaders): Promise<number>; fromHook(token: string, body: string, headers: http.IncomingHttpHeaders): number };
   /** Resend: the webhook signing secret and the received-email reader. */
   resend?: { webhookSecret: string; received(id: string): Promise<ReceivedEmail>; attachmentUrl?(emailId: string, attachmentId: string): Promise<string> };
 }
@@ -85,7 +87,7 @@ export interface HttpServerOptions {
    */
   chatToken?: string;
   /**
-   * Serve only what the public tunnel may see: GET /health and POST /webhooks/inkbox.
+   * Serve only what the public tunnel may see: GET /health, POST /webhooks/inkbox and automations' own webhooks.
    * Everything else is 404. main.ts runs one of these on loopback for the Inkbox tunnel.
    */
   tunnelOnly?: boolean;
@@ -95,6 +97,8 @@ export interface HttpServerOptions {
 export const BODY_LIMIT_BYTES = 1024 * 1024;
 export const CHAT_TOKEN_HEADER = "x-instinct-token";
 export const TUNNEL_ROUTES: ReadonlySet<string> = new Set(["GET /health", "POST /webhooks/inkbox"]);
+/** An automation's own webhook: /webhooks/hook/<token>. The tunnel serves it too, so one can be tried locally. */
+const HOOK_PATH = /^\/webhooks\/hook\/([A-Za-z0-9_-]{16,128})$/;
 /** A Maritime schedule wake may arrive a little before the minute boundary we computed. */
 export const SCHEDULE_WAKE_GRACE_MS = 90_000;
 /** Envelope event type the gateway relays when Link redirects to its callback URL. */
@@ -359,7 +363,8 @@ export function createHttpServer(app: HttpApp, opts: HttpServerOptions = {}): ht
     const method = req.method ?? "GET";
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
-    if (tunnelOnly && !TUNNEL_ROUTES.has(`${method} ${path}`)) return sendJson(res, 404, { error: "not found" });
+    const hook = method === "POST" ? HOOK_PATH.exec(path)?.[1] : undefined;
+    if (tunnelOnly && !TUNNEL_ROUTES.has(`${method} ${path}`) && !hook) return sendJson(res, 404, { error: "not found" });
 
     if (method === "GET" && path === "/health") return sendJson(res, 200, { ok: true });
 
@@ -382,6 +387,16 @@ export function createHttpServer(app: HttpApp, opts: HttpServerOptions = {}): ht
         } else if (inbound) await acceptInbound(app, inbound);
       }
       res.statusCode = 204;
+      res.end();
+      return;
+    }
+
+    if ((method === "POST" && path === "/webhooks/composio") || hook) {
+      if (!app.events) return sendJson(res, 503, { error: "event automations are off" });
+      const raw = await readBody(req, limit);
+      if (raw === undefined) return sendJson(res, 413, { error: "body too large" });
+      const body = raw.toString("utf8");
+      res.statusCode = hook ? app.events.fromHook(hook, body, req.headers) : await app.events.fromApp(body, req.headers);
       res.end();
       return;
     }

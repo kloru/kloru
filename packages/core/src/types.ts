@@ -193,6 +193,23 @@ export const EVENT_ENVELOPE_PREFIX = "@@instinct-event@@";
 // Scheduling
 // ---------------------------------------------------------------------------
 
+/** What starts an event automation: an app's event (a Composio trigger) or a call to its own webhook URL. */
+export type ScheduleEvent =
+  | {
+      kind: "app";
+      /** The app's event, e.g. GMAIL_NEW_GMAIL_MESSAGE. */
+      trigger: string;
+      /** Its name for people, e.g. "New Gmail Message". */
+      label?: string;
+      /** The connected account it watches, by address. */
+      account: string;
+      /** The event's own settings (labels, a calendar, ...). */
+      config?: Record<string, unknown>;
+      /** Composio's trigger id: events carry it, and deleting the last automation on it deletes it. */
+      instance: string;
+    }
+  | { kind: "hook"; /** The secret part of its URL: /webhooks/hook/<token>. */ token: string };
+
 export interface ScheduleEntry {
   id: string;
   name?: string;
@@ -210,6 +227,10 @@ export interface ScheduleEntry {
   target?: "desk";
   /** Whose automation it is: the issue is filed for them and the result reaches them. */
   phone?: string;
+  /** Runs when this happens instead of on a schedule (no cron, no nextRunAt). */
+  on?: ScheduleEvent;
+  /** Which events are worth a run, in the person's words ("an email I need to answer"); unset: every one. */
+  when?: string;
 }
 
 // ---------------------------------------------------------------------------

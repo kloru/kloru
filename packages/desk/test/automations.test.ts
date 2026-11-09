@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Scheduler, StateDir, type WorkerRole } from "@kloru/core";
 import { describe, expect, it } from "vitest";
-import { AUTOMATION_CREATE, automationTools } from "../src/automations.js";
-import { Desk, type Notice, type Planner, type Trigger, type WorkerHost } from "../src/desk.js";
+import { AUTOMATION_CREATE, automationTools, type AutomationEvents } from "../src/automations.js";
+import { Desk, EVENT_HEADING, type Notice, type Planner, type Trigger, type WorkerHost } from "../src/desk.js";
 
 class Host implements WorkerHost {
   runs: Array<{ issue: number; role: WorkerRole; finish: (t: string) => void }> = [];
@@ -94,3 +94,98 @@ describe("saying when, in words", () => {
 });
 
 
+
+describe("event automations: run when something happens", () => {
+  function withEvents() {
+    const s = setup();
+    const watched: string[] = [];
+    const unwatched: string[] = [];
+    const events: AutomationEvents = {
+      types: async (app) => (app === "gmail" ? "GMAIL_NEW_GMAIL_MESSAGE: New Gmail Message. A new email arrives." : ""),
+      watch: async (o) => {
+        if (o.account.toLowerCase() !== "evan@example.com") throw new Error(`${o.account} isn't the caller's account`);
+        watched.push(o.trigger);
+        return { instance: "ti_mail", label: "New Gmail Message" };
+      },
+      unwatch: async (i) => void unwatched.push(i),
+      hookUrl: (token) => `https://kloru.example/webhooks/hook/${token}`,
+    };
+    const tools = Object.fromEntries(automationTools(s.desk, events).map((t) => [t.spec.name, t]));
+    return { ...s, tools, watched, unwatched };
+  }
+  const REPLY = { name: "Email replies", request: "Draft a reply in the thread and text me a one-line summary.", on_event: { trigger: "gmail_new_gmail_message", account: "Evan@example.com" }, when: "an email I need to answer" };
+
+  it("an app event is watched for the caller's own account, saved with its condition, and read back in words", async () => {
+    const { tools, scheduler, issue, watched, desk } = withEvents();
+    const r = text(await tools.automation_create!.spec.execute(REPLY, ctx(issue.id)));
+    expect(watched).toEqual(["GMAIL_NEW_GMAIL_MESSAGE"]);
+    const [e] = scheduler.list();
+    expect(e).toMatchObject({ on: { kind: "app", trigger: "GMAIL_NEW_GMAIL_MESSAGE", label: "New Gmail Message", account: "evan@example.com", instance: "ti_mail" }, when: "an email I need to answer", target: "desk", phone: EVAN });
+    expect(e!.cron).toBeUndefined();
+    expect(e!.nextRunAt).toBeUndefined();
+    expect(r).toContain("on each New Gmail Message for evan@example.com, if an email I need to answer");
+    expect(text(await tools.automation_list!.spec.execute({}, ctx(issue.id)))).toContain("New Gmail Message");
+    expect(desk.repo.ledger(issue.id).find((l) => l.slug === "AUTOMATION_CREATE")?.ok).toBe(true);
+  });
+
+  it("someone else's account isn't watched, and nothing is saved", async () => {
+    const { tools, scheduler, issue } = withEvents();
+    const r = await tools.automation_create!.spec.execute({ ...REPLY, on_event: { trigger: "GMAIL_NEW_GMAIL_MESSAGE", account: "cara@example.com" } }, ctx(issue.id));
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(scheduler.list()).toEqual([]);
+  });
+
+  it("a webhook automation gets its own URL, given back to pass on", async () => {
+    const { tools, scheduler, issue } = withEvents();
+    const r = text(await tools.automation_create!.spec.execute({ name: "Doorbell", request: "Text me who's at the door.", on_webhook: true }, ctx(issue.id)));
+    const on = scheduler.list()[0]!.on!;
+    expect(on.kind).toBe("hook");
+    const token = (on as { token: string }).token;
+    expect(token.length).toBeGreaterThanOrEqual(32);
+    expect(r).toContain(`https://kloru.example/webhooks/hook/${token}`);
+  });
+
+  it("exactly one 'when': a schedule and an event together are refused", async () => {
+    const { tools, scheduler, issue } = withEvents();
+    const r = await tools.automation_create!.spec.execute({ ...REPLY, cron: "0 7 * * *" }, ctx(issue.id));
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(scheduler.list()).toEqual([]);
+  });
+
+  it("deleting the last automation on an event stops watching it; one still in use stays", async () => {
+    const { tools, scheduler, issue, unwatched } = withEvents();
+    await tools.automation_create!.spec.execute(REPLY, ctx(issue.id));
+    await tools.automation_create!.spec.execute({ ...REPLY, name: "Bills", request: "Add bills to my list.", when: "a bill" }, ctx(issue.id));
+    const [a, b] = scheduler.list();
+    await tools.automation_delete!.spec.execute({ id: a!.id }, ctx(issue.id));
+    expect(unwatched).toEqual([]);
+    await tools.automation_delete!.spec.execute({ id: b!.id }, ctx(issue.id));
+    expect(unwatched).toEqual(["ti_mail"]);
+  });
+
+  it("lists what an app can start an automation on", async () => {
+    const { tools, issue } = withEvents();
+    expect(text(await tools.automation_events!.spec.execute({ app: "gmail" }, ctx(issue.id)))).toContain("GMAIL_NEW_GMAIL_MESSAGE");
+  });
+
+  it("without events, automation_create offers schedules only", () => {
+    const { tools } = setup();
+    expect(tools.automation_events).toBeUndefined();
+    expect(JSON.stringify(tools.automation_create!.spec.parameters)).not.toContain("on_event");
+  });
+
+  it("when one fires, the event reaches the worker, marked as outside content, and the PM sees a short part", async () => {
+    const { host, desk, scheduler, call } = setup();
+    desk.endCall(call.id);
+    const entry = scheduler.create({ name: "Email replies", prompt: REPLY.request, on: { kind: "app", trigger: "GMAIL_NEW_GMAIL_MESSAGE", account: "evan@example.com", instance: "ti_mail" }, tz: "UTC", enabled: true, target: "desk", phone: EVAN });
+    const email = `New Gmail Message for evan@example.com:\n{"subject": "Dinner Saturday?", "sender": "cara@example.com", "body": "${"x".repeat(9000)}"}`;
+    const run = desk.runAutomation(entry, email)!;
+    await settle(30);
+    expect(run.event!.length).toBeLessThanOrEqual(Desk.EVENT_MAX + 1);
+    expect(run.thread.find((t) => t.by === "system")?.text).toContain("on each GMAIL_NEW_GMAIL_MESSAGE for evan@example.com");
+    expect(host.last(run.id)).toBeTruthy();
+    const prompt = (desk as unknown as { workerPrompt(i: unknown): string }).workerPrompt(desk.repo.issue(run.id));
+    expect(prompt).toContain(`${EVENT_HEADING}\nNew Gmail Message for evan@example.com`);
+    expect(prompt).toContain("Dinner Saturday?");
+  });
+});

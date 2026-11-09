@@ -68,6 +68,14 @@ async function main(): Promise<void> {
       .catch((err: Error) => log(`webhooks: Inkbox subscription failed: ${err.message}`));
   }
 
+  // App events (Composio triggers) post here too. Dev never moves the project's one webhook off the deployed Kloru.
+  if (env.INSTINCT_TUNNEL !== "1" && publicUrl && app.subscribeAppEvents) {
+    void app
+      .subscribeAppEvents(`${publicUrl}/webhooks/composio`)
+      .then(() => log(`webhooks: app events → ${publicUrl}/webhooks/composio`))
+      .catch((err: Error) => log(`webhooks: app events subscription failed: ${err.message}`));
+  }
+
   let shuttingDown = false;
   const shutdown = (signal: string): void => {
     if (shuttingDown) return;

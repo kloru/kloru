@@ -312,6 +312,16 @@ describe.skipIf(!key)("PM on real-call situations", () => {
     expect(issue.spec ?? "").toMatch(/automation/i);
   }, 120_000);
 
+  it("'when I get an email I need to answer, draft a reply' goes to ops as an automation, not a one-time pass over the inbox", async () => {
+    const { host, desk, call } = setup();
+    desk.addTurn(call.id, { role: "caller", text: "Whenever I get an email I need to answer, draft a reply for me" });
+    desk.fileIssue(call.id, "Whenever an email Evan needs to answer arrives, draft a reply for him.");
+    await until(() => host.finishers.has(1));
+    const issue = desk.repo.issue(1)!;
+    expect(issue.kind).toBe("ops");
+    expect(issue.spec ?? "").toMatch(/automation/i);
+  }, 120_000);
+
   it("coms: a request done after the call ended gets one message from the PM", async () => {
     const sent: Notice[] = [];
     const { host, desk, call, logs } = setup(undefined, async (n) => (sent.push(n), true));

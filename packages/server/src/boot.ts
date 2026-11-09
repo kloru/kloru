@@ -7,12 +7,14 @@
 import { AccountsSyncer, Store, SyncRunner, dayView, storeTools, type StoreScope } from "@kloru/store";
 import { storeFastPath } from "./fast-path.js";
 import { comsDecider } from "./coms-decider.js";
+import { eventGate } from "./event-gate.js";
+import { Events } from "./events.js";
 import { guidelineCheck } from "./guideline-check.js";
 import { steerFilter } from "./steer-filter.js";
 import { actionDecider } from "./action-decider.js";
 import { gmailNotifier } from "./notify.js";
 import { loadToolGuide } from "./tool-guide.js";
-import { Desk, MediaStore, Memory, Vault, type DraftCheck, vaultTools, type VaultKind, type MemberPlan, type Notice, type NoticeMedia, artifactTools, automationTools, groceryTools, mediaTools, workerTools, TechnicalPM, memoryTools } from "@kloru/desk";
+import { Desk, MediaStore, Memory, Vault, type DraftCheck, vaultTools, type VaultKind, type MemberPlan, type Notice, type NoticeMedia, artifactTools, automationTools, deleteAutomation, type AutomationEvents, groceryTools, mediaTools, workerTools, TechnicalPM, memoryTools } from "@kloru/desk";
 import { mediaIngest } from "./media-ingest.js";
 import { RuntimeWorkerHost } from "./desk-host.js";
 import { langfuseFromEnv, prefsAllowContent } from "./telemetry.js";
@@ -133,6 +135,10 @@ export interface BootResult {
   ownerApi?: OwnerApi;
   /** The conversation-as-codebase desk (/desk/*). Off with KLORU_DESK=off. */
   desk?: Desk;
+  /** Event automations: app events and automations' own webhooks (set with the desk). */
+  events?: Events;
+  /** Point Composio's webhook at this Kloru (set when apps can make triggers). Only a deployed Kloru calls it. */
+  subscribeAppEvents?: (url: string) => Promise<void>;
   /** Who may call the family's number: the owner and contacts at partner or family. */
   callers: (phone: string) => Caller;
   /** Texts and emails as desk conversations (set with the desk and Inkbox or Resend). */
@@ -456,6 +462,31 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       log(`apps: ${connected.tools.length} tools${composio.allToolkits ? " (any app by name)" : ""}, connected: ${on.join(", ") || "none"}`);
     }
   }
+  // Event automations: an app event (Composio triggers) or a call to an automation's own URL starts a run.
+  const triggers = apps?.eventTriggers();
+  const publicSite = env.KLORU_PUBLIC_URL?.trim().replace(/\/+$/, "");
+  const automationEvents: AutomationEvents | undefined = triggers
+    ? {
+        types: async (app) =>
+          (await triggers.types(app))
+            .map((t) => {
+              const props = Object.entries(((t.config as { properties?: Record<string, { description?: string }> }).properties ?? {})).map(([k, v]) => `${k}${v.description ? ` (${v.description})` : ""}`);
+              return `${t.slug}: ${t.name}. ${t.description}${props.length ? ` Settings: ${props.join("; ")}.` : ""}`;
+            })
+            .join("\n"),
+        // Only an account's own person may watch it: an event automation reads everything that arrives there.
+        watch: async ({ trigger, account, config: settings, phone }) => {
+          const a = apps!.connected().find((x) => x.email?.toLowerCase() === account.trim().toLowerCase() || x.id === account.trim());
+          if (!a) throw new Error(`no connected account ${account}`);
+          const whose = a.person ? contacts.all().find((c) => c.id === a.person)?.phones[0] : config.owner.phones[0];
+          if (!whose || whose.replace(/\D/g, "").slice(-10) !== phone.replace(/\D/g, "").slice(-10)) throw new Error(`${account} isn't the caller's account; only its own person can set up an automation on it`);
+          return triggers.watch(trigger, a.id, settings);
+        },
+        unwatch: (instance) => triggers.unwatch(instance),
+        hookUrl: (token) => (publicSite ? `${publicSite}/webhooks/hook/${token}` : undefined),
+      }
+    : undefined;
+
   // Atomic Mail: an inbox of the agent's own, when the deployer gave us a key. The key is
   // the switch. With it unset nothing here runs and nothing else changes.
   let mailbox: AtomicMailBackend | undefined;
@@ -643,7 +674,12 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
         automations: {
           list: () => scheduler.list(),
           setEnabled: (id: string, enabled: boolean) => scheduler.setEnabled(id, enabled),
-          delete: (id: string) => scheduler.delete(id),
+          // Deleted at once; an app event nothing else watches stops being watched after.
+          delete: (id: string) => {
+            const had = scheduler.list().some((e) => e.id === id);
+            void deleteAutomation(scheduler, id, automationEvents).catch((e: Error) => log(`automations: ${id} deleted, but its app event is still watched: ${e.message}`));
+            return had;
+          },
           nameOf: (phone: string) => (config.owner.phones.some((p) => p.replace(/\D/g, "").slice(-10) === phone.replace(/\D/g, "").slice(-10)) ? config.owner.name : contacts.findByPhone(phone)?.name),
         },
         ...(householdMemory ? { policies: ((m: Memory) => ({ get: (phone: string) => m.policy(phone), set: (phone: string, body: string) => m.setPolicy(phone, body) }))(householdMemory) } : {}),
@@ -685,6 +721,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
 
   // The desk: talking models file issues; the PM (its own model if KLORU_PM_MODEL is set) triages and merges.
   let desk: Desk | undefined;
+  let events: Events | undefined;
   let textDesk: TextDesk | undefined;
   let resendIn: BootResult["resend"];
   let storeRunner: SyncRunner | undefined;
@@ -893,7 +930,22 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       ...(router ? { notify: (n: Notice) => router.notify(n), channelsFor: (phone: string) => router.channelsFor(phone) } : apps && appsConnected?.includes("gmail") ? { notify: gmailNotifier({ apps, ownerPhones: config.owner.phones, ...(config.owner.emails[0] ? { ownerEmail: config.owner.emails[0] } : {}), people: (phone: string) => memberMail(phone), log }) } : {}),
     });
     // Photos and files people text or email Kloru, kept beside the desk's repo (the website serves them at /m/).
-    registry.registerMany([...artifactTools(desk), ...automationTools(desk), ...workerTools(desk), ...groceryTools(desk), ...mediaTools(desk, media, { workspaceDir: state.path("workspace") })]);
+    registry.registerMany([...artifactTools(desk), ...automationTools(desk, automationEvents), ...workerTools(desk), ...groceryTools(desk), ...mediaTools(desk, media, { workspaceDir: state.path("workspace") })]);
+    {
+      const d = desk;
+      events = new Events({
+        state,
+        automations: () => scheduler.list(),
+        run: (entry, event) => void d.runAutomation(entry, event),
+        // The quick check: only events that meet an automation's condition get a full run.
+        ...(fastKey ? { gate: eventGate({ apiKey: fastKey }) } : {}),
+        ...(householdMemory ? { guidelines: (phone: string) => householdMemory!.guidelines(phone) } : {}),
+        ...(triggers ? { verify: (body: string, headers: Record<string, string | string[] | undefined>) => triggers.verify(body, headers) } : {}),
+        record: (detail) => audit.append({ kind: "schedule", principal: "system", detail: { action: "event", ...detail } }),
+        log,
+      });
+      events.start();
+    }
     // The vault (KLORU_VAULT_KEY): cards, logins and API keys used by reference, never in a conversation.
     if (env.KLORU_VAULT_KEY?.trim()) {
       try {
@@ -988,6 +1040,8 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
     ...(resendIn ? { resend: resendIn } : {}),
     ...(ownerApi ? { ownerApi } : {}),
     ...(desk ? { desk } : {}),
+    ...(events ? { events } : {}),
+    ...(triggers ? { subscribeAppEvents: (url: string) => triggers.subscribe(url) } : {}),
     runtime,
     state,
     config,
@@ -1006,6 +1060,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       await safely(log, "langfuse flush", () => langfuse?.shutdown());
       sync?.stop();
       desk?.stopSweeper();
+      await events?.close();
       textDesk?.close();
       clearInterval(metricsTimer);
       await safely(log, "browser close", () => browserPool?.closeAll());

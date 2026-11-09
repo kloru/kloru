@@ -3,6 +3,7 @@ import { Composio } from "@composio/core";
 import { McpClient, StreamableHttpTransport } from "@earendil-works/pi-mcp";
 import { wrapMcpTools, type McpToolSource } from "./wrap.js";
 import { toolkitOfSlug } from "./capabilities.js";
+import { ComposioTriggers, type ComposioTriggersLike, type WebhookSubscriptionsLike } from "./triggers.js";
 
 /** File under the StateDir that remembers the Composio session for this owner. */
 export const APPS_STATE_FILE = "apps.json";
@@ -163,6 +164,9 @@ export interface ComposioClientLike {
     list(query: { userIds: string[]; toolkitSlugs?: string[] }): Promise<{ items: Array<{ id: string; status?: string; toolkit?: { slug?: string }; createdAt?: string }> }>;
     delete(id: string): Promise<unknown>;
   };
+  /** App events: watch one, and the project's webhook they're posted to. */
+  triggers?: ComposioTriggersLike;
+  webhooks?: { subscriptions: WebhookSubscriptionsLike };
 }
 
 /** Session create config. `toolkits` is left out in all mode: no allowlist means every toolkit. */
@@ -383,6 +387,20 @@ export class ComposioApps {
       .map((r) => ({ id: r.id, toolkit: r.toolkit, ...(emails[r.id] ? { email: emails[r.id] } : {}), ...(people[r.id] ? { person: people[r.id] } : {}), status: r.active ? "connected" : "expired" }));
     this.knownAccounts = accounts;
     return accounts;
+  }
+
+  /** App events for automations; undefined when this client can't make triggers. */
+  eventTriggers(): ComposioTriggers | undefined {
+    const triggers = this.composio.triggers;
+    if (!triggers) return undefined;
+    return new ComposioTriggers({
+      triggers,
+      ...(this.composio.webhooks ? { subscriptions: this.composio.webhooks.subscriptions } : {}),
+      userId: this.opts.userId,
+      state: this.opts.state,
+      accountId: (slug, account) => (account.includes("@") ? this.accountByEmail(slug, account) : this.knownAccounts.find((a) => a.id === account && a.status === "connected")?.id),
+      ...(this.opts.logger ? { log: this.opts.logger } : {}),
+    });
   }
 
   /** The accounts as last listed (accounts()), without a network call. */

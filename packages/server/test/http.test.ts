@@ -783,3 +783,53 @@ describe("what someone wrote in an email", () => {
     expect(latestReply("Just this")).toBe("Just this");
   });
 });
+
+describe("event automation webhooks", () => {
+  const TOKEN = "hook_token_0123456789abcdef";
+  async function serve(o: { tunnel?: boolean; events?: boolean } = {}) {
+    const app = stubApp();
+    const seen: Array<[string, string, string]> = [];
+    if (o.events !== false) {
+      app.events = {
+        fromApp: async (body, headers) => (seen.push(["app", body, String(headers["webhook-id"])]), headers["webhook-signature"] === "v1,good" ? 204 : 401),
+        fromHook: (token, body) => (seen.push(["hook", body, token]), token === TOKEN ? 204 : 404),
+      };
+    }
+    const server = o.tunnel ? await listenTunnelServer(app, { signingKey: SIGNING_KEY, env: {} }) : createHttpServer(app, { signingKey: SIGNING_KEY, env: {} });
+    if (!o.tunnel) await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const post = (path: string, body: string, headers: Record<string, string> = {}) => fetch(base + path, { method: "POST", headers, body });
+    return { seen, post, close: () => new Promise<void>((r) => server.close(() => r())) };
+  }
+
+  it("passes a Composio delivery's raw body and headers through, answering what the router says", async () => {
+    const s = await serve();
+    expect((await s.post("/webhooks/composio", '{"a":1}', { "webhook-id": "msg_1", "webhook-signature": "v1,good" })).status).toBe(204);
+    expect((await s.post("/webhooks/composio", "{}", { "webhook-id": "msg_2", "webhook-signature": "v1,bad" })).status).toBe(401);
+    expect(s.seen[0]).toEqual(["app", '{"a":1}', "msg_1"]);
+    await s.close();
+  });
+
+  it("routes an automation's own URL by its token; a malformed path is a 404 without reaching the router", async () => {
+    const s = await serve();
+    expect((await s.post(`/webhooks/hook/${TOKEN}`, "door")).status).toBe(204);
+    expect((await s.post("/webhooks/hook/short", "door")).status).toBe(404);
+    expect((await s.post(`/webhooks/hook/${TOKEN}/more`, "door")).status).toBe(404);
+    expect(s.seen).toEqual([["hook", "door", TOKEN]]);
+    await s.close();
+  });
+
+  it("answers 503 while event automations are off", async () => {
+    const s = await serve({ events: false });
+    expect((await s.post(`/webhooks/hook/${TOKEN}`, "door")).status).toBe(503);
+    expect((await s.post("/webhooks/composio", "{}")).status).toBe(503);
+    await s.close();
+  });
+
+  it("the tunnel serves automations' webhooks (to try one locally) but not Composio's", async () => {
+    const s = await serve({ tunnel: true });
+    expect((await s.post(`/webhooks/hook/${TOKEN}`, "door")).status).toBe(204);
+    expect((await s.post("/webhooks/composio", "{}")).status).toBe(404);
+    await s.close();
+  });
+});

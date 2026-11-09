@@ -247,9 +247,10 @@ export class Scheduler {
     if (input.cron) {
       const spec = parseCron(input.cron); // throws on a bad expression
       if (!nextRunAt) nextRunAt = nextCron(spec, this.now(), tz)?.toISOString();
-    } else if (!nextRunAt) {
-      throw new Error("schedule: give a cron expression or a nextRunAt time");
+    } else if (!nextRunAt && !input.on) {
+      throw new Error("schedule: give a cron expression, a nextRunAt time or an event");
     }
+    if (input.on && (input.cron || nextRunAt)) throw new Error("schedule: an event automation has no cron or nextRunAt");
     if (nextRunAt !== undefined && Number.isNaN(Date.parse(nextRunAt))) {
       throw new Error(`schedule: bad nextRunAt "${nextRunAt}"`);
     }
@@ -330,7 +331,7 @@ export class Scheduler {
 
   /** The shape Maritime's GET /schedules and the internal schedules push expect. */
   toMaritimeSchedules(): Array<{ id: string; nextRunAt?: string; cron?: string; tz?: string; prompt: string; enabled: boolean }> {
-    return this.load().map((e) => {
+    return this.load().filter((e) => !e.on).map((e) => {
       const out: { id: string; nextRunAt?: string; cron?: string; tz?: string; prompt: string; enabled: boolean } = {
         id: e.id,
         prompt: e.prompt,

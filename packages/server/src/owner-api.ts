@@ -10,7 +10,7 @@
  */
 import { ALL_CAPABILITIES, DEFAULT_TIER_TABLE, SPEND_CAPABILITIES, verifyOwnerEnvelope } from "@kloru/core";
 import type { Approval, ApprovalStore, AuditLog, Capability, ContactStore, Permission, Policy, PolicyEngine, ScheduleEntry, Tier } from "@kloru/core";
-import { describeWhen } from "@kloru/desk";
+import { describeAutomation } from "@kloru/desk";
 
 const TIERS: readonly Tier[] = ["owner", "staff", "partner", "family", "friend", "contact", "stranger"];
 const PERMISSIONS: readonly Permission[] = ["yes", "ask", "limit", "no", "intro", "partial"];
@@ -229,7 +229,7 @@ export function createOwnerApi(deps: OwnerApiDeps): OwnerApi {
       return ok(list.map((e) => ({
         id: e.id,
         name: e.name ?? "Untitled",
-        when: describeWhen(e.cron, e.cron ? undefined : e.nextRunAt, e.tz),
+        when: describeAutomation(e, e.tz),
         request: e.prompt,
         enabled: e.enabled,
         ...(e.nextRunAt ? { nextRunAt: e.nextRunAt } : {}),

@@ -158,7 +158,7 @@ describe("Scheduler store", () => {
   it("validates input", () => {
     const s = new Scheduler(tempState());
     expect(() => s.create({ enabled: true, prompt: "x", cron: "bad" })).toThrow(/cron/);
-    expect(() => s.create({ enabled: true, prompt: "x" })).toThrow(/cron expression or a nextRunAt/);
+    expect(() => s.create({ enabled: true, prompt: "x" })).toThrow(/cron expression, a nextRunAt time or an event/);
     expect(() => s.create({ enabled: true, prompt: "x", cron: "0 9 * * *", tz: "Mars/Olympus" })).toThrow(/time zone/);
     expect(() => s.create({ enabled: true, prompt: "  ", nextRunAt: "2026-10-03T18:00:00Z" })).toThrow(/prompt/);
     expect(() => s.create({ enabled: true, prompt: "x", nextRunAt: "tomorrowish" })).toThrow(/nextRunAt/);
@@ -187,5 +187,24 @@ describe("Scheduler store", () => {
     stop();
     expect(fired).toEqual([a.id]);
     expect(s.get(a.id)?.enabled).toBe(false);
+  });
+});
+
+describe("Scheduler: event automations", () => {
+  const on = { kind: "app" as const, trigger: "GMAIL_NEW_GMAIL_MESSAGE", account: "evan@example.com", instance: "ti_1" };
+
+  it("saves one with an event and no time; it never comes due and isn't pushed to Maritime", () => {
+    const s = new Scheduler(tempState(), { now: () => new Date("2026-11-08T12:00:00Z") });
+    const e = s.create({ name: "Email replies", prompt: "Draft a reply.", on, when: "an email I need to answer", enabled: true, target: "desk", phone: "+14155550190" });
+    expect(e.nextRunAt).toBeUndefined();
+    expect(s.due(new Date("2030-01-01T00:00:00Z"))).toEqual([]);
+    expect(s.toMaritimeSchedules()).toEqual([]);
+    expect(s.get(e.id)).toMatchObject({ on, when: "an email I need to answer" });
+  });
+
+  it("refuses an event together with a time", () => {
+    const s = new Scheduler(tempState());
+    expect(() => s.create({ prompt: "x", on, cron: "0 7 * * *", enabled: true })).toThrow(/no cron/);
+    expect(() => s.create({ prompt: "x", on, nextRunAt: "2030-01-01T00:00:00Z", enabled: true })).toThrow(/no cron/);
   });
 });
