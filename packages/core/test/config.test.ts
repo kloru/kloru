@@ -27,7 +27,7 @@ describe("config", () => {
       COMPOSIO_TOOLKITS: "gmail,GoogleCalendar",
     };
     const cfg = loadConfig(state, env);
-    expect(cfg.owner).toEqual({ name: "Maria", phones: ["+16175550100", "+16175550190"], emails: ["maria@example.com"], timezone: "America/New_York" });
+    expect(cfg.owner).toEqual({ name: "Maria", phones: ["+16175550100", "+16175550101"], emails: ["maria@example.com"], timezone: "America/New_York" });
     expect(cfg.model.primary).toBe("anthropic/claude-sonnet-5-5");
     expect(cfg.agent).toEqual({ name: "Pip", handle: "maria-instinct" });
     expect(cfg.computer.mode).toBe("maritime");

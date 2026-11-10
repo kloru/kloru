@@ -62,7 +62,7 @@ describe("contacts_search", () => {
     const r = await run(tools, "contacts_search", { query: "sam" }, ctx(owner));
     expect(r.isError).toBe(false);
     expect(r.text).toContain("sam-lee: Sam Lee");
-    expect(r.text).toContain("+16175550190");
+    expect(r.text).toContain("+16175550101");
     expect(r.text).toContain("@sam-instinct");
   });
 
@@ -269,7 +269,7 @@ describe("ask_instinct", () => {
     expect(outbox.sent[0]?.msg).toMatchObject({ channel: "email", to: "priya@example.com" });
     expect(outbox.sent[0]?.msg.text).toContain("Are you coming Friday?");
     await run(tools, "ask_instinct", { contact: "sam", intent: "ask", text: "Still on?" }, ctx(owner));
-    expect(outbox.sent[1]?.msg).toMatchObject({ channel: "imessage", to: "+16175550190" });
+    expect(outbox.sent[1]?.msg).toMatchObject({ channel: "imessage", to: "+16175550101" });
   });
 
   it("errors when the contact cannot be reached or does not exist", async () => {

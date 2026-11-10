@@ -5,7 +5,7 @@ import { normalizeAgentHandle, resolveA2aPrincipal } from "../src/principal.js";
 import { agentPrincipal, contactPrincipal, fakeContacts, owner, stranger } from "./fakes.js";
 
 const contacts = fakeContacts([
-  { name: "Sam Lee", tier: "partner", agentHandle: "sam-instinct", phones: ["6175550190"] },
+  { name: "Sam Lee", tier: "partner", agentHandle: "sam-instinct", phones: ["6175550101"] },
   { name: "Sam Lin", tier: "friend", emails: ["lin@example.com"] },
 ]);
 
@@ -59,7 +59,7 @@ describe("lookupContact", () => {
 
   it("helpers normalize the way core does", () => {
     expect(slugify("  Priya  Patel-O'Neil ")).toBe("priya-patel-o-neil");
-    expect(phoneKey("(617) 555-0101")).toBe("+16175550190");
+    expect(phoneKey("(617) 555-0101")).toBe("+16175550101");
     expect(phoneKey("+44 20 7946 0958")).toBe("+442079460958");
   });
 });
