@@ -11,8 +11,10 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { resolveModel, type WorkerRole } from "@kloru/core";
 import { describe, expect, it } from "vitest";
 import { Desk, type DeskOptions, type Notice, type WorkerHost } from "../src/desk.js";
-// The production message check (coms), so these cases run the PM and Jev together.
-import { comsDecider } from "../../server/src/coms-decider.js";
+// The production fast pass (Jev) and the organizer, so these cases run the PM and the outbox together.
+import { outboxDecider } from "../../server/src/outbox-decider.js";
+import { OutboxOrganizer } from "../src/outbox-organizer.js";
+import { isFinal } from "../src/outbox-machine.js";
 import { TechnicalPM } from "../src/pm.js";
 import { Memory } from "../src/memory.js";
 
@@ -31,17 +33,30 @@ class Host implements WorkerHost {
   stop(): void {}
 }
 
-function setup(clock?: () => Date, notify?: (n: Notice) => Promise<boolean>, decideMessage?: DeskOptions["decideMessage"]) {
+function setup(clock?: () => Date, notify?: (n: Notice) => Promise<boolean>, firstPass?: DeskOptions["firstPass"]) {
   const host = new Host();
   const model = resolveModel(process.env.KLORU_PM_MODEL ?? "openrouter/google/gemini-3.5-flash", process.env);
   const logs: string[] = [];
   const pm = new TechnicalPM({ model, streamFn: streamSimple as unknown as StreamFn, getApiKey: () => key, thinking: "minimal", log: (m) => logs.push(m) });
-  const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "pm-live-")), host, planner: pm, ...(clock ? { now: clock } : {}), ...(notify ? { notify, notifyDelayMs: 50, notifyWaitMs: 2000 } : {}), ...(decideMessage ? { decideMessage, ownEmails: () => ["ezra@personal.example.com"] } : {}), log: (m: string) => (logs.push(m), process.env.SHOW && console.log("LOG", m)) });
+  const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "pm-live-")), host, planner: pm, ...(clock ? { now: clock } : {}), ...(notify ? { notify, notifyDelayMs: 50, notifyWaitMs: 2000 } : {}), ...(firstPass ? { firstPass, organizer: new OutboxOrganizer({ model, streamFn: streamSimple as unknown as StreamFn, getApiKey: () => key, thinking: "minimal", log: (m) => logs.push(m) }), ownEmails: () => ["ezra@personal.example.com"] } : {}), log: (m: string) => (logs.push(m), process.env.SHOW && console.log("LOG", m)) });
   const { call } = desk.startCall({ callSid: "CA1", phone: "+14155550190", channel: "voice" });
   return { host, desk, call, logs };
 }
 
 const isClosedStatus = (s: string) => ["resolved", "wont_do", "not_planned", "superseded", "failed", "done", "merged"].includes(s);
+
+const EZRA = "+14155550190";
+
+/** Wait for the outbox to settle; what the fast pass left for the organizer gets its run now, not after the quiet time. */
+async function settled(desk: Desk, ms = 90_000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const items = desk.outbox.all(EZRA);
+    if (items.some((i) => i.state === "queued")) await desk.outbox.runOrganizer(EZRA);
+    else if (items.length && items.every((i) => isFinal(i.state) || i.state === "scheduled")) return;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
 
 /** Wait until the PM has nothing queued and the condition holds. */
 async function until(f: () => boolean, ms = 60_000) {
@@ -109,8 +124,8 @@ describe.skipIf(!key)("PM on real-call situations", () => {
     await until(() => desk.repo.issue(1)!.status !== "open");
     const i = desk.repo.issue(1)!;
     console.log(i.status, i.policyLine, i.confirmation?.draft);
-    expect(i.policyLine ?? "").toMatch(/Cleo/);
-    expect(i.policyLine ?? "").toMatch(/work email/i);
+    expect(i.policyLine?.line ?? "").toMatch(/Cleo/);
+    expect(i.policyLine?.line ?? "").toMatch(/work email/i);
     expect(i.status).toBe("needs_confirmation");
   }, 90_000);
 
@@ -247,7 +262,7 @@ describe.skipIf(!key)("PM on real-call situations", () => {
     desk.fileIssue(call.id, "Research how divorce probability changes with taking jobs where you travel 4 months or more in a year");
     await until(() => host.finishers.has(1));
     desk.endCall(call.id);
-    const told = () => [...desk.repo.inbox(call.id, 0).map((m) => m.text), ...sent, ...desk.repo.ledger().filter((e) => e.tool === "tell_caller").map((e) => JSON.stringify(e.args))];
+    const told = () => [...desk.repo.inbox(call.id, 0).map((m) => m.text), ...sent, ...desk.repo.ledger().filter((e) => e.tool === "outbox").map((e) => JSON.stringify(e.args))];
     for (let i = 0; i < 3 && !told().length; i++) {
       host.finishers.clear();
       desk.sweep(new Date(Date.now() + 40 * 60_000)); // its worker ran far too long, again
@@ -277,7 +292,7 @@ describe.skipIf(!key)("PM on real-call situations", () => {
     desk.fileIssue(call.id, "Look up flights for the Tucson trip next week (it's on the calendar).");
     await until(() => host.finishers.size > 0);
     const [n, finish] = [...host.finishers.entries()].at(-1)!;
-    finish("Best nonstop: Delta 2:08 PM Tue Nov 3 SFO→ATL; return United 5:35 PM Thu Nov 5. All options: https://kloru.com/a/Qm9vZ2xlR29vZ2xlR29vZ2");
+    finish("Best nonstop: Delta 2:08 PM next Tuesday SFO→ATL; return United 5:35 PM next Thursday. All options: https://kloru.com/a/Qm9vZ2xlR29vZ2xlR29vZ2");
     await until(() => desk.repo.inbox(call.id, 0).length > 0);
     const sent = desk.repo.inbox(call.id, 0).map((m) => m.text).join(" ");
     expect(sent, `#${n}`).toContain("https://kloru.com/a/Qm9vZ2xlR29vZ2xlR29vZ2");
@@ -329,9 +344,13 @@ describe.skipIf(!key)("PM on real-call situations", () => {
     desk.fileIssue(call.id, "Move the dentist appointment from Thursday to Friday at 3 PM.");
     await until(() => host.finishers.has(1));
     desk.endCall(call.id);
+    // This week's Friday, so the result is never in the past.
+    const d = new Date();
+    d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7 || 7));
+    const friday = d.toISOString().slice(0, 10);
     // As a real worker's change would be: recorded in the ledger as it happens.
-    desk.repo.appendLedger({ issue: 1, call: call.id, phone: "+14155550190", tool: "app_googlecalendar_patch_event", slug: "GOOGLECALENDAR_PATCH_EVENT", args: { event_id: "5k2", start_datetime: "2026-11-06T15:00:00-08:00" }, ok: true, result: "updated 5k2" });
-    host.finishers.get(1)!("Moved 'Dentist' from Thu Nov 5 3 PM to Fri Nov 6 3 PM on ezra@personal.example.com's calendar. Event id 5k2.");
+    desk.repo.appendLedger({ issue: 1, call: call.id, phone: "+14155550190", tool: "app_googlecalendar_patch_event", slug: "GOOGLECALENDAR_PATCH_EVENT", args: { event_id: "5k2", start_datetime: `${friday}T15:00:00-08:00` }, ok: true, result: "updated 5k2" });
+    host.finishers.get(1)!(`Moved 'Dentist' from this Thursday 3 PM to this Friday (${friday}) 3 PM on ezra@personal.example.com's calendar. Event id 5k2.`);
     await until(() => sent.length > 0, 60_000);
     await new Promise((r) => setTimeout(r, 3000));
     const i = desk.repo.issue(1)!;
@@ -341,7 +360,7 @@ describe.skipIf(!key)("PM on real-call situations", () => {
 
   it("Nov 2 laundry: new options on a page they already have the link to still get the message", async () => {
     const sent: Notice[] = [];
-    const { host, desk, logs, call: voice } = setup(undefined, async (n) => (sent.push(n), true), comsDecider({ apiKey: key! }));
+    const { host, desk, logs, call: voice } = setup(undefined, async (n) => (sent.push(n), true), outboxDecider({ apiKey: key! }));
     desk.endCall(voice.id);
     const { call } = desk.startCall({ callSid: "imessage:l1", phone: "+14155550190", channel: "imessage" });
     desk.addTurn(call.id, { role: "caller", text: "I need a new laundry basket. Not expensive, from Amazon, light, and my wife shouldn't think it's ugly" });
@@ -353,27 +372,27 @@ describe.skipIf(!key)("PM on real-call situations", () => {
     await until(() => ["merged", "resolved", "done"].includes(desk.repo.issue(first.id)!.status));
     // The talker texted that result with the link, as it did on Nov 2.
     const told = desk.repo.inbox(call.id, 0);
-    desk.repo.appendLedger({ issue: 0, call: call.id, phone: "+14155550190", tool: "reply", slug: "MESSAGE", args: { to: "+14155550190", channel: "imessage", text: `I found a few cheap, light options: ${page.value.url}` }, ok: true, result: "sent", decision: "send" });
-    desk.addTurn(call.id, { role: "kloru", text: `I found a few cheap, light options: ${page.value.url}` });
+    await desk.submitFromConversation(call.id, { text: `I found a few cheap, light options: ${page.value.url}`, issues: [first.id], thread: { channel: "imessage", to: "+14155550190" } });
+    await settled(desk);
     if (told.length) desk.ack(call.id, told.at(-1)!.seq);
+    const before = sent.length;
     desk.addTurn(call.id, { role: "caller", text: "She thinks all of those are ugly. You can spend up to $100" });
     const second = desk.fileIssue(call.id, "Find stylish, high-quality laundry baskets on Amazon up to $100; update the same page.");
     await until(() => host.finishers.has(second.id));
     desk.updateArtifact(page.value.id, { append: "- Brabantia, $62\n- Joseph Joseph, $90\n" }, { issue: second.id, phone: "+14155550190" });
     host.finishers.get(second.id)!(`Updated the page with four design-forward options up to $100, including a $62 Brabantia and a $90 Joseph Joseph: ${page.value.url}`);
     await until(() => desk.repo.inbox(call.id, told.at(-1)?.seq ?? 0).length > 0);
-    // In the conversation the talker wrote it up and Jev held it; then a deploy ended the conversation.
-    const held = desk.repo.inbox(call.id, told.at(-1)?.seq ?? 0).at(-1)!.text;
-    desk.repo.appendLedger({ issue: 0, call: call.id, phone: "+14155550190", tool: "reply", slug: "MESSAGE", args: { to: "+14155550190", channel: "imessage", text: held }, ok: false, result: "held to go with other updates", decision: "hold" });
+    // A deploy ended the conversation before the talker texted it, so it goes to his outbox.
     desk.endCall(call.id);
-    await until(() => sent.length > 0, 60_000);
-    expect(sent, logs.join("\n")).toHaveLength(1);
-    expect(sent[0]!.text).toMatch(/\$100|Brabantia|Joseph/);
+    await settled(desk);
+    const after = sent.slice(before);
+    expect(after, logs.join("\n")).toHaveLength(1);
+    expect(after[0]!.text).toMatch(/\$100|Brabantia|Joseph/);
   }, 180_000);
 
   it("coms: a result the caller already got by email gets no second message", async () => {
     const sent: Notice[] = [];
-    const { host, desk, call } = setup(undefined, async (n) => (sent.push(n), true), comsDecider({ apiKey: key! }));
+    const { host, desk, call } = setup(undefined, async (n) => (sent.push(n), true), outboxDecider({ apiKey: key! }));
     desk.addTurn(call.id, { role: "caller", text: "Email me the Portland bulky-item pickup instructions" });
     desk.fileIssue(call.id, "Email the Portland bulky-item pickup instructions to ezra@personal.example.com.");
     await until(() => host.finishers.has(1));
@@ -381,7 +400,7 @@ describe.skipIf(!key)("PM on real-call situations", () => {
     desk.repo.appendLedger({ issue: 1, call: call.id, phone: "+14155550190", tool: "app_gmail_send_email", slug: "GMAIL_SEND_EMAIL", args: { recipient_email: "ezra@personal.example.com", subject: "Portland bulky-item pickup", body: "Instructions and the scheduling link…" }, ok: true, result: "sent, id 19a" });
     host.finishers.get(1)!("Done. I emailed the Portland bulky-item pickup instructions and scheduling link to ezra@personal.example.com.");
     await until(() => desk.repo.issue(1)!.status === "merged");
-    await new Promise((r) => setTimeout(r, 20_000));
+    await settled(desk);
     expect(sent).toEqual([]);
   }, 120_000);
 });

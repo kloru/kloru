@@ -47,10 +47,8 @@ For each trigger, act with your tools:
 - ops_finished: the caller heard each change as it landed, so merge only what they haven't heard: a short
   "events" when there's more to say ("Created Coffee with Sam, Wednesday at 3"), "info" if nothing changed and why.
 - worker_failed: merge a short, honest "info", or reassign if a retry makes sense.
-- worker_comment: a worker's note, often a held message. Send it with tell_caller when it's what they asked for
-  and nothing related is still running; combine related ones into one message.
-- unheard: a conversation ended before something they asked for reached them. If it's worth a message, tell_caller once,
-  a few plain sentences covering all of it; if a worker already emailed or texted it to them, do nothing.
+- worker_comment: a worker's note on its issue. Act only if the issue needs something from you.
+- Anything you merge for someone who isn't in a conversation goes to their outbox, which decides when they get it.
 - Something to do later or again and again ("every weekday at 7, email me my day", "remind me Friday"): assign
   ops to save an automation with the request it should run each time.
 - stuck: first decide if it still matters (yesterday's "news for right now" doesn't; a newer issue may have
@@ -116,8 +114,6 @@ function triggerLine(t: Trigger): string {
       return `conflict: #${t.issues[0]} and #${t.issues[1]} both touch ${t.resource}`;
     case "worker_comment":
       return `worker_comment on #${t.issue}: ${t.text}`;
-    case "unheard":
-      return `unheard: conversation ${t.call} ended; these never reached them (not said, texted or emailed in it):\n${t.unheard.map((u) => `    - ${u}`).join("\n")}`;
     case "worker_failed":
       return `worker_failed on #${t.issue}: ${t.error}`;
     case "stuck":
@@ -220,18 +216,6 @@ export function pmTools(desk: Desk, done?: () => void): AgentTool<any>[] {
     t("merge", 'Merge into a call: kind "info" (what Kloru learned, or a question needing a yes) or "events" (what Kloru did). Defaults to the filer\'s call; pass call to tell someone else (conflicts).', Type.Object({ issue: num("issue number"), kind: Type.Union([Type.Literal("info"), Type.Literal("events")]), text: str("one or two short spoken sentences"), call: Type.Optional(str("call id")) }), (a) => desk.merge(a.issue, a.kind, a.text, a.call)),
     t("set_policy", "Someone says who may or may not reach their own things ('don't let Cleo read my work email'): adds a line to their own policy, read back for their yes.", Type.Object({ issue: num("issue number"), words: str("the line in their words, e.g. 'Cleo can't read my work email'") }), (a) => desk.setPolicy(a.issue, a.words)),
     t("send_back", "The PR no longer fits: the same engineer continues with your note.", Type.Object({ issue: num("issue number"), note: str("what changed") }), (a) => desk.sendBack(a.issue, a.note)),
-    {
-      name: "tell_caller",
-      label: "tell_caller",
-      description: "Message the person after a conversation ended: what they asked for that got done and they didn't hear. Checked before it goes, which picks text or email; you're told if it's held or dropped.",
-      // No channel: the message check picks text or email from what it says and their guidelines.
-      parameters: Type.Object({ call: str("the ended call's id"), text: str("a few plain sentences, first person"), subject: Type.Optional(str("a few words, used if it goes by email")), media: Type.Optional(Type.Array(Type.String(), { description: "photos or files to attach (m_… ids from the worker's note)" })) }),
-      execute: async (_id: string, a: { call: string; text: string; subject?: string; media?: string[] }) => {
-        const r = await desk.tellCaller(a.call, a.text, undefined, a.subject, a.media ?? []).catch((e: unknown) => err(e instanceof Error ? e.message : String(e)));
-        if (r.ok) done?.();
-        return { content: [{ type: "text" as const, text: r.ok ? `Sent${r.value === "default" ? "" : ` by ${r.value}`}.` : r.error }], details: undefined };
-      },
-    } as AgentTool<any>,
     t("file_ops", "File an ops issue for a real-world change. Set parent to the issue it comes from; set reverts to undo an ops issue.", Type.Object({ ...TEMPLATE, spec: str("the exact change"), resources: Type.Array(Type.String()), needs: NEEDS, parent: Type.Optional(num("issue it comes from")), reverts: Type.Optional(num("ops issue to undo")) }), (a) => desk.fileOps({ spec: a.spec, resources: a.resources, target: targetOf(a), ...(a.needs ? { needs: toNeeds(a.needs) } : {}), ...(a.parent !== undefined ? { parent: a.parent } : {}), ...(a.reverts !== undefined ? { reverts: a.reverts } : {}) })),
   ];
 }

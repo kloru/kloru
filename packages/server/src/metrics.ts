@@ -158,7 +158,7 @@ export class Metrics {
       (f) => {
         const key = decodeURIComponent(f.replace(/\.jsonl$/, ""));
         const m = /^desk:issue:(\d+):(\w+)/.exec(key);
-        return { role: m ? m[2]! : key === "desk:pm" ? "pm" : key.startsWith("chat:voice:") ? "voice" : key.startsWith("scheduled:") ? "automations" : "other", issue: m ? Number(m[1]) : null, call: /^chat:voice:(CA\w+)/.exec(key)?.[1] ?? null };
+        return { role: m ? m[2]! : key === "desk:pm" ? "pm" : key === "desk:outbox" ? "outbox" : key.startsWith("chat:voice:") ? "voice" : key.startsWith("scheduled:") ? "automations" : "other", issue: m ? Number(m[1]) : null, call: /^chat:voice:(CA\w+)/.exec(key)?.[1] ?? null };
       },
       (ms) => this.day(ms),
       // Session logs name the model without its provider (openai/gpt-6.1-terra).

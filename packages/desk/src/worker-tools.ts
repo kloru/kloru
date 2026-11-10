@@ -39,7 +39,7 @@ export function workerTools(desk: Desk): RegisteredTool[] {
       name: "send_to_caller",
       label: "Text or email the person who asked",
       description:
-        "Send the person who asked a message: when they asked you to text or email them (\"text me the link\", \"email me when you're done\"). Leave channel out unless they named one. Every message is checked first; if it's held or dropped, you're told why. Links are fine here.",
+        "Send the person who asked a message: when they asked you to text or email them (\"text me the link\", \"email me when you're done\"). Leave channel out unless they named one. It goes into their outbox, which sends it now, keeps it for a better time, or drops it; you're told which. Links are fine here.",
       parameters: Type.Object({
         text: Type.String({ description: "the message, short; for email it can be longer, with links" }),
         // "text" and "imessage" are the same channel: Kloru texts over iMessage.
@@ -51,15 +51,57 @@ export function workerTools(desk: Desk): RegisteredTool[] {
       execute: async ({ text, channel, subject, media }, ctx) => {
         const issue = Number(/^desk:issue:(\d+):/.exec(ctx?.conversationKey ?? "")?.[1] ?? NaN);
         const r = await desk.messageCaller(issue, text, channel === "text" ? "imessage" : channel, subject, media ?? []);
-        return r.ok ? textResult(`Sent${r.value === "default" ? "" : ` by ${r.value}`}.`) : { content: [{ type: "text" as const, text: r.error }], isError: true };
+        return r.ok ? textResult(r.value) : { content: [{ type: "text" as const, text: r.error }], isError: true };
+      },
+    }),
+    defineTool({
+      name: "remind",
+      label: "Remind the person who asked, once, at a time",
+      description:
+        "A one-time reminder whose words you know now (\"remind me at 9 to call Dr. Lee\"): Kloru sends them exactly this text at that time. Something that needs looking up then, or repeats, is an automation instead.",
+      parameters: Type.Object({
+        text: Type.String({ description: "the reminder as they should read it, e.g. 'Reminder: call Dr. Lee about Friday.'" }),
+        at: Type.String({ description: 'when, in their local time, like "2026-11-11T09:00"' }),
+      }),
+      meta: { capabilities: [], group: "files" as const },
+      execute: async ({ text, at }, ctx) => {
+        const issue = Number(/^desk:issue:(\d+):/.exec(ctx?.conversationKey ?? "")?.[1] ?? NaN);
+        const r = await desk.remindCaller(issue, text, at);
+        return r.ok ? textResult(r.value) : { content: [{ type: "text" as const, text: r.error }], isError: true };
+      },
+    }),
+    defineTool({
+      name: "outbox_list",
+      label: "See what's waiting to go to the person who asked",
+      description: "The messages and reminders Kloru has waiting for them, each with its id. Use it when they ask what's coming or want one stopped.",
+      parameters: Type.Object({}),
+      meta: { capabilities: [], group: "files" as const },
+      execute: async (_a, ctx) => {
+        const issue = desk.repo.issue(Number(/^desk:issue:(\d+):/.exec(ctx?.conversationKey ?? "")?.[1] ?? NaN));
+        if (!issue) return { content: [{ type: "text" as const, text: "no issue here" }], isError: true };
+        const lines = desk.outboxList(issue.filedBy.phone);
+        return textResult(lines.length ? lines.join("\n") : "Nothing is waiting to go to them.");
+      },
+    }),
+    defineTool({
+      name: "outbox_cancel",
+      label: "Stop a waiting message or reminder",
+      description: "Stop one message or reminder that hasn't gone yet, by its id from outbox_list. Only when they asked for it to stop.",
+      parameters: Type.Object({ id: Type.String({ description: "the item's id, like o_…" }) }),
+      meta: { capabilities: [], group: "files" as const },
+      execute: async ({ id }, ctx) => {
+        const issue = desk.repo.issue(Number(/^desk:issue:(\d+):/.exec(ctx?.conversationKey ?? "")?.[1] ?? NaN));
+        if (!issue) return { content: [{ type: "text" as const, text: "no issue here" }], isError: true };
+        const r = desk.outboxCancel(id, issue.filedBy.phone);
+        return r.ok ? textResult(`Stopped: ${r.value.text.slice(0, 200)}`) : { content: [{ type: "text" as const, text: r.error }], isError: true };
       },
     }),
     defineTool({
       name: "comment_on_issue",
       label: "Leave the PM a note on your issue",
       description:
-        "A note for the PM, who coordinates: a message that was held (paste exactly what you'd send), or something another issue or person has to know. Then carry on or finish.",
-      parameters: Type.Object({ text: Type.String({ description: "the note, with any held message word for word" }) }),
+        "A note for the PM, who coordinates: something another issue or person has to know. Then carry on or finish.",
+      parameters: Type.Object({ text: Type.String({ description: "the note" }) }),
       meta: { capabilities: [], group: "files" as const },
       execute: async ({ text }, ctx) => {
         const issue = Number(/^desk:issue:(\d+):/.exec(ctx?.conversationKey ?? "")?.[1] ?? NaN);

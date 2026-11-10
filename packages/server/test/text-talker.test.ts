@@ -21,6 +21,9 @@ function tools() {
     updateIssue: (n, x) => (calls.push(`update ${n} ${x}`), "Updated."),
     confirm: (n, d) => (calls.push(`confirm ${n} ${d}`), "Confirmed."),
     remember: (x) => (calls.push(`remember ${x}`), "Noted."),
+    remind: (x, at) => (calls.push(`remind ${at} ${x}`), `Set for ${at}.`),
+    outboxList: () => (calls.push("list"), "- o_1 [reminder, goes Wed 9:00 AM] Reminder: call Dr. Lee."),
+    outboxCancel: (id) => (calls.push(`cancel ${id}`), "Cancelled; it won't be sent."),
   };
   return { t, calls };
 }
@@ -37,7 +40,20 @@ describe("the text talker", () => {
     const second = m.bodies[1];
     expect(second.messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "t0", content: "Filed #7." });
     expect(m.bodies[0].messages[0].content).toContain("Caller: Ezra");
-    expect(m.bodies[0].tools.map((x: any) => x.function.name)).toEqual(["file_issue", "update_issue", "confirm", "remember"]);
+    expect(m.bodies[0].tools.map((x: any) => x.function.name)).toEqual(["file_issue", "update_issue", "confirm", "remember", "remind", "outbox_list", "outbox_cancel"]);
+  });
+
+  it("a reminder whose words are known is set with remind, and a waiting one can be listed and stopped", async () => {
+    const m = model([
+      { tool_calls: [{ name: "remind", args: { text: "Reminder: call Dr. Lee.", at: "2026-10-31T09:00" } }] },
+      { tool_calls: [{ name: "outbox_list", args: {} }] },
+      { tool_calls: [{ name: "outbox_cancel", args: { id: "o_1" } }] },
+      { content: "Done." },
+    ]);
+    const { t, calls } = tools();
+    await textTalker({ apiKey: "k", fetchImpl: m.fetchImpl, now: () => NOW })({ brief: "", channel: "imessage", thread: [{ role: "caller", text: "Remind me at 9 tomorrow to call Dr. Lee" }], tools: t, timezone: "America/Los_Angeles" });
+    expect(calls).toEqual(["remind 2026-10-31T09:00 Reminder: call Dr. Lee.", "list", "cancel o_1"]);
+    expect(m.bodies[1].messages.at(-1)).toMatchObject({ role: "tool", content: "Set for 2026-10-31T09:00." });
   });
 
   it("a result that lands becomes one message", async () => {

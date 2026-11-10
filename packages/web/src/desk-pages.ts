@@ -5,7 +5,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { CLOSED, Memory, Repo, describeWhen, type Artifact, type CallRecord, type Issue, type LedgerEntry } from "@kloru/desk";
+import { CLOSED, Memory, Repo, describeWhen, readOutbox, type Artifact, type CallRecord, type Issue, type LedgerEntry, type OutboxItem } from "@kloru/desk";
 import { Store } from "@kloru/store";
 import { esc } from "./html.js";
 import { renderMarkdown } from "./markdown.js";
@@ -262,6 +262,37 @@ interface ScheduleRow {
   prompt: string;
   target?: string;
   phone?: string;
+}
+
+const OUTBOX_WHY: Record<OutboxItem["why"], string> = { reply: "reply", result: "result", report: "report", question: "question", reminder: "reminder" };
+
+function outboxRow(i: OutboxItem, who?: string): string {
+  const state =
+    i.state === "scheduled" ? `goes ${at(i.sendAt)}` : i.state === "sent" ? `sent${i.sentOn && i.sentOn !== "default" ? ` by ${esc(i.sentOn)}` : ""} ${at(i.updatedAt)}` : i.state === "merged" ? "went inside another message" : i.state === "queued" || i.state === "new" || i.state === "sending" ? `waiting since ${at(i.at)}` : `${esc(i.state)} ${at(i.updatedAt)}`;
+  const why = i.state !== "sent" && i.note ? `<br><span class="muted small">${esc(clip(i.note, 200))}</span>` : "";
+  const covers = i.covers?.length ? ` · carries ${plural(i.covers.length, "message")}` : "";
+  return `<li><span class="state${i.state === "sent" ? " ok" : ""}">${esc(OUTBOX_WHY[i.why])}</span> <span class="muted small">${state}${covers}${who ? ` · for ${esc(who)}` : ""}</span><br>${esc(clip(i.text, 400))}${why}</li>`;
+}
+
+/**
+ * A person's outbox: what waits for them, what is scheduled, and what the last day sent or dropped,
+ * with the reason. `name` labels each row when the list holds more than one person's (an owner's view).
+ */
+export function outboxPage(deskDir: string, o: { phone?: string; name?: (phone: string) => string | undefined; now?: Date } = {}): string {
+  const digits = (p: string) => p.replace(/\D/g, "").slice(-10);
+  const items = readOutbox(join(deskDir, "outbox")).filter((i) => !o.phone || digits(i.phone) === digits(o.phone));
+  const who = (i: OutboxItem) => (o.phone ? undefined : (o.name?.(i.phone) ?? i.phone));
+  const since = (o.now ?? new Date()).getTime() - 86_400_000;
+  const waiting = items.filter((i) => i.state === "queued" || i.state === "new" || i.state === "sending");
+  const scheduled = items.filter((i) => i.state === "scheduled").sort((a, b) => (a.sendAt ?? "").localeCompare(b.sendAt ?? ""));
+  const day = items.filter((i) => (i.state === "sent" || i.state === "dropped" || i.state === "merged" || i.state === "cancelled") && Date.parse(i.updatedAt) >= since).reverse();
+  const list = (title: string, rows: OutboxItem[], none: string) => `<section><h2>${title}</h2>${rows.length ? `<ul class="rows">${rows.map((i) => outboxRow(i, who(i))).join("")}</ul>` : `<p class="muted">${none}</p>`}</section>`;
+  return (
+    `<h1>Messages</h1><p class="muted small">Everything Kloru sends ${o.phone ? "you" : "the family"} goes through an outbox: sent now, kept for a better time, or dropped. To stop one that is waiting, tell Kloru.</p>` +
+    list("Waiting", waiting, "Nothing is waiting.") +
+    list("Scheduled", scheduled, "Nothing is scheduled.") +
+    list("The last day", day, "Nothing in the last day.")
+  );
 }
 
 /** Automations made on calls (and any other schedules), from <agent dir>/schedules.json. */

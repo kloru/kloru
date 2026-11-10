@@ -12,7 +12,7 @@ import { makeConnectToken, readConnectToken } from "./connect-link.js";
 import { readCalls } from "./calls.js";
 import { readTranscript } from "./transcripts.js";
 import { ARTIFACT_ID, MEDIA_ID, MediaStore, type Artifact } from "@kloru/desk";
-import { automationsSection, storeSection, artifactGonePage, artifactPage, artifactsSection, revokeArtifact, revokedArtifacts, deskCallPage, deskPage, issuePage, ledgerPage, memoryCommitPage, memoryFile, memoryPage, openMemory, openRepo, publicDiff, readAlerts } from "./desk-pages.js";
+import { automationsSection, outboxPage, storeSection, artifactGonePage, artifactPage, artifactsSection, revokeArtifact, revokedArtifacts, deskCallPage, deskPage, issuePage, ledgerPage, memoryCommitPage, memoryFile, memoryPage, openMemory, openRepo, publicDiff, readAlerts } from "./desk-pages.js";
 import { appAccess, appFramePage, appShellPage, FRAME_CSP, pagesPage } from "./app-pages.js";
 import { AppStore, COLLECTION } from "./app-store.js";
 import { improveKloru, setImproveKloru } from "./prefs.js";
@@ -640,6 +640,14 @@ export function createConsole(o: ConsoleOptions): http.Server {
       const mine = normPhone(ctx.user.phone);
       const list = o.deskDir ? openRepo(o.deskDir).artifacts().filter((a) => !gone.has(a.id) && (a.kind === "app" || normPhone(a.phone) === mine)) : [];
       return page(ctx, 200, "Pages", pagesPage(list), undefined, "/pages");
+    }
+    // Messages: your own outbox; an owner can look at everyone's with ?all.
+    if (method === "GET" && path === "/outbox" && (isAdmin(ctx.user) || memberOf(ctx.user))) {
+      if (!o.deskDir) return page(ctx, 404, "Not found", messageBody("No desk", "This console isn't connected to a desk."));
+      const all = isAdmin(ctx.user) && url.searchParams.has("all");
+      const body = outboxPage(o.deskDir, all ? { name: (phone) => familyNow(phone)?.name } : { phone: ctx.user.phone });
+      const more = isAdmin(ctx.user) ? `<ul class="go"><li>${all ? `<a href="/outbox">Only mine</a>` : `<a href="/outbox?all">Everyone's</a>`}</li></ul>` : "";
+      return page(ctx, 200, "Messages", body + more, undefined, "/outbox");
     }
     if (path === "/policy" && (isAdmin(ctx.user) || memberOf(ctx.user))) {
       const client = o.clientFor(ctx.user);

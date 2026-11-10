@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Desk, type MessageCheck, type MessageDecision, type Planner, type WorkerHost } from "@kloru/desk";
+import { Desk, type FirstPassCheck, type FirstPassChoice, type Planner, type WorkerHost } from "@kloru/desk";
 import { describe, expect, it } from "vitest";
 import { TextDesk, type TextDeskOptions, type TextIn } from "../src/text-desk.js";
 import type { TalkerTurn } from "../src/text-talker.js";
@@ -22,9 +22,10 @@ const settle = async (ms = 40) => {
   while (Date.now() < end) await new Promise((r) => setTimeout(r, 5));
 };
 
-function setup(o: { reply?: (t: TalkerTurn) => string; idleMs?: number; ingest?: TextDeskOptions["ingest"]; decide?: (c: MessageCheck) => Promise<MessageDecision>; react?: (conversation: string, message: string, reaction: string) => Promise<boolean>; holdMs?: number; shape?: TextDeskOptions["shape"]; feedback?: TextDeskOptions["feedback"]; checkDraft?: TextDeskOptions["checkDraft"] } = {}) {
+function setup(o: { reply?: (t: TalkerTurn) => string; idleMs?: number; ingest?: TextDeskOptions["ingest"]; pass?: (c: FirstPassCheck) => FirstPassChoice | Promise<FirstPassChoice>; react?: (conversation: string, message: string, reaction: string) => Promise<boolean>; shape?: TextDeskOptions["shape"]; feedback?: TextDeskOptions["feedback"]; checkDraft?: TextDeskOptions["checkDraft"] } = {}) {
   const planner: Planner = { handle: async () => {} };
-  const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "textdesk-")), host: new Host(), planner, ...(o.decide ? { decideMessage: o.decide } : {}) });
+  const passes: FirstPassCheck[] = [];
+  const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "textdesk-")), host: new Host(), planner, notify: async () => true, firstPass: async (c) => (passes.push(c), (o.pass ?? (() => "send"))(c)) });
   const turns: TalkerTurn[] = [];
   const sent: string[] = [];
   const text = new TextDesk({
@@ -43,7 +44,6 @@ function setup(o: { reply?: (t: TalkerTurn) => string; idleMs?: number; ingest?:
     },
     idleMs: o.idleMs ?? 10_000,
     burstMs: 10,
-    ...(o.holdMs !== undefined ? { holdMs: o.holdMs } : {}),
     ...(o.ingest ? { ingest: o.ingest } : {}),
     ...(o.shape ? { shape: o.shape } : {}),
     ...(o.feedback ? { feedback: o.feedback } : {}),
@@ -51,8 +51,11 @@ function setup(o: { reply?: (t: TalkerTurn) => string; idleMs?: number; ingest?:
     timezone: "America/Los_Angeles",
     log: () => {},
   });
-  return { desk, text, turns, sent };
+  return { desk, text, turns, sent, passes };
 }
+
+/** The first pass most tests here use: answers and questions go now, everything else is the organizer's. */
+const resultsWait = (c: FirstPassCheck): FirstPassChoice => (c.item.why === "reply" || c.item.why === "question" ? "send" : "organizer");
 
 const imsg = (id: string, body: string, from = EZRA): TextIn => ({ channel: "imessage", id, from, thread: `imessage:${from}`, text: body });
 const mail = (id: string, body: string, o: Partial<TextIn> = {}): TextIn => ({ channel: "email", id, from: "ezra@work.example.com", thread: "<root@work.example.com>", text: body, subject: "Dentist", messageId: `<${id}@work.example.com>`, references: ["<root@work.example.com>"], dmarc: "pass", ...o });
@@ -145,16 +148,17 @@ describe("texts and emails become desk conversations", () => {
 });
 
 describe("a result that can't be sent", () => {
-  it("stays undelivered, so the note after the conversation carries it", async () => {
+  it("stays in their outbox to go again, so it isn't lost and isn't written twice", async () => {
     const planner: Planner = { handle: async () => {} };
     const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "textdesk-")), host: new Host(), planner });
     let up = true;
+    const sent: string[] = [];
     const text = new TextDesk({
       desk,
       callers: (p) => (p === EZRA ? { allowed: true, tier: "owner" } : { allowed: false }),
       emailPerson: () => undefined,
       talker: async (t) => (t.event ? "Found it." : (t.tools.fileIssue("x"), "On it.")),
-      send: { imessage: async () => up },
+      send: { imessage: async (_to, body) => (up ? (sent.push(body), true) : false) },
       burstMs: 10,
       timezone: "America/Los_Angeles",
       log: () => {},
@@ -164,7 +168,12 @@ describe("a result that can't be sent", () => {
     up = false;
     desk.resolve(1, "Tomorrow: drop-off at 8.");
     await settle(120);
-    expect(desk.repo.undelivered(call.id).map((m) => m.text)).toEqual(["Tomorrow: drop-off at 8."]);
+    expect(desk.outbox.list(EZRA)).toMatchObject([{ text: "Found it.", state: "queued", tries: 1 }]);
+    expect(desk.repo.undelivered(call.id)).toEqual([]);
+    up = true;
+    await desk.outbox.runOrganizer(EZRA);
+    expect(sent).toEqual(["On it.", "Found it."]);
+    expect(desk.outbox.list(EZRA)).toEqual([]);
   });
 });
 
@@ -298,18 +307,17 @@ describe("photos and files sent by text or email", () => {
   });
 });
 
-describe("one outbox: every message in a thread passes the check (#37)", () => {
-  it("a reply to their text is checked as a direct answer and recorded in the ledger", async () => {
-    const checks: MessageCheck[] = [];
-    const { desk, text, sent } = setup({ decide: async (c) => (checks.push(c), { action: "send", p: 0.9 }) });
+describe("one outbox: every message in a thread goes through it (#37)", () => {
+  it("a reply to their text is a reply from the talker, and is recorded in the ledger", async () => {
+    const { desk, text, sent, passes } = setup();
     await text.receive(imsg("m1", "What's the link to the parking at SFO?"));
     expect(sent).toEqual([`imessage ${EZRA}: On it.`]);
-    expect(checks[0]).toMatchObject({ from: "talker", replyingTo: "What's the link to the parking at SFO?" });
+    expect(passes[0]!.item).toMatchObject({ why: "reply", from: { agent: "talker" }, replyingTo: "What's the link to the parking at SFO?", thread: { channel: "imessage", to: EZRA } });
     expect(desk.recentMessages(EZRA).at(-1)).toMatch(/sent \(imessage to \+14155550190\): On it\./);
   });
 
   it("a dropped result isn't sent but counts as told", async () => {
-    const { desk, text, sent } = setup({ decide: async (c) => ({ action: c.replyingTo ? "send" : "drop", p: 0.95 }) });
+    const { desk, text, sent } = setup({ pass: (c) => (c.item.why === "reply" ? "send" : "drop") });
     await text.receive(imsg("m1", "What's on tomorrow?"));
     const call = desk.repo.liveCallFor(EZRA)!;
     desk.resolve(desk.openIssues()[0]!.id, "Dentist at 3.");
@@ -318,46 +326,50 @@ describe("one outbox: every message in a thread passes the check (#37)", () => {
     expect(desk.repo.call(call.id)!.deliveredSeq).toBe(1);
   });
 
-  it("a held result waits, then goes out with the next result as one message", async () => {
-    let hold = true;
-    const { desk, text, sent, turns } = setup({ decide: async (c) => ({ action: c.replyingTo || !hold ? "send" : "hold", p: 0.95 }) });
-    await text.receive(imsg("m1", "Find SFO parking and a mailbox plan"));
-    const call = desk.repo.liveCallFor(EZRA)!;
-    const [a] = desk.openIssues();
-    desk.resolve(a!.id, "SFO long-term is $27 a day.");
-    await settle(80);
-    expect(sent).toHaveLength(1);
-    expect(desk.repo.call(call.id)!.deliveredSeq).toBe(0);
-    const talkerCalls = turns.length;
-    await settle(80);
-    expect(turns.length).toBe(talkerCalls); // no busy loop while nothing new arrives
-    hold = false;
-    const b = desk.fileIssue(call.id, "Mailbox plan");
-    desk.resolve(b.id, "Mailbox plan is on your page.");
-    await settle(80);
-    expect(sent).toHaveLength(2);
-    expect(turns.at(-1)!.event).toContain("SFO long-term");
-    expect(turns.at(-1)!.event).toContain("Mailbox plan");
-    expect(desk.repo.call(call.id)!.deliveredSeq).toBe(2);
-  });
-});
-
-describe("held results are part of the next reply (review fix)", () => {
-  it("their next text is answered with the held result in view, and it isn't sent again after", async () => {
-    let hold = true;
-    const { desk, text, sent, turns } = setup({ decide: async (c) => ({ action: c.replyingTo || !hold ? "send" : "hold", p: 0.95 }) });
+  it("a result left for the organizer waits in their outbox, written once, and later goes out in the thread", async () => {
+    const { desk, text, sent, turns, passes } = setup({ pass: resultsWait });
     await text.receive(imsg("m1", "Find SFO parking"));
     const call = desk.repo.liveCallFor(EZRA)!;
     desk.resolve(desk.openIssues()[0]!.id, "SFO long-term is $27 a day.");
     await settle(80);
     expect(sent).toHaveLength(1);
-    hold = false;
-    await text.receive(imsg("m2", "Any news?"));
-    expect(turns.at(-1)!.event).toContain("SFO long-term");
-    expect(sent).toHaveLength(2);
+    expect(passes.at(-1)!.item).toMatchObject({ why: "result", from: { agent: "talker" } });
+    expect(desk.outbox.list(EZRA)).toMatchObject([{ text: "Here's what I found.", state: "queued", thread: { channel: "imessage", to: EZRA } }]);
+    // The conversation has moved on: nothing is written again while it waits.
     expect(desk.repo.call(call.id)!.deliveredSeq).toBe(1);
+    const talkerCalls = turns.length;
     await settle(80);
-    expect(sent).toHaveLength(2);
+    expect(turns.length).toBe(talkerCalls);
+    // With no organizer set up, what waits goes as written.
+    await desk.outbox.runOrganizer(EZRA);
+    expect(sent).toEqual([`imessage ${EZRA}: On it.`, `imessage ${EZRA}: Here's what I found.`]);
+    expect(desk.repo.turns(call.id, 0).at(-1)).toMatchObject({ role: "kloru", text: "Here's what I found." });
+  });
+});
+
+describe("the talker's outbox tools", () => {
+  it("a reminder it sets is theirs, scheduled, with no issue filed", async () => {
+    const { desk, text } = setup({ reply: (t) => (void t.tools.remind("Reminder: call the dentist.", "2099-01-05T09:00"), "I'll remind you at 9.") });
+    await text.receive(imsg("m1", "Remind me at 9 on the 5th to call the dentist"));
+    await settle(20);
+    expect(desk.outbox.list(EZRA)).toMatchObject([{ why: "reminder", state: "scheduled", text: "Reminder: call the dentist.", from: { agent: "talker" } }]);
+  });
+
+  it("it can list what's waiting and stop one", async () => {
+    const said: string[] = [];
+    const { desk, text } = setup({
+      reply: (t) => {
+        const id = /o_[A-Za-z0-9_-]+/.exec(t.tools.outboxList())?.[0] ?? "";
+        said.push(t.tools.outboxList(), id ? t.tools.outboxCancel(id) : "nothing");
+        return "Stopped.";
+      },
+    });
+    const set = await desk.remind(EZRA, "Reminder: call the dentist.", "2099-01-05T09:00");
+    expect(set.ok).toBe(true);
+    await text.receive(imsg("m1", "Never mind the dentist reminder"));
+    expect(said[0]).toContain("call the dentist");
+    expect(said[1]).toMatch(/Cancelled/);
+    expect(desk.outbox.list(EZRA)).toEqual([]);
   });
 });
 
@@ -440,22 +452,6 @@ describe("a text that starts work gets a reaction, not a message", () => {
   });
 });
 
-describe("Nov 2: a held result still reaches them", () => {
-  it("a result held with nothing to wait for goes on its own after holdMs, once", async () => {
-    // Jev holds every result that isn't a direct reply, as it did with the laundry baskets.
-    const { desk, text, sent } = setup({ holdMs: 80, decide: async (c) => (c.replyingTo ? { action: "send", p: 0.9 } : { action: "hold", p: 0.9 }) });
-    await text.receive(imsg("m1", "Find me a laundry basket"));
-    const issue = desk.openIssues()[0]!;
-    desk.merge(issue.id, "info", "I updated the page with four options up to $100.");
-    await settle(40);
-    expect(sent).toEqual([`imessage ${EZRA}: On it.`]);
-    await settle(250);
-    expect(sent).toEqual([`imessage ${EZRA}: On it.`, `imessage ${EZRA}: Here's what I found.`]);
-    const call = desk.repo.liveCallFor(EZRA)!;
-    expect(desk.repo.undelivered(call.id)).toEqual([]);
-  });
-});
-
 describe("a card number sent by text (2026-11-02)", () => {
   it("is removed before the transcript or the talker sees it", async () => {
     const { desk, text, turns } = setup();
@@ -479,13 +475,14 @@ describe("follow-ups and questions (SFO parking, 2026-11-03)", () => {
     expect(turns.at(-1)!.open![0]).toContain(open!.request);
   });
 
-  it("a question from the PM goes out at once, even when the check would hold it", async () => {
-    const { desk, text, sent } = setup({ decide: async (c) => ({ action: c.replyingTo ? "send" : "hold", p: 0.95 }), reply: (t) => (t.event ? "Did you see a $78 charge from SFO?" : "On it.") });
+  it("a question from the PM reaches the outbox as a question, so it goes at once while results wait", async () => {
+    const { desk, text, sent, passes } = setup({ pass: resultsWait, reply: (t) => (t.event ? "Did you see a $78 charge from SFO?" : "On it.") });
     await text.receive(imsg("m1", "Book SFO long-term parking"));
     const [issue] = desk.openIssues();
     expect(desk.askCaller(issue!.id, "Do you see a $78 charge from SFO in Wallet?").ok).toBe(true);
     await settle(120);
     expect(sent.at(-1)).toContain("Did you see a $78 charge from SFO?");
+    expect(passes.at(-1)!.item.why).toBe("question");
   });
 });
 

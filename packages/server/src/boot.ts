@@ -7,6 +7,7 @@
 import { AccountsSyncer, Store, SyncRunner, dayView, storeTools, type StoreScope } from "@kloru/store";
 import { storeFastPath } from "./fast-path.js";
 import { comsDecider } from "./coms-decider.js";
+import { outboxDecider } from "./outbox-decider.js";
 import { eventGate } from "./event-gate.js";
 import { Events } from "./events.js";
 import { guidelineCheck } from "./guideline-check.js";
@@ -15,7 +16,7 @@ import { actionDecider } from "./action-decider.js";
 import { gmailNotifier } from "./notify.js";
 import { loadToolGuide } from "./tool-guide.js";
 import { appErrorsReader } from "./app-errors.js";
-import { Desk, MediaStore, Memory, Vault, type DraftCheck, vaultTools, type VaultKind, type MemberPlan, type Notice, type NoticeMedia, artifactTools, appTools, automationTools, deleteAutomation, type AutomationEvents, groceryTools, mediaTools, workerTools, TechnicalPM, memoryTools } from "@kloru/desk";
+import { Desk, MediaStore, Memory, Vault, type DraftCheck, vaultTools, type VaultKind, type MemberPlan, type Notice, type NoticeMedia, artifactTools, appTools, automationTools, deleteAutomation, type AutomationEvents, groceryTools, mediaTools, workerTools, TechnicalPM, OutboxOrganizer, memoryTools } from "@kloru/desk";
 import { mediaIngest } from "./media-ingest.js";
 import { RuntimeWorkerHost } from "./desk-host.js";
 import { langfuseFromEnv, prefsAllowContent } from "./telemetry.js";
@@ -927,15 +928,30 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       contentAllowed: prefsAllowContent(env.KLORU_VOICE_PREFS?.trim()),
       ...(engineerModel ? { engineerModel } : {}),
       ...(householdMemory ? { memory: householdMemory, legacyMemory: () => memory.readDurable() } : {}),
-      // What finishes after the owner hangs up is emailed to them (texts once A2P is approved).
       ...(artifactBase(env) ? { artifactBaseUrl: artifactBase(env)! } : {}),
       scheduler,
       // Script errors an app threw in someone's browser, from the website's store, so a worker can fix them.
       appErrors: appErrorsReader(env.KLORU_APPS_DB?.trim() || "/data/kloru/apps.db", log),
       ...(config.owner.timezone ? { timezone: config.owner.timezone } : {}),
       onWrite: (slug: string) => void storeRunner?.kick(slug).catch(() => undefined),
-      // A model writes that email with only what wasn't heard on the call, or decides none is needed (#37).
-      // Coms: every message passes one check (Jev) and lands in the ledger; the agent that drafted it sends it.
+      // Each person's outbox: a fast pass (Jev) on every message for them, and an organizer agent for what waits.
+      ...(fastKey && env.KLORU_COMS?.trim() !== "off" ? { firstPass: outboxDecider({ apiKey: fastKey, log }) } : {}),
+      organizer: new OutboxOrganizer({
+        model: pmModel,
+        streamFn: opts.streamFn ?? (streamSimple as StreamFn),
+        getApiKey: (provider: string) => apiKeyFor(provider, env),
+        log,
+        ...(config.owner.timezone ? { timezone: config.owner.timezone } : {}),
+        onReply: (r) => {
+          try {
+            mkdirSync(state.path("sessions"), { recursive: true });
+            appendFileSync(join(state.path("sessions"), `${encodeURIComponent("desk:outbox")}.jsonl`), `${JSON.stringify({ role: "assistant", ...r })}\n`);
+          } catch (e) {
+            log(`metrics: organizer cost not recorded: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        },
+      }),
+      // Coms: a send from someone's connected account passes one check (Jev) and lands in the ledger.
       ...(fastKey && env.KLORU_COMS?.trim() !== "off" ? { decideMessage: comsDecider({ apiKey: fastKey, timezone: config.owner.timezone ?? "America/Los_Angeles" }) } : {}),
       // A worker's or the PM's draft is weighed against how they like messages, and redrafted once on a clear miss.
       ...(fastKey && env.KLORU_MESSAGE_SHAPE?.trim() !== "off" ? { checkDraft: ((check) => async (d: DraftCheck) => { const v = await check(d); return v.verdict === "fits" ? { fits: true as const } : { fits: false as const, why: REDRAFT[v.verdict] }; })(draftChecker({ apiKey: fastKey })) } : {}),

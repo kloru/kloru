@@ -17,3 +17,7 @@ export { Vault, VAULT_KINDS, SECRET_FIELDS, luhnNumbers, type VaultEntry, type V
 export { vaultTools, describeEntry } from "./vault-tools.js";
 export { PERMISSIONS, accessLine, describeNeed, type AccessCheck, type AccessChoice, type AccessDecision, type AccessReview, type Need, type Permission } from "./access.js";
 export { mediaTools } from "./media-tools.js";
+export { canMove, moveItem, isFinal, OUTBOX_FINAL, type OutboxState } from "./outbox-machine.js";
+export { OutboxStore, readOutbox, type OutboxChannel, type OutboxClock, type OutboxItem, type OutboxThread, type OutboxWhy } from "./outbox-store.js";
+export { PersonOutbox, localTime, whenIn, type FirstPassCheck, type FirstPassChoice, type Organizer, type OrganizerActions, type OrganizerView, type OutboxDeps, type OutboxPerson, type OutboxSubmit } from "./outbox.js";
+export { ORGANIZER_RULES, OutboxOrganizer, itemLine, organizerTools, organizerView, type OutboxOrganizerOptions } from "./outbox-organizer.js";

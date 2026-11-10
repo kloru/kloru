@@ -71,9 +71,10 @@ describe("a member's action that the owner's policy asks about", () => {
     expect(desk.repo.inbox(cleoCall.id, 0).at(-1)!.text).toMatch(/asked Ezra/);
   });
 
-  it("Ezra off the phone: he gets an email, and his next call carries the question", async () => {
+  it("Ezra off the phone: his outbox sends him the question, and his next call carries it", async () => {
     const { desk, role, notices } = setup({ ezraOnCall: false });
     await role.ownerApproval!(MOVE);
+    await settle(30); // the question goes through his outbox
     expect(notices).toHaveLength(1);
     expect(notices[0]).toMatchObject({ phone: EZRA });
     expect(notices[0]!.text).toContain("Cleo asked me to move Ezra's 3 PM to 4 PM");

@@ -122,8 +122,8 @@ export interface Merge {
   draft?: string;
   /** A change told as it happened, while its issue's work goes on. */
   progress?: boolean;
-  /** Something they must do now (a takeover link): goes out at once, never held or dropped. */
-  urgent?: boolean;
+  /** It asks them something the work waits on (a question, a yes, a takeover link). */
+  question?: boolean;
 }
 
 export interface LedgerEntry {

@@ -2,9 +2,10 @@
  * Texts and emails as desk conversations, like phone calls. Each thread (one iMessage thread per
  * person; an email thread by its root Message-ID) is a desk call with channel imessage or email.
  * Each message from them is a caller turn the text talker answers; each result that lands in the
- * call's inbox becomes one message in the thread. Every message goes through the desk's one outbox
- * (sendInConversation): checked like any other, sent on this thread, and recorded in the ledger. Quiet for idleMs ends the conversation, which
- * runs the memory update and the after-conversation note exactly as hanging up does.
+ * call's inbox becomes one message in the thread. Every message goes into the person's outbox
+ * (submitFromConversation), which sends it on this thread now, keeps it for a better time or drops
+ * it, and records it in the ledger. Quiet for idleMs ends the conversation, which runs the memory
+ * update exactly as hanging up does.
  *
  * Who's writing is a hard rule: a phone number through the family's caller list, an email address
  * only when it passed DMARC (email is easy to forge, and these conversations act with their powers).
@@ -84,8 +85,6 @@ export interface TextDeskOptions {
   seenFile?: string;
   /** How long to wait for more results before telling them as one message. */
   burstMs?: number;
-  /** The longest a held result waits for others to go with it. */
-  holdMs?: number;
   timezone: string;
   log: (m: string) => void;
   /** How a written message should look for this person (message-shape.ts), decided before it's written. */
@@ -107,12 +106,14 @@ export class TextDesk {
   private readonly seen = new Set<string>();
   private readonly idleMs: number;
   private readonly burstMs: number;
-  private readonly holdMs: number;
 
   constructor(private readonly o: TextDeskOptions) {
     this.idleMs = o.idleMs ?? 30 * 60_000;
     this.burstMs = o.burstMs ?? 3000;
-    this.holdMs = o.holdMs ?? 90_000;
+    // An outbox item that answers in a thread goes out on that thread's own transport.
+    o.desk.useThreadSender(async (th, text) =>
+      th.channel === "imessage" ? !!(await this.o.send.imessage?.(th.to, text)) : !!(await this.o.send.email?.(th.to, th.subject ?? "From Kloru", text, th.threading ?? {})),
+    );
     if (o.seenFile && existsSync(o.seenFile)) {
       for (const id of readFileSync(o.seenFile, "utf8").split("\n").filter(Boolean).slice(-SEEN_MAX)) this.seen.add(id);
     }
@@ -165,7 +166,7 @@ export class TextDesk {
     }
   }
 
-  /** Shutdown: open conversations end properly (memory update, note), so a deploy doesn't cut them off. */
+  /** Shutdown: open conversations end properly (memory update), so a deploy doesn't cut them off. */
   close(): void {
     for (const t of this.threads.values()) {
       clearTimeout(t.timer);
@@ -222,7 +223,7 @@ export class TextDesk {
   }
 
   /**
-   * Their message, answered with whatever was waiting for them (an ask, a result, a held burst) in
+   * Their message, answered with whatever was waiting for them (an ask, a result) in
    * view: it's part of this answer, so it isn't sent again a moment later.
    */
   private async answer(t: Thread, text: string, reactTo?: ReactTarget): Promise<void> {
@@ -239,63 +240,50 @@ export class TextDesk {
     t.lastAsk = text;
     if (reactTo) t.reactTo = reactTo;
     const carried = this.o.desk.repo.inbox(t.callId, t.seq);
-    const r = await this.say(t, carried, text, reactTo);
-    if (carried.length && r !== "failed") {
+    await this.say(t, carried, text, reactTo);
+    // Said, queued or dropped, the outbox has it now.
+    if (carried.length) {
       t.seq = carried.at(-1)!.seq;
       this.o.desk.ack(t.callId, t.seq);
     }
   }
 
-  /**
-   * Results that land in the conversation's inbox become messages, a burst as one. A held burst goes
-   * with the next result, or on its own once it has waited holdMs.
-   */
+  /** Results that land in the conversation's inbox become messages, a burst as one. */
   private async pump(key: string, t: Thread): Promise<void> {
     let after = t.seq;
-    let heldAt: number | undefined;
     for (;;) {
       const call = this.o.desk.repo.call(t.callId);
       if (!call || call.endedAt || this.threads.get(key) !== t) return;
       after = Math.max(after, t.seq);
-      const first = await this.o.desk.waitInbox(t.callId, after, heldAt === undefined ? 60_000 : Math.max(0, heldAt + this.holdMs - Date.now()));
-      const due = !first.length && heldAt !== undefined && Date.now() - heldAt >= this.holdMs;
-      if (!first.length && !due) continue;
-      if (first.length) await new Promise((r) => setTimeout(r, this.burstMs).unref?.());
+      const first = await this.o.desk.waitInbox(t.callId, after, 60_000);
+      if (!first.length) continue;
+      await new Promise((r) => setTimeout(r, this.burstMs).unref?.());
       // Read in turn with their messages: a reply that already carried these leaves nothing to send.
       let last = t.seq;
       const run = t.chain.then(async () => {
         const merges = this.o.desk.repo.inbox(t.callId, t.seq);
         if (!merges.length) return "none" as const;
         last = merges.at(-1)!.seq;
-        return this.say(t, merges, undefined, undefined, due);
+        return this.say(t, merges);
       });
       t.chain = run.catch(() => undefined);
-      let r: ConversationSend | "quiet" | "none" = "failed";
+      let r: ConversationSend | "quiet" | "none";
       try {
         r = await run;
       } catch (error) {
+        // Never written or never reached the outbox: left undelivered, so the end of the conversation carries it.
         this.o.log(`text: passing on results for ${t.callId} failed: ${error instanceof Error ? error.message : String(error)}`);
+        return;
       }
-      if (r === "none") {
-        heldAt = undefined;
-        continue;
-      }
-      // Not sent (a failed send): left undelivered, so the note after the conversation carries it.
-      if (r === "failed") return;
-      // Held: it waits for the next result and goes with it.
-      if (r === "held") {
-        after = last;
-        heldAt ??= Date.now();
-        continue;
-      }
-      heldAt = undefined;
+      if (r === "none") continue;
+      // Sent, queued or dropped, the outbox has it now.
       t.seq = last;
       this.o.desk.ack(t.callId, last);
     }
   }
 
-  /** One message from Kloru, through the one outbox; quiet when there's nothing new to say. */
-  private async say(t: Thread, merges: Merge[] = [], replyingTo?: string, reactTo?: ReactTarget, heldBefore = false): Promise<ConversationSend | "quiet"> {
+  /** One message from Kloru, into their outbox; quiet when there's nothing new to say. */
+  private async say(t: Thread, merges: Merge[] = [], replyingTo?: string, reactTo?: ReactTarget): Promise<ConversationSend | "quiet"> {
     const shape = await this.shapeFor(t, merges, replyingTo);
     // A reaction goes on their message: the one this answers, or for a result, the one that asked.
     const target = reactTo ?? (merges.length ? t.reactTo : undefined);
@@ -322,6 +310,13 @@ export class TextDesk {
         },
         // How they want Kloru to work goes into their guidelines now; other facts wait for the end-of-call memory.
         remember: (text) => (void this.o.desk.rememberNow(t.callId, text).catch((e: Error) => this.o.log(`text: remember failed: ${e.message}`)), "Noted."),
+        remind: async (text, at) => {
+          acted.done = true;
+          const r = await this.o.desk.remind(t.phone, text, at, { agent: "talker", call: t.callId });
+          return r.ok ? `Set for ${at}.` : r.error;
+        },
+        outboxList: () => this.o.desk.outboxList(t.phone).join("\n") || "Nothing is waiting to be sent to them.",
+        outboxCancel: (id) => ((r) => (r.ok ? "Cancelled; it won't be sent." : r.error))(this.o.desk.outboxCancel(id, t.phone)),
         ...(target && this.o.send.react ? { react: (r: Reaction) => ((reacted.done = true), (reacted.eyes ||= r === "eyes"), void this.react(t, target, r, replyingTo ?? t.lastAsk ?? ""), "Reacted.") } : {}),
       },
       ...(shape ? { shape } : {}),
@@ -340,7 +335,7 @@ export class TextDesk {
       const done = (x: string) => () => `${x} (already done for this message).`;
       reply = await this.o.talker({
         ...turn,
-        tools: { ...turn.tools, fileIssue: done("Filed"), updateIssue: done("Updated"), confirm: done("Confirmed"), remember: done("Noted") },
+        tools: { ...turn.tools, fileIssue: done("Filed"), updateIssue: done("Updated"), confirm: done("Confirmed"), remember: done("Noted"), remind: async () => done("Set")(), outboxCancel: done("Cancelled") },
         redraft: { draft: reply, why },
       });
     }
@@ -349,7 +344,7 @@ export class TextDesk {
       if (result && reacted.done && shape) t.lastSent = { asked: t.lastAsk ?? "", text: "(a reaction on their message)", shape };
       return "quiet";
     }
-    const r = await this.send(t, reply, merges.flatMap((m) => (m.issue !== undefined ? [m.issue] : [])), replyingTo, heldBefore, merges.some((m) => m.urgent));
+    const r = await this.send(t, reply, merges.flatMap((m) => (m.issue !== undefined ? [m.issue] : [])), replyingTo, merges.some(asks));
     if (r === "sent" && result && shape) t.lastSent = { asked: t.lastAsk ?? "", text: reply, shape };
     return r;
   }
@@ -363,7 +358,7 @@ export class TextDesk {
   private async redraftReason(t: Thread, merges: Merge[], replyingTo: string | undefined, shape: MessageShape | undefined, draft: string, canReact: boolean): Promise<string | undefined> {
     if (!this.o.checkDraft) return undefined;
     const content = merges.map((m) => m.text).join("\n");
-    const kind = !merges.length ? "their_message" : merges.some((m) => m.draft || /^Question for the caller/.test(m.text)) ? "question" : "result";
+    const kind = !merges.length ? "their_message" : merges.some(asks) ? "question" : "result";
     const v = await this.o
       .checkDraft({ channel: t.channel === "email" ? "email" : "imessage", kind, theirMessage: replyingTo ?? t.lastAsk ?? "", ...(content ? { content } : {}), ...(shape ? { shape } : {}), draft, preferences: this.o.desk.messagePreferences(t.phone), thread: this.threadText(t), canReact })
       .catch((e: Error) => (this.o.log(`text: draft check failed: ${e.message}`), undefined));
@@ -376,7 +371,7 @@ export class TextDesk {
   private async shapeFor(t: Thread, merges: Merge[], replyingTo?: string): Promise<MessageShape | undefined> {
     if (!this.o.shape) return undefined;
     const content = merges.map((m) => m.text).join("\n");
-    const kind = !merges.length ? "their_message" : merges.some((m) => m.draft || /^Question for the caller/.test(m.text)) ? "question" : "result";
+    const kind = !merges.length ? "their_message" : merges.some(asks) ? "question" : "result";
     const recent = this.threadText(t);
     const shape = await this.o
       .shape({ channel: t.channel === "email" ? "email" : "imessage", kind, theirMessage: replyingTo ?? t.lastAsk ?? "", ...(content ? { content } : {}), hasPage: /\/a\/[A-Za-z0-9_-]{22}/.test(content), preferences: this.o.desk.messagePreferences(t.phone), recent, open: this.openFor(t) })
@@ -385,30 +380,25 @@ export class TextDesk {
     return shape;
   }
 
-  /** Checked, sent on this thread, and recorded (the desk's outbox). */
-  private async send(t: Thread, text: string, issues: number[] = [], replyingTo?: string, heldBefore = false, urgent = false): Promise<ConversationSend> {
-    const r = await this.o.desk.sendInConversation(t.callId, { text, issues, ...(replyingTo ? { replyingTo } : {}), ...(heldBefore ? { heldBefore } : {}), ...(urgent ? { urgent } : {}), send: (x) => this.deliver(t, x) });
-    if (r === "failed") this.o.log(`text: reply in ${t.callId} not sent`);
+  /** Into their outbox, answering on this thread: sent now, kept for a better time, or dropped; recorded there. */
+  private async send(t: Thread, text: string, issues: number[] = [], replyingTo?: string, question = false): Promise<ConversationSend> {
+    const thread = t.channel === "imessage"
+      ? { channel: "imessage" as const, to: t.to }
+      : { channel: "email" as const, to: t.to, subject: t.subject ? `Re: ${t.subject.replace(/^re:\s*/i, "")}` : "From Kloru", threading: t.threading };
+    const r = await this.o.desk.submitFromConversation(t.callId, { text, issues, ...(replyingTo ? { replyingTo } : {}), ...(question ? { question } : {}), thread });
+    if (r === "failed") this.o.log(`text: reply in ${t.callId} not sent yet; their outbox tries again`);
     return r;
   }
 
   /**
    * A tapback on their message, recorded in the ledger like any message. It carries no words, so
-   * there's nothing for the message check to weigh. One that fails becomes a short text instead.
+   * there's nothing for the outbox to weigh. One that fails becomes a short text instead.
    */
   private async react(t: Thread, to: ReactTarget, reaction: Reaction, replyingTo: string): Promise<void> {
     const ok = await this.o.send.react!(to.conversation, to.message, reaction).catch((e: Error) => (this.o.log(`text: reaction in ${t.callId} failed: ${e.message}`), false));
     this.o.desk.repo.appendLedger({ issue: 0, call: t.callId, phone: t.phone, tool: "react", slug: "REACTION", args: { message: to.message, reaction }, ok, result: ok ? "sent" : "failed", decision: "send" });
     // Not a turn: the talker reads its turns as its own messages and would write the marker out.
     if (!ok) await this.send(t, reaction === "like" ? "Done." : "On it.", [], replyingTo);
-  }
-
-  /** This thread's own transport: their iMessage thread, or the email thread with its threading headers. */
-  private async deliver(t: Thread, text: string): Promise<boolean> {
-    const sent = t.channel === "imessage"
-      ? await this.o.send.imessage?.(t.to, text)
-      : await this.o.send.email?.(t.to, t.subject ? `Re: ${t.subject.replace(/^re:\s*/i, "")}` : "From Kloru", text, t.threading);
-    return !!sent;
   }
 
   /** Their own requests still being worked on, newest last, each with how it's going so a status question gets a true answer. */
@@ -445,6 +435,9 @@ function progress(i: Issue, now: number): string {
 }
 
 const samePhone = (a: string, b: string) => a.replace(/\D/g, "").slice(-10) === b.replace(/\D/g, "").slice(-10);
+
+/** A merge that asks them something the work waits on. */
+const asks = (m: Merge) => !!m.draft || !!m.question;
 
 function tag(m: Merge): string {
   const kind = m.kind === "events" ? "events" : "info";

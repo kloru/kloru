@@ -13,6 +13,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { join } from "node:path";
 import { capabilitiesForSlug, innerCalls, isReadSlug, isWriteCall, toolkitOfSlug } from "@kloru/apps";
 import type { Model } from "@earendil-works/pi-ai";
 import { hashArgs, type Capability, type RegisteredTool, type ScheduleEntry, type ScheduleEvent, type Scheduler, type WorkerRole } from "@kloru/core";
@@ -21,6 +22,8 @@ import { checkApp } from "./apps.js";
 import { OWNER_ONLY, PERMISSION_OF, PLUMBING, PUBLIC_NEEDS, PUBLIC_PLUMBING_NO, READ_ONLY, SURE, accessLine, describeNeed, hasNeed, type AccessCheck, type AccessDecision, type AccessReview, type Need } from "./access.js";
 import { mediaNote, type MediaItem, type MediaStore } from "./media.js";
 import { clip, type Memory } from "./memory.js";
+import { PersonOutbox, localTime, whenIn, type FirstPassCheck, type FirstPassChoice, type Organizer, type OutboxPerson } from "./outbox.js";
+import type { OutboxItem, OutboxThread, OutboxWhy } from "./outbox-store.js";
 import { Repo } from "./repo.js";
 import { err, ok, type Result } from "./result.js";
 import { describeEntry, type Vault } from "./vault.js";
@@ -133,10 +136,8 @@ export interface WorkerHost {
 export type Trigger =
   | { kind: "filed"; issue: number }
   | { kind: "comment"; issue: number; call: string; text: string }
-  /** A worker's note on its issue: a held message, or something only the PM can coordinate. */
+  /** A worker's note on its issue: something only the PM can coordinate. */
   | { kind: "worker_comment"; issue: number; text: string }
-  /** A conversation ended and something the caller asked for got done without them hearing it. */
-  | { kind: "unheard"; issue: number; call: string; unheard: string[] }
   | { kind: "pr"; issue: number }
   | { kind: "needs_confirmation"; issue: number }
   | { kind: "ops_finished"; issue: number }
@@ -196,10 +197,10 @@ export interface DeskOptions {
   notify?: (n: Notice) => Promise<boolean | NoticeChannel>;
   /** The message check (coms): every message is weighed here before it goes. Without it, app sends use decideAction. */
   decideMessage?: (c: MessageCheck) => Promise<MessageDecision>;
-  /** Quiet time after the last result before the PM hears what an ended call didn't, so results arrive together. */
-  notifyDelayMs?: number;
-  /** Longest that waits for a call's other work before the PM hears what's done. */
-  notifyWaitMs?: number;
+  /** The outbox's fast first pass over each message to a person: send it now, drop it, or leave it for their organizer. */
+  firstPass?: (c: FirstPassCheck) => Promise<FirstPassChoice>;
+  /** The agent that organizes what waits in a person's outbox. Without it, what waits goes as written. */
+  organizer?: Organizer;
   /** Where published artifacts are served, e.g. https://kloru.com/a/ (an id is appended). */
   artifactBaseUrl?: string;
   /** The agent's scheduler: automations made on a call are saved here and fire as desk issues. */
@@ -315,7 +316,10 @@ export interface NoticeMedia {
 export type NoticeChannel = "imessage" | "email";
 
 /** What became of a message Kloru wrote in a text or email conversation. */
-export type ConversationSend = "sent" | "held" | "dropped" | "failed";
+export type ConversationSend = "sent" | "queued" | "dropped" | "failed";
+
+/** Sends a reply inside the text or email thread it answers; false when it didn't go. */
+export type ThreadSender = (thread: OutboxThread, text: string) => Promise<boolean>;
 
 export type CloseStatus = Extract<IssueStatus, "resolved" | "duplicate" | "wont_do" | "superseded" | "not_planned">;
 
@@ -454,10 +458,9 @@ export class Desk {
   private readonly legacyMemory: (() => string) | undefined;
   private readonly notify: ((n: Notice) => Promise<boolean | NoticeChannel>) | undefined;
   private readonly decideMessage: ((c: MessageCheck) => Promise<MessageDecision>) | undefined;
-  /** Per ended call: the last inbox seq the PM was already woken about. */
-  private readonly toldPm = new Map<string, number>();
-  /** Pages the PM was already woken about. */
-  private readonly pagesTold = new Set<string>();
+  /** Every message to a person on Kloru's own channels goes through here. */
+  readonly outbox: PersonOutbox;
+  private threadSender: ThreadSender | undefined;
   private readonly ownerPhone: string | undefined;
   private readonly coOwner: ((phone: string) => boolean) | undefined;
   private readonly decideAccess: ((c: AccessCheck) => Promise<AccessDecision>) | undefined;
@@ -472,9 +475,6 @@ export class Desk {
   private readonly setMemberModel: ((words: string) => Promise<MemberPlan>) | undefined;
   private readonly applyMember: ((plan: MemberPlan) => void) | undefined;
   private readonly nameOf: (phone: string) => string | undefined;
-  private readonly notifyDelayMs: number;
-  private readonly notifyWaitMs: number;
-  private readonly noticeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly artifactBaseUrl: string;
   private setup: (() => string | undefined) | undefined;
   private readonly checkDraft: DeskOptions["checkDraft"];
@@ -532,9 +532,7 @@ export class Desk {
     this.applyMember = o.applyMember;
     this.nameOf = o.nameOf ?? (() => undefined);
     this.checkDraft = o.checkDraft;
-    this.notifyDelayMs = o.notifyDelayMs ?? 60_000;
     this.decideMessage = o.decideMessage;
-    this.notifyWaitMs = o.notifyWaitMs ?? 15 * 60_000;
     this.artifactBaseUrl = o.artifactBaseUrl ?? "https://kloru.com/a/";
     this.scheduler = o.scheduler;
     this.timezone = o.timezone ?? "America/Los_Angeles";
@@ -552,6 +550,24 @@ export class Desk {
     this.media = o.media;
     this.isGuideline = o.isGuideline;
     this.events.setMaxListeners(0);
+    this.outbox = new PersonOutbox({
+      dir: join(this.repo.dir, "outbox"),
+      now: () => this.now(),
+      log: this.log,
+      ...(o.firstPass ? { firstPass: o.firstPass } : {}),
+      ...(o.organizer ? { organizer: o.organizer } : {}),
+      person: (phone) => this.outboxPerson(phone),
+      request: (item) => this.outboxRequest(item),
+      changedPages: (item) => this.changedPages(item.phone, item.text),
+      recent: (phone) => this.recentMessages(phone),
+      checkDraft: (item, text, channel) => this.outboxDraft(item, text, channel),
+      deliver: (item, m) => this.outboxDeliver(item, m),
+      record: (item) => this.outboxRecord(item),
+      sent: (item) => this.outboxSent(item),
+      page: (phone, p) => this.outboxPage(phone, p),
+      addNote: (phone, line) => (this.memory ? this.memory.addOutboxNote(phone, line) : err("no memory here")),
+      isOwner: (phone) => this.isOwner(phone),
+    });
   }
 
   /**
@@ -560,13 +576,12 @@ export class Desk {
    */
   recover(): void {
     const cut = this.repo.liveCalls();
-    for (const call of cut) this.repo.endCall(call.id);
-    // The note after a conversation waits on a timer a restart loses: conversations that ended lately
-    // (or that this restart cut off) with results they never got are noted again.
-    const since = this.now().getTime() - Desk.RECOVER_NOTICE_MS;
-    for (const call of this.repo.allCalls()) {
-      if (call.endedAt && (cut.includes(call) || Date.parse(call.endedAt) >= since) && this.repo.undelivered(call.id).length) this.scheduleNotice(call.id);
+    for (const call of cut) {
+      this.repo.endCall(call.id);
+      // What a conversation cut off by the restart never heard goes to the person's outbox.
+      this.flushEnded(call.id);
     }
+    void this.outbox.recover().catch((e) => this.log(`desk: outbox recover failed: ${(e as Error).message}`));
     for (const issue of this.repo.issues((i) => i.purpose === "scout" && i.status === "executing")) this.move(issue, "failed");
     for (const issue of this.repo.issues((i) => i.purpose === "memory" && i.status === "executing")) {
       this.memory?.discard();
@@ -601,7 +616,12 @@ export class Desk {
     let pending = 0;
     // A schedule call (an automation running) carries nothing: results from earlier calls wait for a real one.
     // What a family member asked that waits on this caller's yes: asked again on every call until answered.
-    const waiting = o.channel === "schedule" ? [] : this.repo.issues((i) => i.status === "needs_confirmation" && !!i.confirmation?.by && samePhone(i.confirmation.by, o.phone) && !i.confirmation.confirmedBy);
+    // Their own draft from a conversation that ended is asked again too: its yes is still wanted.
+    const waiting = o.channel === "schedule" ? [] : this.repo.issues((i) => {
+      const c = i.confirmation;
+      if (i.status !== "needs_confirmation" || !c || c.confirmedBy) return false;
+      return c.by ? samePhone(c.by, o.phone) : samePhone(i.filedBy.phone, o.phone) && i.filedBy.call !== call.id && !!this.repo.call(i.filedBy.call)?.endedAt;
+    });
     for (const old of o.channel === "schedule" ? [] : this.repo.callsFor(o.phone)) {
       if (old.id === call.id || !old.endedAt) continue;
       const late = this.repo.undelivered(old.id).filter((m) => !waiting.some((i) => i.confirmation!.id === m.draft));
@@ -613,9 +633,10 @@ export class Desk {
       if (late.length) this.repo.ack(old.id, late.at(-1)!.seq);
     }
     for (const i of waiting) {
-      this.repo.appendInbox(call.id, { kind: "info", text: this.ownerAsk(i), issue: i.id, draft: i.confirmation!.id });
+      this.repo.appendInbox(call.id, { kind: "info", text: i.confirmation!.by ? this.ownerAsk(i) : `From an earlier call: Needs a yes before I do it: ${i.confirmation!.draft}`, issue: i.id, draft: i.confirmation!.id });
       pending++;
     }
+    if (o.channel !== "schedule") this.outbox.personSpoke(o.phone);
     const brief = this.brief(o.phone, call.id);
     if (o.channel !== "schedule") this.markOffered(o.phone, call.id);
     return { call, pending, brief };
@@ -657,6 +678,9 @@ export class Desk {
         this.log(`desk: day view failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       const theirs = this.guidelines?.(phone)?.trim();
+      const waiting = this.outbox.list(phone).map((i) => `- ${i.id} (${i.why}${i.state === "scheduled" && i.sendAt ? `, goes ${localTime(new Date(i.sendAt), this.timezone)}` : ", waiting"}): ${clip(i.text, 160)}`);
+      const sent = this.recentMessages(phone).filter((l) => / UTC sent /.test(l)).slice(-5).map((l) => `- ${clip(l, 260)}`);
+      const asked = this.outbox.recentAsk(phone);
       const offers = this.offerable(phone).map((s) => `- ${s.ask} (goal: ${s.goal}; why now: ${s.why})`);
       const owner = this.ownerName();
       const words = this.isOwner(phone) ? "" : this.ownerWords?.(phone)?.trim();
@@ -670,6 +694,9 @@ export class Desk {
         tasks.length ? `Recent tasks (newest first; what each found):\n${tasks.join("\n")}` : "",
         pages.length ? `Their pages (newest first; open one with artifact_read instead of searching again):\n${pages.join("\n")}` : "",
         day,
+        sent.length ? `Messages Kloru sent them lately (they may be answering one):\n${sent.join("\n")}` : "",
+        waiting.length ? `Messages waiting to go to them (outbox_list shows them, outbox_cancel stops one):\n${waiting.join("\n")}` : "",
+        asked ? `Kloru asked them how they want messages: "${clip(asked, 200)}". If they answer, remember it.` : "",
         offers.length ? `Things you could offer (one at a time: while work runs, or when they ask what's next):\n${offers.join("\n")}` : "",
       ].filter(Boolean).join("\n");
     } catch (error) {
@@ -682,6 +709,8 @@ export class Desk {
   addTurn(callId: string, t: { role: Turn["role"]; text: string; interrupted?: boolean }): Turn {
     const turn = this.repo.addTurn(callId, t);
     if (t.role === "caller") {
+      const call = this.repo.call(callId);
+      if (call && call.channel !== "schedule") this.outbox.personSpoke(call.phone);
       for (const issue of this.repo.issues((i) => i.filedBy.call === callId && i.kind !== "untriaged" && !isClosed(i.status))) {
         const steer = () =>
           this.host.steer(issue.id, `The caller said on the phone: "${t.text}". Kloru answers them there. Change your work only if this changes the request; if it doesn't, don't reply to it: your final message must still be your complete result.`);
@@ -883,7 +912,7 @@ export class Desk {
     this.repo.endCall(callId);
     this.events.emit(`inbox:${callId}`);
     if (!already) this.queueMemory(callId);
-    if (!already) this.scheduleNotice(callId);
+    if (!already) this.flushEnded(callId);
   }
 
   /**
@@ -1053,7 +1082,7 @@ export class Desk {
     for (const pr of issue.prs) if (pr.status === "open") pr.status = "rejected";
     this.note(issue, "pm", `Asked the caller: ${question}`);
     // A question waits on them: it goes now, never held to go with other updates.
-    this.deliver(issue.filedBy.call, { kind: "info", text: `Question for the caller (issue ${issueId}): ${question}`, issue: issueId, urgent: true });
+    this.deliver(issue.filedBy.call, { kind: "info", text: `Question for the caller (issue ${issueId}): ${question}`, issue: issueId, question: true, say: question });
     return ok(issue);
   }
 
@@ -1534,7 +1563,7 @@ export class Desk {
   needsPerson(issueId: number, text: string): Result<Issue> {
     const issue = this.repo.issue(issueId);
     if (!issue) return err(`no issue ${issueId}`);
-    this.deliver(issue.filedBy.call, { kind: "info", text, issue: issueId, urgent: true });
+    this.deliver(issue.filedBy.call, { kind: "info", text, issue: issueId, question: true });
     return ok(issue);
   }
 
@@ -1549,7 +1578,7 @@ export class Desk {
       if (!moved.ok) return moved;
     }
     this.repo.saveIssue(issue);
-    this.deliver(issue.filedBy.call, { kind: "info", text: `Needs a yes before I do it: ${draft}`, issue: issueId, draft: id, urgent: true });
+    this.deliver(issue.filedBy.call, { kind: "info", text: `Needs a yes before I do it: ${draft}`, issue: issueId, draft: id, question: true, say: `Before I do this I need your yes: ${draft}` });
     this.trigger({ kind: "needs_confirmation", issue: issueId });
     return ok(issue);
   }
@@ -1608,10 +1637,10 @@ export class Desk {
   }
 
   /**
-   * "Text me the link", "email me when you're done": a worker sends the person who asked a message
-   * on their channel, once the message check says so. Recorded in the ledger either way.
+   * "Text me the link", "email me when you're done": a worker's message to the person who asked.
+   * It goes into their outbox, which sends it now, keeps it for a better time, or drops it.
    */
-  async messageCaller(issueId: number, text: string, channel?: NoticeChannel, subject?: string, media: string[] = []): Promise<Result<NoticeChannel | "default">> {
+  async messageCaller(issueId: number, text: string, channel?: NoticeChannel, subject?: string, media: string[] = []): Promise<Result<string>> {
     const issue = this.repo.issue(issueId);
     if (!issue) return err(`no issue ${issueId}`);
     if (!this.notify) return err("Kloru can't text or email from here yet. Tell them plainly; offer to say it on the call.");
@@ -1623,9 +1652,33 @@ export class Desk {
     const call = this.repo.call(issue.filedBy.call);
     if (call && !call.endedAt && (call.channel === "imessage" || call.channel === "email") && !items.value.length && (!channel || channel === (call.channel === "email" ? "email" : "imessage"))) {
       this.deliver(call.id, { kind: "info", text: body, issue: issueId });
-      return ok("default");
+      return ok("Passed on in their conversation.");
     }
-    return this.sendChecked(issue, issue.filedBy.call, { from: "worker", text: body, subject: subject?.trim() || `Kloru: ${clip(issue.request, 70)}`, ...(channel ? { channel } : {}), ...(items.value.length ? { media: items.value } : {}) });
+    const phone = issue.filedBy.phone;
+    // The draft, weighed against how they like messages: a clear miss goes back to its writer once.
+    const once = `${issue.id}:worker`;
+    if (this.checkDraft && !this.redrafted.has(once)) {
+      const why = await this.draftMiss(phone, issue.filedBy.call, issue.request, body, channel, "result");
+      if (why) {
+        this.redrafted.add(once);
+        this.log(`desk: #${issue.id} worker draft → redraft: ${why}`);
+        return err(`Not sent yet: redraft it. ${why} Then send the new version the same way.`);
+      }
+    }
+    this.redrafted.delete(once);
+    const item = await this.outbox.submit({
+      phone,
+      text: body,
+      why: this.whyOf(issue),
+      from: { agent: "worker", issue: issue.id, call: issue.filedBy.call },
+      drafted: true,
+      subject: subject?.trim() || `Kloru: ${clip(issue.request, 70)}`,
+      ...(channel ? { channel } : {}),
+      ...(items.value.length ? { media: items.value.map((x) => x.item.id) } : {}),
+    });
+    if (item.state === "sent") return ok(`Sent${item.sentOn && item.sentOn !== "default" ? ` by ${item.sentOn}` : ""}.`);
+    if (item.state === "dropped") return ok("Not sent: they already have this or don't need it. Don't send it another way.");
+    return ok("It's in their outbox and will reach them at a good time for them. Don't send it another way; carry on.");
   }
 
   /** The photos and files a message to this issue's caller may carry: kept, and theirs to see. */
@@ -1642,72 +1695,219 @@ export class Desk {
     return ok(out);
   }
 
-  /**
-   * The PM's message after a conversation: what the caller asked for got done and they didn't hear it.
-   * Sent or dropped, what the call had waiting counts as told; held, it waits for the next call.
-   */
-  async tellCaller(callId: string, text: string, channel?: NoticeChannel, subject?: string, media: string[] = []): Promise<Result<NoticeChannel | "default">> {
-    const call = this.repo.call(callId);
-    if (!call) {
-      this.log(`desk: tell_caller: no such call ${callId}`);
-      return err(`no such call: ${callId}. Use the call id from the unheard trigger.`);
-    }
-    if (!this.notify) return err("Kloru can't text or email from here; the next call will carry it.");
-    const body = text.trim();
-    if (!body) return err("nothing to send");
-    const merges = this.repo.undelivered(callId);
-    const issue = this.repo.issue(merges.find((m) => m.issue !== undefined)?.issue ?? NaN) ?? this.repo.issues((i) => i.filedBy.call === callId && !i.purpose).at(-1);
-    if (!issue) return err(`call ${callId} asked for nothing`);
-    const items = this.attachable(issue, media);
-    if (!items.ok) return items;
-    const pages = this.repo.artifacts().filter((a) => a.call === callId && !a.emailedAt);
-    // The PM decides whether they'd want a page's link; nothing is added for it.
-    const r = await this.sendChecked(issue, callId, { from: "pm", text: body, subject: subject?.trim() || `Kloru: ${clip(issue.request, 70)}`, ...(channel ? { channel } : {}), ...(items.value.length ? { media: items.value } : {}) });
-    if (!r.ok) this.log(`desk: tell_caller on ${callId}: ${r.error}`);
-    const told = r.ok || /^Not sent: they/.test(r.ok ? "" : r.error);
-    if (told) {
-      if (merges.length) this.repo.ack(callId, merges.at(-1)!.seq);
-      for (const a of pages) this.repo.saveArtifact({ ...a, emailedAt: this.now().toISOString() });
-    }
-    return r;
+  // ---------------------------------------------------------------------------
+  // The outbox: every message to a person on Kloru's own channels goes through it
+  // ---------------------------------------------------------------------------
+
+  /** The thread a text or email conversation answers in; the text desk registers how to send there. */
+  useThreadSender(send: ThreadSender): void {
+    this.threadSender = send;
   }
 
   /**
-   * One outbox: a message the text talker wrote in a text or email conversation passes the same check
-   * as a worker's or the PM's, goes out on the conversation's own thread, and lands in the ledger and
-   * the thread, so the check and every agent see one history.
+   * A message the text talker wrote in a text or email conversation: into the person's outbox, which
+   * sends it on the conversation's own thread now, keeps it for a better time, or drops it.
    */
-  async sendInConversation(callId: string, m: { text: string; issues?: number[]; replyingTo?: string; heldBefore?: boolean; urgent?: boolean; send: (text: string) => Promise<boolean> }): Promise<ConversationSend> {
+  async submitFromConversation(callId: string, m: { text: string; issues?: number[]; replyingTo?: string; question?: boolean; thread: OutboxThread }): Promise<ConversationSend> {
     const call = this.repo.call(callId);
     if (!call) throw new DeskConflict(`no such call: ${callId}`);
-    const channel: NoticeChannel = call.channel === "email" ? "email" : "imessage";
-    // The result it passes on, if any, says what they asked; the message itself is no issue's change.
+    // The result it passes on, if any, says why it exists; with none, it answers what they wrote.
     const issue = this.repo.issue(m.issues?.at(-1) ?? NaN);
-    const request = issue?.request ?? this.repo.turns(callId, 0).filter((t) => t.role === "caller").at(-1)?.text ?? "";
-    const d = await this.checkMessage(
-      { phone: call.phone, call: callId, request, ...(issue ? { issue: issue.id } : {}) },
-      { to: call.phone, toCaller: true, from: "talker", text: m.text, channels: [channel], ...(m.replyingTo ? { replyingTo: m.replyingTo } : {}) },
-    );
-    const record = (decision: string, ok: boolean, result: string) =>
-      this.repo.appendLedger({ issue: 0, call: callId, phone: call.phone, tool: "reply", slug: "MESSAGE", args: { to: call.phone, channel, text: m.text }, ok, result, decision });
-    // A hold is a wait, not a drop: once it has waited (heldBefore), it goes, even if the second
-    // look calls it a repeat; it was never sent (the SFO parking answer lost on 2026-11-03).
-    if (d.action === "drop" && !m.heldBefore && !m.urgent) {
-      record("drop", false, "not sent: they already have this or don't need it");
-      return "dropped";
+    const why: OutboxWhy = m.question ? "question" : issue ? this.whyOf(issue) : m.replyingTo ? "reply" : "result";
+    const item = await this.outbox.submit({
+      phone: call.phone,
+      text: m.text,
+      why,
+      from: { agent: "talker", call: callId, ...(issue ? { issue: issue.id } : {}) },
+      drafted: true,
+      channel: m.thread.channel,
+      thread: m.thread,
+      ...(m.replyingTo ? { replyingTo: m.replyingTo } : {}),
+    });
+    if (item.state === "sent") return "sent";
+    if (item.state === "dropped") return "dropped";
+    // Not delivered: a reply they wait for has failed; anything else waits in the outbox.
+    return item.tries ? "failed" : "queued";
+  }
+
+  /** A reminder: words known now, sent at a time they chose, with no PM or worker run then. */
+  async remind(phone: string, text: string, at: string, from: OutboxItem["from"] = { agent: "system" }): Promise<Result<OutboxItem>> {
+    const body = text.trim();
+    if (!body) return err("say what the reminder should say");
+    if (!this.notify) return err("Kloru can't text or email from here yet, so it can't send a reminder.");
+    const when = whenIn(at, this.timezone);
+    if (!when) return err(`"${at}" isn't a time. Give it like 2026-11-11T09:00, in their timezone (${this.timezone}).`);
+    if (when.getTime() <= this.now().getTime()) return err(`${localTime(when, this.timezone)} has already passed. Now is ${localTime(this.now(), this.timezone)}.`);
+    return ok(await this.outbox.submit({ phone, text: body, why: "reminder", from, sendAt: when, subject: `Reminder: ${clip(body, 60)}` }));
+  }
+
+  /** A worker's reminder for the person who asked. */
+  async remindCaller(issueId: number, text: string, at: string): Promise<Result<string>> {
+    const issue = this.repo.issue(issueId);
+    if (!issue) return err(`no issue ${issueId}`);
+    const r = await this.remind(issue.filedBy.phone, text, at, { agent: "worker", issue: issue.id, call: issue.filedBy.call });
+    return r.ok ? ok(`Set: they get it ${localTime(new Date(r.value.sendAt!), this.timezone)}. They can ask Kloru to cancel it.`) : r;
+  }
+
+  /** What waits in this person's outbox, in words, oldest first. */
+  outboxList(phone: string): string[] {
+    return this.outbox.list(phone).map((i) => `${i.id} (${i.why}${i.state === "scheduled" && i.sendAt ? `, goes ${localTime(new Date(i.sendAt), this.timezone)}` : ", waiting"}): ${clip(i.text, 200)}`);
+  }
+
+  /** Stop a waiting message: their own, or anyone's for an owner. */
+  outboxCancel(id: string, by: string): Result<OutboxItem> {
+    return this.outbox.cancel(id.trim(), by);
+  }
+
+  /** Why a message exists, from what its issue is: nobody asked by hand for an automation's or Kloru's own run. */
+  private whyOf(issue: Issue): OutboxWhy {
+    return issue.event || issue.purpose || this.repo.call(issue.filedBy.call)?.channel === "schedule" ? "report" : "result";
+  }
+
+  /** Why a draft misses how its reader likes messages, or undefined when it fits or can't be checked. */
+  private async draftMiss(phone: string, callId: string | undefined, request: string, draft: string, channel: NoticeChannel | undefined, kind: DraftCheck["kind"]): Promise<string | undefined> {
+    if (!this.checkDraft) return undefined;
+    const turns = callId && this.repo.call(callId) ? this.repo.turns(callId, 0) : [];
+    const ask = turns.filter((x) => x.role === "caller").at(-1)?.text ?? request;
+    const thread = turns.slice(-60).map((x) => `${x.role === "caller" ? "Them" : "Kloru"}: ${x.text.slice(0, 300)}`);
+    const v = await this.checkDraft({ channel: channel ?? this.channelsFor(phone)[0] ?? "imessage", kind, theirMessage: ask, draft, preferences: this.messagePreferences(phone), thread, canReact: false }).catch((e: unknown) => (this.log(`desk: draft check failed: ${e instanceof Error ? e.message : String(e)}`), undefined));
+    return v && !v.fits ? v.why : undefined;
+  }
+
+  private outboxPerson(phone: string): OutboxPerson {
+    const live = this.repo.liveCallFor(phone);
+    const latest = live ?? this.repo.callsFor(phone).find((c) => c.channel !== "schedule");
+    return {
+      name: this.nameOf(phone) ?? phone,
+      localTime: localTime(this.now(), this.timezone),
+      guidelines: this.guidelines?.(phone)?.trim() ?? "",
+      preferences: this.messagePreferences(phone),
+      notes: this.memory?.outboxNotes(phone) ?? "",
+      inConversation: live && live.channel !== "schedule" ? live.channel : undefined,
+      turns: latest ? this.repo.turns(latest.id, 0).slice(-12).map((t) => `${t.role === "caller" ? "Them" : "Kloru"}: ${clip(t.text, 300)}`) : [],
+      running: this.repo.issues((i) => samePhone(i.filedBy.phone, phone) && !i.purpose && !isClosed(i.status)).map((i) => `#${i.id} ${clip(i.request, 120)}`),
+      channels: this.channelsFor(phone),
+    };
+  }
+
+  /** What the item follows: its issue's request, or the last thing they said in its conversation. */
+  private outboxRequest(item: OutboxItem): string {
+    const issue = item.from.issue !== undefined ? this.repo.issue(item.from.issue) : undefined;
+    if (issue) return issue.request;
+    if (item.replyingTo) return item.replyingTo;
+    const call = item.from.call ? this.repo.call(item.from.call) : undefined;
+    return call ? (this.repo.turns(call.id, 0).filter((t) => t.role === "caller").at(-1)?.text ?? "") : "";
+  }
+
+  private outboxDraft(item: OutboxItem, text: string, channel: NoticeChannel | undefined): Promise<string | undefined> {
+    return this.draftMiss(item.phone, item.from.call, this.outboxRequest(item), text, channel, item.from.agent === "worker" ? "result" : "after_call");
+  }
+
+  /** Hands an item's words to its channel: the thread it answers in, else Kloru's text or email. */
+  private async outboxDeliver(item: OutboxItem, m: { text: string; channel?: NoticeChannel; subject?: string }): Promise<string | false> {
+    if (item.thread && this.threadSender && (!m.channel || m.channel === item.thread.channel) && !item.media?.length) {
+      return (await this.threadSender(item.thread, m.text)) ? item.thread.channel : false;
     }
-    // A direct answer to them goes even when Jev would hold it: they're waiting for it.
-    if (d.action === "hold" && !m.replyingTo && !m.heldBefore && !m.urgent) {
-      record("hold", false, "held to go with other updates");
-      return "held";
+    if (!this.notify) return false;
+    const media = (item.media ?? []).flatMap((id) => {
+      const got = this.media?.get(id);
+      return got ? [{ path: got.path, mime: got.item.mime, name: got.item.name }] : [];
+    });
+    const sent = await this.notify({ phone: item.phone, callId: item.from.call ?? "", subject: m.subject ?? "Kloru", text: m.text, ...(m.channel ? { channel: m.channel } : {}), ...(media.length ? { media } : {}) });
+    return typeof sent === "string" ? sent : sent ? (m.channel ?? "default") : false;
+  }
+
+  /** An item's one ledger entry, when it is sent, dropped, merged or cancelled. */
+  private outboxRecord(item: OutboxItem): void {
+    const decision = item.state === "sent" ? "send" : item.state === "dropped" ? "drop" : item.state;
+    const result = item.state === "sent" ? "sent" : item.state === "merged" ? `merged into ${item.coveredBy ?? "another message"}` : `${item.state}${item.note ? `: ${item.note}` : ""}`;
+    this.repo.appendLedger({
+      // A text reply is no issue's change, so it never counts as one.
+      issue: item.from.agent === "talker" ? 0 : (item.from.issue ?? 0),
+      call: item.from.call ?? "",
+      phone: item.phone,
+      tool: "outbox",
+      slug: "MESSAGE",
+      args: { to: item.phone, channel: item.sentOn ?? item.channel ?? "default", ...(item.subject ? { subject: item.subject } : {}), text: item.text, item: item.id, why: item.why, from: item.from.agent, ...(item.covers?.length ? { covers: item.covers } : {}), ...(item.media?.length ? { media: item.media } : {}) },
+      ok: item.state === "sent",
+      result,
+      decision,
+    });
+  }
+
+  /** After an item went out: their open text thread sees it as said, its pages count as told, its issue notes it. */
+  private outboxSent(item: OutboxItem): void {
+    const notes = (item.media ?? []).flatMap((id) => ((got) => (got ? [mediaNote(got.item)] : []))(this.media?.get(id)));
+    const said = [item.text, ...notes].join("\n");
+    const own = item.thread && item.from.call ? this.repo.call(item.from.call) : undefined;
+    const thread = own && !own.endedAt && item.sentOn === item.thread?.channel ? own : item.sentOn === "imessage" ? this.repo.liveCalls().find((c) => c.channel === "imessage" && samePhone(c.phone, item.phone)) : undefined;
+    if (thread) this.repo.addTurn(thread.id, { role: "kloru", text: said });
+    this.markPagesTold(item.phone, item.text);
+    const issue = item.from.agent !== "talker" && item.from.issue !== undefined ? this.repo.issue(item.from.issue) : undefined;
+    if (issue) this.note(issue, "system", `Sent them${!item.sentOn || item.sentOn === "default" ? "" : ` by ${item.sentOn}`}: ${clip(said, 200)}`);
+  }
+
+  /** A page the organizer made or updated for a person: its link. */
+  private outboxPage(phone: string, p: { page?: string; title: string; markdown: string; issue?: number }): Result<string> {
+    if (!p.title.trim()) return err("give the page a title");
+    if (!p.markdown.trim()) return err("the page is empty");
+    if (p.markdown.length > Desk.ARTIFACT_MAX) return err(`the page is too long (${p.markdown.length} characters; at most ${Desk.ARTIFACT_MAX})`);
+    if (p.page) {
+      const updated = this.updateArtifact(p.page, { markdown: p.markdown, title: p.title }, { phone });
+      return updated.ok ? ok(updated.value.url) : updated;
     }
-    // ask, ask_owner and text_instead aren't offered for the talker's own messages: anything else sends.
-    const sent = await m.send(m.text).catch(() => false);
-    record("send", sent, sent ? "sent" : "failed");
-    if (!sent) return "failed";
-    this.addTurn(callId, { role: "kloru", text: m.text });
-    this.markPagesTold(call.phone, m.text);
-    return "sent";
+    const id = randomBytes(16).toString("base64url");
+    const at = this.now().toISOString();
+    const a: Artifact = { id, title: clip(p.title.trim(), 120), markdown: p.markdown, issue: p.issue ?? 0, call: "", phone, createdAt: at, updatedAt: at, version: 1 };
+    this.repo.saveArtifact(a);
+    this.repo.appendArtifactVersion(id, { version: 1, at, title: a.title, markdown: p.markdown, issue: a.issue });
+    return ok(this.artifactUrl(id));
+  }
+
+  /** A merge for someone who isn't in a conversation, as an outbox item. */
+  private submitMerge(phone: string, callId: string, m: { text: string; issue?: number; draft?: string; question?: boolean; say?: string }): void {
+    const issue = m.issue !== undefined ? this.repo.issue(m.issue) : undefined;
+    // Its page goes along when they haven't had the link.
+    const pages = issue ? this.repo.artifacts().filter((a) => a.issue === issue.id && !a.emailedAt && !m.text.includes(this.artifactUrl(a.id))) : [];
+    const words = m.say ?? m.text;
+    const text = pages.length ? `${words}\n${pages.map((a) => `${a.title}: ${this.artifactUrl(a.id)}`).join("\n")}` : words;
+    const why: OutboxWhy = m.draft || m.question ? "question" : issue ? this.whyOf(issue) : this.repo.call(callId)?.channel === "schedule" ? "report" : "result";
+    void this.outbox
+      .submit({ phone, text, why, from: { agent: "pm", call: callId, ...(issue ? { issue: issue.id } : {}) }, ...(issue ? { subject: `Kloru: ${clip(issue.request, 70)}` } : {}) })
+      .catch((e) => this.log(`desk: outbox submit for ${callId} failed: ${e instanceof Error ? e.message : String(e)}`));
+  }
+
+  /**
+   * A conversation ended: what it never heard goes to the person's outbox, and so does the link of a
+   * finished page (a link can't be spoken). With a live conversation elsewhere, that one carries it.
+   */
+  private flushEnded(callId: string): void {
+    const call = this.repo.call(callId);
+    if (!call?.endedAt || !this.notify || call.channel === "schedule" && !this.repo.undelivered(callId).length) return;
+    const merges = this.repo.undelivered(callId);
+    const live = this.repo.liveCallFor(call.phone);
+    for (const m of merges) {
+      if (m.progress) continue;
+      if (live) {
+        this.repo.appendInbox(live.id, { kind: m.kind, text: m.text, ...(m.issue !== undefined ? { issue: m.issue } : {}), ...(m.draft ? { draft: m.draft } : {}), ...(m.question ? { question: true } : {}) });
+        this.events.emit(`inbox:${live.id}`);
+      } else {
+        const asked = /^Question for the caller \(issue \d+\): /.exec(m.text);
+        this.submitMerge(call.phone, callId, { text: m.text, ...(m.issue !== undefined ? { issue: m.issue } : {}), ...(m.draft ? { draft: m.draft, say: m.text.replace(/^Needs a yes before I do it: /, "Before I do this I need your yes: ") } : {}), ...(m.question ? { question: true } : {}), ...(asked ? { say: m.text.slice(asked[0].length) } : {}) });
+      }
+    }
+    if (merges.length) this.repo.ack(callId, merges.at(-1)!.seq);
+    if (live) return;
+    const told = merges.map((m) => m.issue);
+    for (const a of this.repo.artifacts()) {
+      if (a.call !== callId || a.emailedAt || told.includes(a.issue) || !this.isDone(a.issue)) continue;
+      this.submitMerge(call.phone, callId, { text: `The page I made: ${a.title}: ${this.artifactUrl(a.id)}`, issue: a.issue });
+    }
+  }
+
+  private isDone(issueId: number): boolean {
+    const issue = this.repo.issue(issueId);
+    return !!issue && !issue.purpose && (issue.status === "merged" || issue.status === "done" || issue.status === "resolved");
   }
 
   /** Pages this text links that were edited after the last message that sent this person their link. */
@@ -1721,14 +1921,14 @@ export class Desk {
     });
   }
 
-  /** A page whose link went out to this person counts as told: the after-conversation note won't send it again. */
+  /** A page whose link went out to this person counts as told: its link isn't sent again on its own. */
   private markPagesTold(phone: string, text: string): void {
     for (const a of this.repo.artifacts()) {
       if (!a.emailedAt && samePhone(a.phone, phone) && text.includes(this.artifactUrl(a.id))) this.repo.saveArtifact({ ...a, emailedAt: this.now().toISOString() });
     }
   }
 
-  /** A worker's note to the PM on its issue (a held message, something to coordinate): the PM is woken. */
+  /** A worker's note to the PM on its issue (something to coordinate): the PM is woken. */
   workerComment(issueId: number, text: string): Result<Issue> {
     const issue = this.repo.issue(issueId);
     if (!issue) return err(`no issue ${issueId}`);
@@ -1749,7 +1949,7 @@ export class Desk {
         const a = this.draftArgs((e.args ?? {}) as Record<string, unknown>);
         const what = e.slug === "MESSAGE" ? `${String(a.channel ?? "")} to ${String(a.to ?? "")}` : `${e.slug} to ${recipientOf(a) || "?"}`;
         // Only "sent" reached them: say so plainly, so the check never reads a held copy as had.
-        const NOT = { hold: "held, never sent", drop: "dropped, never sent", ask: "waiting for a yes, not sent", ask_owner: "waiting for the owner, not sent" } as Record<string, string>;
+        const NOT = { hold: "held, never sent", drop: "dropped, never sent", merged: "folded into another message, not sent on its own", cancelled: "cancelled, never sent", ask: "waiting for a yes, not sent", ask_owner: "waiting for the owner, not sent" } as Record<string, string>;
         const state = e.decision && e.decision !== "send" ? (NOT[e.decision] ?? `${e.decision}, not sent`) : e.ok ? "sent" : "failed, never sent";
         return `${e.at.slice(11, 16)} UTC ${state} (${what}): ${clip(messageText(a), 300)}`;
       });
@@ -1757,62 +1957,11 @@ export class Desk {
 
   /** Below this, a drop is held instead. */
   static readonly SURE_DROP = 0.7;
-  /** After a restart, conversations that ended this recently still get their note. */
-  static readonly RECOVER_NOTICE_MS = 2 * 3_600_000;
 
   /** The conversation that asked, and where its replies go by default: call or text → text, email → email. */
   private replyChannel(callId: string): { conversation: string; defaultChannel: NoticeChannel } {
     const conversation = this.repo.call(callId)?.channel ?? "voice";
     return { conversation, defaultChannel: conversation === "email" ? "email" : "imessage" };
-  }
-
-  /** Weigh one message to the person who asked on Kloru's channels, then send it and record it. */
-  private async sendChecked(issue: Issue, callId: string, m: { from: "worker" | "pm"; text: string; subject: string; channel?: NoticeChannel; media?: Array<{ item: MediaItem; path: string }> }): Promise<Result<NoticeChannel | "default">> {
-    const phone = issue.filedBy.phone;
-    const channels = this.channelsFor(phone);
-    const media = m.media ?? [];
-    // What they'd get, as the check and the thread see it: the words, then a line per photo or file.
-    const said = [m.text, ...media.map((x) => mediaNote(x.item))].join("\n");
-    // The draft, weighed against how they like messages: a clear miss goes back to its writer once.
-    const once = `${issue.id}:${m.from}`;
-    if (this.checkDraft && !this.redrafted.has(once)) {
-      const ask = this.repo.turns(callId, 0).filter((x) => x.role === "caller").at(-1)?.text ?? issue.request;
-      const thread = this.repo.turns(callId, 0).slice(-60).map((x) => `${x.role === "caller" ? "Them" : "Kloru"}: ${x.text.slice(0, 300)}`);
-      const v = await this.checkDraft({ channel: m.channel ?? channels[0] ?? "imessage", kind: m.from === "pm" ? "after_call" : "result", theirMessage: ask, draft: m.text, preferences: this.messagePreferences(phone), thread, canReact: false }).catch((e: unknown) => (this.log(`desk: #${issue.id} draft check failed: ${e instanceof Error ? e.message : String(e)}`), undefined));
-      if (v && !v.fits) {
-        this.redrafted.add(once);
-        this.log(`desk: #${issue.id} ${m.from} draft → redraft: ${v.why}`);
-        return err(`Not sent yet: redraft it. ${v.why} Then send the new version the same way.`);
-      }
-    }
-    this.redrafted.delete(once);
-    const d = await this.checkMessage(asker(issue), { to: phone, toCaller: true, from: m.from, subject: m.subject, text: said, channels });
-    const record = (decision: string, ok: boolean, channel: string, result: string) =>
-      this.repo.appendLedger({ issue: issue.id, call: callId, phone, tool: m.from === "pm" ? "tell_caller" : "send_to_caller", slug: "MESSAGE", args: { to: phone, channel, subject: m.subject, text: m.text, ...(media.length ? { media: media.map((x) => x.item.id) } : {}) }, ok, result, decision });
-    if (d.action === "drop") {
-      record("drop", false, m.channel ?? d.channel ?? "default", "not sent: they already have this or don't need it");
-      return err("Not sent: they already have this or don't need it. Don't send it another way.");
-    }
-    if (d.action === "hold") {
-      record("hold", false, m.channel ?? d.channel ?? "default", "held to go with other updates");
-      return err(`Not sent yet: it's held to go with their other updates. Leave it as a comment on the issue (comment_on_issue)${media.length ? `, with its media ids (${media.map((x) => x.item.id).join(", ")})` : ""}, and the PM sends it with the rest.`);
-    }
-    if (d.action === "ask" || d.action === "ask_owner") {
-      record(d.action, false, m.channel ?? d.channel ?? "default", "waiting for a yes");
-      const asked = d.action === "ask_owner" && !this.isOwner(phone) ? this.askOwner(issue.id, `send them: "${clip(said, 200)}"`) : this.askForYes(issue.id, `Send you this: "${clip(said, 300)}"`);
-      return err(asked.ok ? "Not sent yet: it needs a yes first, and they've been asked. Stop here." : `Not sent: it needs a yes, and asking failed (${asked.error}).`);
-    }
-    const channel = m.channel ?? (d.action === "text_instead" ? "imessage" : d.channel);
-    const sent = await this.notify!({ phone, callId, subject: m.subject, text: m.text, ...(channel ? { channel } : {}), ...(media.length ? { media: media.map((x) => ({ path: x.path, mime: x.item.mime, name: x.item.name })) } : {}) });
-    const used = typeof sent === "string" ? sent : (channel ?? "default");
-    record("send", !!sent, used, sent ? "sent" : "failed");
-    if (!sent) return err(`Couldn't send it${channel ? ` by ${channel}` : ""}. Tell them, and offer another way.`);
-    // An iMessage is in their one iMessage thread: an open text conversation there sees it as said.
-    const thread = used === "imessage" ? this.repo.liveCalls().find((c) => c.channel === "imessage" && samePhone(c.phone, phone)) : undefined;
-    if (thread) this.addTurn(thread.id, { role: "kloru", text: said });
-    this.markPagesTold(phone, m.text);
-    this.note(issue, "system", `Sent them${used === "default" ? "" : ` by ${used}`}: ${clip(said, 200)}`);
-    return ok(used as NoticeChannel | "default");
   }
 
   /**
@@ -1840,9 +1989,8 @@ export class Desk {
         ...this.replyChannel(who.call),
       });
       this.log(`desk: ${who.issue !== undefined ? `#${who.issue}` : who.call} message to ${m.toCaller ? "the caller" : m.to} → ${d.action}${d.channel ? ` by ${d.channel}` : ""}${d.p !== undefined ? ` (${d.p.toFixed(2)})` : ""}`);
-      // A coin-flip drop loses something they may want: held, it waits for their next conversation. A
-      // direct answer to them, or the note after a conversation (the last word on it), goes.
-      if (d.action === "drop" && d.p !== undefined && d.p < Desk.SURE_DROP) return { ...d, action: m.replyingTo || m.from === "pm" ? "send" : "hold" };
+      // A coin-flip drop loses something they may want: it is held instead.
+      if (d.action === "drop" && d.p !== undefined && d.p < Desk.SURE_DROP) return { ...d, action: "hold" };
       return d;
     } catch (error) {
       const why = error instanceof Error ? error.message : String(error);
@@ -1853,7 +2001,7 @@ export class Desk {
 
   /**
    * A member asked for something the owner's policy asks about: the owner hears it on his live call
-   * (else by email, and on his next call), the member hears that he was asked, and only his yes counts.
+   * (else through his outbox, and on his next call), the member hears that he was asked, and only his yes counts.
    */
   askOwner(issueId: number, what: string, exact?: { tool: string; argsHash: string }, to?: string, personal = false): Result<Issue> {
     const issue = this.repo.issue(issueId);
@@ -1872,9 +2020,11 @@ export class Desk {
     const text = this.ownerAsk(issue);
     const live = this.repo.liveCallFor(askee);
     if (live) this.deliver(live.id, { kind: "info", text, issue: issueId, draft: id });
-    else void this.notify?.({ phone: askee, callId: this.repo.callsFor(askee)[0]?.id ?? "", subject: `Kloru: ${clip(draft, 60)}?`, text: `${text}\n\nReply yes, or call Kloru.` }).then((sent) => {
-        this.repo.appendLedger({ issue: issueId, call: issue.filedBy.call, phone: askee, tool: "ask_owner", slug: "MESSAGE", args: { to: askee, channel: typeof sent === "string" ? sent : "default", subject: `Kloru: ${clip(draft, 60)}?`, text }, ok: !!sent, result: sent ? "sent" : "failed", decision: "send" });
-      }).catch((e) => this.log(`desk: asking the owner about #${issueId} by email failed: ${e instanceof Error ? e.message : String(e)}`));
+    else if (this.notify) {
+      void this.outbox
+        .submit({ phone: askee, text: `${text}\n\nReply yes, or call Kloru.`, why: "question", from: { agent: "system", issue: issueId, call: issue.filedBy.call }, subject: `Kloru: ${clip(draft, 60)}?` })
+        .catch((e) => this.log(`desk: asking the owner about #${issueId} failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
     this.deliver(issue.filedBy.call, { kind: "info", text: `I've asked ${this.nameOf(askee) ?? this.ownerName()} about this: ${what}. I'll tell you once they say yes.`, issue: issueId });
     this.trigger({ kind: "needs_confirmation", issue: issueId });
     return ok(issue);
@@ -1931,7 +2081,7 @@ export class Desk {
   /**
    * An automation fires: a call with no voice (channel "schedule") files its request and ends.
    * Everything after is the desk as usual: the PM, the worker, the ledger, the yes before
-   * anything reaches someone, and the after-call email (or the live call, if one is on).
+   * anything reaches someone, and the person's outbox (or the live call, if one is on).
    */
   runAutomation(entry: ScheduleEntry, event?: string): Issue | undefined {
     if (!entry.phone) {
@@ -2116,54 +2266,6 @@ export class Desk {
   }
 
   // ---------------------------------------------------------------------------
-  // After the call: one summary of what finished, once the call's work settles
-  // ---------------------------------------------------------------------------
-
-  /** (Re)start the quiet timer for a call's summary. */
-  private scheduleNotice(callId: string): void {
-    if (!this.notify) return;
-    clearTimeout(this.noticeTimers.get(callId));
-    const timer = setTimeout(() => {
-      this.noticeTimers.delete(callId);
-      void this.sendNotice(callId).catch((error) => this.log(`desk: summary for ${callId} failed: ${error instanceof Error ? error.message : String(error)}`));
-    }, this.notifyDelayMs);
-    timer.unref?.();
-    this.noticeTimers.set(callId, timer);
-  }
-
-  /**
-   * Waits while the call's other work runs (up to notifyWaitMs), then wakes the PM, once per batch,
-   * only when something the caller asked for got done (or waits on their yes) and they didn't hear
-   * it. The PM writes the message (tellCaller); anything else waits for the next conversation.
-   */
-  private async sendNotice(callId: string): Promise<void> {
-    const call = this.repo.call(callId);
-    if (!call?.endedAt || this.repo.liveCallFor(call.phone)) return;
-    const running = this.repo.issues((i) => i.filedBy.call === callId && !i.purpose && !isClosed(i.status) && i.status !== "needs_info" && i.status !== "needs_confirmation");
-    if (running.length && this.now().getTime() - Date.parse(call.endedAt) < this.notifyWaitMs) return this.scheduleNotice(callId);
-    const merges = this.repo.undelivered(callId).filter((m) => !m.progress);
-    const seen = this.toldPm.get(callId) ?? -1;
-    const unheard = merges.filter((m) => m.seq > seen && this.askedAndDone(m));
-    // A page can't be spoken ("the link's in your email"), so its link goes even when the result was heard.
-    const pages = this.repo.artifacts().filter((a) => a.call === callId && !a.emailedAt && !this.pagesTold.has(a.id) && a.issue !== undefined && this.isDone(a.issue));
-    if (!unheard.length && !pages.length) return;
-    if (merges.length) this.toldPm.set(callId, merges.at(-1)!.seq);
-    for (const a of pages) this.pagesTold.add(a.id);
-    const lines = [...unheard.map((m) => m.text), ...pages.map((a) => `A page they were told is in their messages: ${a.title}: ${this.artifactUrl(a.id)}`)];
-    this.trigger({ kind: "unheard", issue: unheard.find((m) => m.issue !== undefined)?.issue ?? pages[0]!.issue!, call: callId, unheard: lines });
-  }
-
-  private isDone(issueId: number): boolean {
-    const issue = this.repo.issue(issueId);
-    return !!issue && !issue.purpose && (issue.status === "merged" || issue.status === "done" || issue.status === "resolved");
-  }
-
-  /** A result the caller asked for that got done, or a draft waiting on their yes. Not failures, progress or suggestions. */
-  private askedAndDone(m: Merge): boolean {
-    return !!m.draft || (m.issue !== undefined && this.isDone(m.issue));
-  }
-
-  // ---------------------------------------------------------------------------
   // Stuck issues: a parent closes with its follow-ups; the sweeper moves the rest along
   // ---------------------------------------------------------------------------
 
@@ -2316,11 +2418,13 @@ export class Desk {
       }
     }, everyMs);
     this.sweeper.unref?.();
+    this.outbox.start();
   }
 
   stopSweeper(): void {
     if (this.sweeper) clearInterval(this.sweeper);
     this.sweeper = undefined;
+    this.outbox.stop();
   }
 
   // ---------------------------------------------------------------------------
@@ -2698,7 +2802,7 @@ export class Desk {
     }
     if (d.action === "hold") {
       record("held");
-      return "Not sent yet: it's held. Leave it as a comment on the issue (comment_on_issue) with exactly what you'd send, and the PM sends it when it's right.";
+      return "Not sent: now isn't the time for this one. Say so in your result, with exactly what you'd have sent.";
     }
     record("waiting for a yes");
     const draft = `${c.slug.toLowerCase().replace(/_/g, " ")} to ${to || "them"}: "${clip(text, 300)}"`;
@@ -2786,6 +2890,7 @@ export class Desk {
         "You make changes for Kloru. Your goal: the change the caller asked for, exactly. An id in your issue names " +
         "the exact item; names and times only help you find it. For the owner's own events with no guests, pass " +
         "send_updates none. Something to do on a schedule is an automation (automation_create), not a calendar event. " +
+        "A one-time reminder whose words are known now is remind, not an automation. " +
         "Report what you changed with ids. If told to stop, stop." +
         this.guide(true, issueId) +
         this.guidelinesFor(issueId),
@@ -2900,16 +3005,25 @@ export class Desk {
     }
   }
 
-  /** Append to a call's inbox; a call that ended hands off to its phone's live call, with that call's page links. */
-  private deliver(callId: string, m: { kind: MergeKind; text: string; issue?: number; draft?: string; progress?: boolean; urgent?: boolean }): Merge {
+  /**
+   * Append to a call's inbox. A call that ended hands off to its phone's live call, with that call's
+   * page links; with no live call, it goes to the person's outbox (`say`: the words for them).
+   */
+  private deliver(callId: string, m: { kind: MergeKind; text: string; issue?: number; draft?: string; progress?: boolean; question?: boolean; say?: string }): Merge {
+    const { say, ...rest } = m;
     const call = this.repo.call(callId);
     const target = call?.endedAt ? (this.repo.liveCallFor(call.phone)?.id ?? callId) : callId;
     // A result moving to another conversation brings its pages along; whoever writes the message decides whether they'd want one.
     const pages = target === callId || m.progress ? [] : this.repo.artifacts().filter((a) => a.call === callId && !a.emailedAt && !m.text.includes(this.artifactUrl(a.id)));
     const text = pages.length ? `${m.text}\n${pages.map((a) => `${a.title}: ${this.artifactUrl(a.id)}`).join("\n")}` : m.text;
-    const merge = this.repo.appendInbox(target, { ...m, text });
+    const merge = this.repo.appendInbox(target, { ...rest, text });
     this.events.emit(`inbox:${target}`);
-    if (this.repo.call(target)?.endedAt) this.scheduleNotice(target);
+    // Nobody is in that conversation any more: it's kept there as told, and their outbox carries it.
+    const ended = this.repo.call(target);
+    if (ended?.endedAt && this.notify && !m.progress) {
+      this.repo.ack(target, merge.seq);
+      this.submitMerge(ended.phone, target, { text: m.text, ...(m.issue !== undefined ? { issue: m.issue } : {}), ...(m.draft ? { draft: m.draft } : {}), ...(m.question ? { question: true } : {}), ...(say ? { say } : {}) });
+    }
     return merge;
   }
 

@@ -206,6 +206,28 @@ export class Memory {
     return ok(this.commit(`How ${first} likes messages: ${line.slice(0, 80)}`) ?? "");
   }
 
+  /** The outbox organizer's dated notes on reaching this person (<operator>/outbox.md); or "". */
+  outboxNotes(phone: string): string {
+    const op = this.operatorFor(phone);
+    return op ? (this.open(`${op}/outbox.md`)?.body ?? "").trim() : "";
+  }
+
+  /** One dated line from the outbox organizer about how this person likes to be reached; committed. */
+  addOutboxNote(phone: string, text: string, now: Date = this.now()): Result<string> {
+    const op = this.operatorFor(phone);
+    if (!op) return err(`no memory for ${phone}`);
+    const line = text.trim().replace(/\s+/g, " ");
+    if (!line) return err("nothing to add");
+    const first = String(this.open(`${op}/profile.md`)?.meta.name ?? op).split(/\s+/)[0];
+    const full = join(this.root, op, "outbox.md");
+    const current = existsSync(full) ? readFileSync(full, "utf8") : `---\nid: outbox\ntype: notes\naliases: [how to reach ${first}]\n---\n`;
+    const lines = current.replace(/\s+$/, "").split("\n");
+    const head = lines.slice(0, lines.indexOf("---", 1) + 1);
+    const body = lines.slice(head.length).filter(Boolean).slice(-39);
+    this.write(`${op}/outbox.md`, `${[...head, ...body, `- ${line} (${now.toISOString().slice(0, 10)})`].join("\n")}\n`);
+    return ok(this.commit(`Outbox note for ${first}: ${line.slice(0, 80)}`) ?? "");
+  }
+
   /** Replace this person's whole policy (they edited it on kloru.com) and commit it. */
   setPolicy(phone: string, body: string, message?: string): Result<string> {
     const op = this.operatorFor(phone);

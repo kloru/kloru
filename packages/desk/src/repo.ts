@@ -228,10 +228,10 @@ export class Repo {
 
   // Inbox (merges into a call) ---------------------------------------------------
 
-  appendInbox(callId: string, m: { kind: MergeKind; text: string; issue?: number; draft?: string; progress?: boolean; urgent?: boolean }): Merge {
+  appendInbox(callId: string, m: { kind: MergeKind; text: string; issue?: number; draft?: string; progress?: boolean; question?: boolean }): Merge {
     this.mustCall(callId);
     const list = this.inboxes.get(callId)!;
-    const merge: Merge = { seq: list.length + 1, at: this.iso(), kind: m.kind, text: m.text, ...(m.issue !== undefined ? { issue: m.issue } : {}), ...(m.draft ? { draft: m.draft } : {}), ...(m.progress ? { progress: true } : {}), ...(m.urgent ? { urgent: true } : {}) };
+    const merge: Merge = { seq: list.length + 1, at: this.iso(), kind: m.kind, text: m.text, ...(m.issue !== undefined ? { issue: m.issue } : {}), ...(m.draft ? { draft: m.draft } : {}), ...(m.progress ? { progress: true } : {}), ...(m.question ? { question: true } : {}) };
     appendFileSync(join(this.callDir(callId), "inbox.jsonl"), JSON.stringify(merge) + "\n");
     list.push(merge);
     return merge;

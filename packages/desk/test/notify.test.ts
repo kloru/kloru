@@ -49,7 +49,7 @@ function setup(o: { send?: (n: Notice) => Promise<boolean> } = {}) {
   return { host, desk, sent };
 }
 
-describe("after hang-up, no note is written in code (the PM writes the rare one; see coms.test.ts)", () => {
+describe("after hang-up, what they didn't hear goes to their outbox (see outbox.test.ts)", () => {
   it("calling back before anything goes out: the new call carries the result", async () => {
     const { host, desk, sent } = setup();
     const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
@@ -63,7 +63,7 @@ describe("after hang-up, no note is written in code (the PM writes the rare one;
     expect(desk.repo.inbox(next.call.id, 0).some((m) => m.text.includes("Nothing new"))).toBe(true);
   });
 
-  it("a result that lands after the call ended isn't sent by code; the next call still carries it", async () => {
+  it("a result that lands after the call ended goes through their outbox once; the next call doesn't repeat it", async () => {
     const { host, desk, sent } = setup();
     const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
     const a = desk.fileIssue(call.id, "Find a dentist");
@@ -71,8 +71,9 @@ describe("after hang-up, no note is written in code (the PM writes the rare one;
     desk.endCall(call.id);
     host.last(a.id).finish("Maplewood Kids Dental.");
     await settle(150);
-    expect(sent).toEqual([]);
-    expect(desk.startCall({ callSid: "CA2", phone: EZRA, channel: "voice" }).pending).toBe(1);
+    expect(sent.map((n) => n.text)).toEqual(["Maplewood Kids Dental."]);
+    expect(desk.outbox.all(EZRA).map((i) => [i.why, i.from.agent, i.state])).toEqual([["result", "pm", "sent"]]);
+    expect(desk.startCall({ callSid: "CA2", phone: EZRA, channel: "voice" }).pending).toBe(0);
   });
 });
 

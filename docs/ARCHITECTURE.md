@@ -37,12 +37,21 @@ runs on that machine.
 4. **The worker does it** with the tools above, and comments on the request as it goes. An
    owner's own request is the approval for what it needs; every approval, and who gave it, goes
    on the request and in the ledger.
-5. **The result goes back** through the conversation that asked. In a text thread there's one
-   writer, the texting model, and every message passes three checks:
-   - **Shape (before writing):** a reaction, one line, a sentence or two, or the whole answer,
-     and whether the page's link belongs, from the person's `messages.md` and guidelines.
-   - **Draft (after writing):** does it fit them? A clear miss is rewritten once.
-   - **Send:** send, hold (to go with more), or drop (they already have it). All of it is recorded.
+5. **The result goes into the person's outbox.** Every message Kloru sends someone (a reply, a
+   result, a report, a question, a reminder) is one item in that person's outbox, whoever wrote it.
+   In a text thread the texting model writes it, shaped first (a reaction, one line, or the whole
+   answer, from their `messages.md`) and redrafted once if it clearly misses.
+   - **Fast pass:** one Jev decision per item: send it now, drop it (they already have it), or
+     leave it for the organizer.
+   - **Organizer:** one agent per person that sees everything waiting for them, what they got
+     today and their guidelines, and decides what they get, when, and in what shape: as written,
+     several as one message, scheduled, or dropped.
+   - **Timed items:** a reminder is an item with a time; it is sent then with no PM or worker
+     run, and survives restarts.
+
+   Each item ends as one ledger entry. What waits is on the website under Messages, and anyone
+   can ask Kloru what's waiting for them or to stop one. Sends from a connected account (Gmail,
+   Outlook) pass the message check instead.
 6. **It learns.** How they answer a result (asking for the link, for more, for less) becomes a
    dated line in their `messages.md`. After each conversation, the memory worker files people,
    places and plans into household memory.
@@ -52,6 +61,7 @@ runs on that machine.
 | | |
 |---|---|
 | `/data/instinct/repo` | the desk's records: calls and threads, requests, the ledger (a hash chain), pages, media |
+| `/data/instinct/repo/outbox` | one file per person: every message for them and where it stands |
 | `/data/instinct/repo/memory` | household memory: a git repo of markdown, `household/` plus one folder per person (`policy.md`, `messages.md`, `private/`) |
 | `/data/instinct/store` | mail and calendar synced from Composio, with full-text search |
 | `/data/instinct/secrets/vault.json` | the vault: AES-256-GCM, keyed by `KLORU_VAULT_KEY` |
