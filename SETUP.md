@@ -11,6 +11,8 @@ section tells it how.
 - A phone number you call to talk to Kloru, and an iMessage line you text.
 - A website at your domain where you and your family sign in, connect Gmail and Google Calendar,
   save cards and logins in an encrypted vault, and see what Kloru did and what it cost.
+- Small apps on that website, made when you ask ("make us a shared grocery list"): the family
+  opens the link on their phones and uses it together. Nothing to set up; the data stays on your machine.
 - One always-on machine on Fly.io that runs all of it. Your data stays on that machine's disk,
   with optional encrypted nightly backups to your own Cloudflare R2 bucket.
 

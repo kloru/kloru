@@ -96,6 +96,8 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<void> 
     ...(cfg.alertsPath ? { alertsPath: cfg.alertsPath } : {}),
     ...(cfg.revokedArtifactsPath ? { revokedArtifactsPath: cfg.revokedArtifactsPath } : {}),
     ...(cfg.prefsPath ? { prefsPath: cfg.prefsPath } : {}),
+    // What people enter into apps, beside the website's other files: nothing to set up.
+    appsDbPath: `${cfg.dataDir}/apps.db`,
     clientFor: (user) => clientFor(user, env),
     ...(cfg.devAgent ? { pageClient: () => clientFor({ agent: cfg.devAgent } as Parameters<typeof clientFor>[0], env) } : {}),
     staticDir: fileURLToPath(new URL("../static", import.meta.url)),

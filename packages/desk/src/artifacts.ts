@@ -66,7 +66,7 @@ export function artifactTools(desk: Desk): RegisteredTool[] {
         const who = caller(ctx);
         if (!who) return failed("Only desk workers can find pages.");
         const found = desk.findArtifacts(who.phone, query);
-        return textResult(found.length ? found.map((a) => `${a.id} "${a.title}" (updated ${(a.updatedAt ?? a.createdAt).slice(0, 16)}): ${clip(a.markdown.replace(/\s+/g, " "), 160)}`).join("\n") : "No pages match.");
+        return textResult(found.length ? found.map((a) => a.kind === "app" ? `${a.id} "${a.title}" (app, updated ${(a.updatedAt ?? a.createdAt).slice(0, 16)}): read it with app_read` : `${a.id} "${a.title}" (updated ${(a.updatedAt ?? a.createdAt).slice(0, 16)}): ${clip(a.markdown.replace(/\s+/g, " "), 160)}`).join("\n") : "No pages match.");
       },
     }),
     defineTool({
@@ -79,6 +79,7 @@ export function artifactTools(desk: Desk): RegisteredTool[] {
         const who = caller(ctx);
         if (!who) return failed("Only desk workers can read pages.");
         const r = desk.readArtifact(id, who.phone);
+        if (r.ok && r.value.kind === "app") return textResult(`${r.value.title} is an app (${desk.artifactUrl(id)}); read it with app_read and change it with app_update.`);
         return r.ok ? textResult(`# ${r.value.title} (version ${r.value.version ?? 1}, ${desk.artifactUrl(id)})\n\n${r.value.markdown}`) : failed(r.error);
       },
     }),

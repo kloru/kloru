@@ -17,13 +17,14 @@ import { capabilitiesForSlug, innerCalls, isReadSlug, isWriteCall, toolkitOfSlug
 import type { Model } from "@earendil-works/pi-ai";
 import { hashArgs, type Capability, type RegisteredTool, type ScheduleEntry, type ScheduleEvent, type Scheduler, type WorkerRole } from "@kloru/core";
 import { transition } from "./machine.js";
+import { checkApp } from "./apps.js";
 import { OWNER_ONLY, PERMISSION_OF, PLUMBING, PUBLIC_NEEDS, PUBLIC_PLUMBING_NO, READ_ONLY, SURE, accessLine, describeNeed, hasNeed, type AccessCheck, type AccessDecision, type AccessReview, type Need } from "./access.js";
 import { mediaNote, type MediaItem, type MediaStore } from "./media.js";
 import { clip, type Memory } from "./memory.js";
 import { Repo } from "./repo.js";
 import { err, ok, type Result } from "./result.js";
 import { describeEntry, type Vault } from "./vault.js";
-import { isClosed, type Artifact, type Author, type CallRecord, type Issue, type IssueStatus, type IssueTarget, type LedgerEntry, type Merge, type MemberPlan, type MergeKind, type Suggestion, type Turn } from "./types.js";
+import { isClosed, type AppVisitors, type Artifact, type Author, type CallRecord, type Issue, type IssueStatus, type IssueTarget, type LedgerEntry, type Merge, type MemberPlan, type MergeKind, type Suggestion, type Turn } from "./types.js";
 
 /** Runs worker conversations. Production: AgentRuntime.worker; tests: a fake. */
 /** What the decision model weighs before a change. */
@@ -260,6 +261,8 @@ export interface DeskOptions {
   phoneOfPerson?: (contactId: string) => string | undefined;
   /** Whether a caller is a family member (partner or family); anyone else who isn't the owner is the public. */
   isMember?: (phone: string) => boolean;
+  /** Script errors people's browsers reported for one version of an app (the website keeps them). */
+  appErrors?: (id: string, version: number) => string[];
   /** What the owner said about this caller (their trust policy, his words), by phone. */
   ownerWords?: (phone: string) => string | undefined;
   /** A caller's name, by phone, for what the owner is told. */
@@ -465,6 +468,7 @@ export class Desk {
   private readonly channelsFor: (phone: string) => NoticeChannel[];
   private readonly ownerWords: DeskOptions["ownerWords"];
   private readonly isMember: (phone: string) => boolean;
+  private readonly appErrors: (id: string, version: number) => string[];
   private readonly setMemberModel: ((words: string) => Promise<MemberPlan>) | undefined;
   private readonly applyMember: ((plan: MemberPlan) => void) | undefined;
   private readonly nameOf: (phone: string) => string | undefined;
@@ -523,6 +527,7 @@ export class Desk {
     this.channelsFor = o.channelsFor ?? (() => []);
     this.ownerWords = o.ownerWords;
     this.isMember = o.isMember ?? (() => false);
+    this.appErrors = o.appErrors ?? (() => []);
     this.setMemberModel = o.setMember;
     this.applyMember = o.applyMember;
     this.nameOf = o.nameOf ?? (() => undefined);
@@ -641,10 +646,10 @@ export class Desk {
       const tasks = this.recentTasks(phone, { days: 7, limit: 6, clip: 160 }).map((t) => `- ${t}`);
       const pages = this.repo
         .artifacts()
-        .filter((a) => this.mayRead(a, phone))
+        .filter((a) => this.maySee(a, phone))
         .sort((x, y) => (y.updatedAt ?? y.createdAt).localeCompare(x.updatedAt ?? x.createdAt))
         .slice(0, 6)
-        .map((a) => `- ${a.title}: ${this.artifactUrl(a.id)}`);
+        .map((a) => `- ${a.title}${a.kind === "app" ? " (app)" : ""}: ${this.artifactUrl(a.id)}`);
       let day = "";
       try {
         day = this.dayView?.(phone) ?? "";
@@ -1979,6 +1984,7 @@ export class Desk {
   updateArtifact(id: string, change: { markdown?: string; section?: string; append?: string; title?: string }, who: { issue?: number; phone: string; by?: string }): Result<{ id: string; url: string; version: number }> {
     const a = this.repo.artifact(id);
     if (!a || !this.mayRead(a, who.phone)) return err(`no page ${id} for this caller`);
+    if (a.kind === "app") return err(`${id} is an app; change it with app_update`);
     let body = a.markdown;
     if (change.section !== undefined) body = replaceSection(body, change.section, change.markdown ?? "");
     else if (change.markdown !== undefined) body = change.markdown;
@@ -2006,6 +2012,81 @@ export class Desk {
     return this.isOwner(phone) || samePhone(a.phone, phone);
   }
 
+  /** An app is the family's: anyone in it may open and change it, whoever asked for it. */
+  private maySee(a: Artifact, phone: string): boolean {
+    return this.mayRead(a, phone) || (a.kind === "app" && this.isFamily(phone));
+  }
+
+  /** A worker's app for its issue: one HTML file, checked, stored like a page and served by the website. */
+  publishApp(issueId: number, title: string, html: string, visitors?: AppVisitors): Result<{ id: string; url: string }> {
+    const issue = this.repo.issue(issueId);
+    if (!issue) return err(`no issue ${issueId}`);
+    if (!title.trim()) return err("give the app a title");
+    const checked = checkApp(html);
+    if (!checked.ok) return checked;
+    const id = randomBytes(16).toString("base64url");
+    const at = this.now().toISOString();
+    const open = visitors && visitors !== "none" ? { visitors } : {};
+    const a: Artifact = { id, kind: "app", title: clip(title.trim(), 120), markdown: "", html, ...open, testKey: randomBytes(16).toString("base64url"), issue: issue.id, call: issue.filedBy.call, phone: issue.filedBy.phone, createdAt: at, updatedAt: at, version: 1 };
+    this.repo.saveArtifact(a);
+    this.repo.appendArtifactVersion(id, { version: 1, at, title: a.title, markdown: "", html, ...open, issue: issue.id });
+    issue.artifact = id;
+    this.repo.saveIssue(issue);
+    const url = this.artifactUrl(id);
+    this.note(issue, "system", `Made an app: ${a.title} ${url}`);
+    return ok({ id, url });
+  }
+
+  /** Change an app in place: one exact replacement or a whole new file, its title, or who may visit. Every change is a new version. */
+  updateApp(id: string, change: { html?: string; replace?: { old: string; new: string }; title?: string; visitors?: AppVisitors }, who: { issue?: number; phone: string }): Result<{ id: string; url: string; version: number }> {
+    const a = this.repo.artifact(id);
+    if (!a || a.kind !== "app" || !this.maySee(a, who.phone)) return err(`no app ${id} for this caller`);
+    let html = change.html ?? a.html ?? "";
+    if (change.replace) {
+      const found = html.split(change.replace.old).length - 1;
+      if (!change.replace.old || found === 0) return err("replace.old isn't in the file; read it with app_read and copy the text exactly");
+      if (found > 1) return err(`replace.old is in ${found} places; include more of the text around it so it matches once`);
+      html = html.replace(change.replace.old, () => change.replace!.new);
+    }
+    const checked = checkApp(html);
+    if (!checked.ok) return checked;
+    const at = this.now().toISOString();
+    const version = (a.version ?? 1) + 1;
+    const title = change.title?.trim() ? clip(change.title.trim(), 120) : a.title;
+    const visitors = change.visitors ?? a.visitors ?? "none";
+    this.repo.saveArtifact({ ...a, title, html, visitors, version, updatedAt: at });
+    this.repo.appendArtifactVersion(id, { version, at, title, markdown: "", html, visitors, ...(who.issue !== undefined ? { issue: who.issue } : {}) });
+    const issue = who.issue === undefined ? undefined : this.repo.issue(who.issue);
+    if (issue) {
+      issue.artifact = id;
+      this.repo.saveIssue(issue);
+      this.note(issue, "system", `Updated the app ${title} (version ${version})`);
+    }
+    return ok({ id, url: this.artifactUrl(id), version });
+  }
+
+  /** An app's file, with what people's browsers reported going wrong in this version. */
+  readApp(id: string, phone: string): Result<{ app: Artifact; errors: string[] }> {
+    const a = this.repo.artifact(id);
+    if (!a || a.kind !== "app" || !this.maySee(a, phone)) return err(`no app ${id} for this caller`);
+    let errors: string[] = [];
+    try {
+      errors = this.appErrors(id, a.version ?? 1);
+    } catch (error) {
+      this.log(`desk: app errors unreadable: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return ok({ app: a, errors });
+  }
+
+  /** Where a worker tries an app in a browser: the app itself, on scratch data nobody else sees. */
+  appTestUrl(id: string, phone: string): Result<string> {
+    const a = this.repo.artifact(id);
+    if (!a || a.kind !== "app" || !this.maySee(a, phone)) return err(`no app ${id} for this caller`);
+    const testKey = a.testKey ?? randomBytes(16).toString("base64url");
+    if (!a.testKey) this.repo.saveArtifact({ ...a, testKey });
+    return ok(`${this.artifactUrl(id)}?test=${testKey}`);
+  }
+
   /** Media someone sent: theirs, or anyone's for the owner. */
   mayReadMedia(sender: string, phone: string): boolean {
     return this.isOwner(phone) || samePhone(sender, phone);
@@ -2016,10 +2097,10 @@ export class Desk {
     const words = query.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1);
     return this.repo
       .artifacts()
-      .filter((a) => this.mayRead(a, phone))
+      .filter((a) => this.maySee(a, phone))
       .map((a) => {
         const title = a.title.toLowerCase();
-        const body = a.markdown.toLowerCase();
+        const body = (a.html ?? a.markdown).toLowerCase();
         const score = words.reduce((n, w) => n + (title.includes(w) ? 3 : 0) + (body.includes(w) ? 1 : 0), 0);
         return { a, score };
       })
@@ -2031,7 +2112,7 @@ export class Desk {
 
   readArtifact(id: string, phone: string): Result<Artifact> {
     const a = this.repo.artifact(id);
-    return a && this.mayRead(a, phone) ? ok(a) : err(`no page ${id} for this caller`);
+    return a && this.maySee(a, phone) ? ok(a) : err(`no page ${id} for this caller`);
   }
 
   // ---------------------------------------------------------------------------
@@ -2690,7 +2771,7 @@ export class Desk {
       prompt:
         "You are an engineer on Kloru's desk. Do what the request needs, end to end, then give the result: the outcome with its exact details (names, ids, times in their timezone). " +
         "Take the likeliest reading rather than asking, and check the live state before saying something can't be done. " +
-        "Email and calendar are in the store (store_search, store_calendar). A page (artifact_create) is for results too long for a text." +
+        "Email and calendar are in the store (store_search, store_calendar). A page (artifact_create) is for results too long for a text; an app (app_create) is for something people fill in or tick off themselves." +
         this.guide(true, issueId) +
         this.guidelinesFor(issueId),
       ...this.plumbing(issueId),

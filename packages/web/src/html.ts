@@ -22,6 +22,7 @@ const NAV: ReadonlyArray<readonly [string, string]> = [
   ["/approvals", "Approvals"],
   ["/automations", "Automations"],
   ["/contacts", "People"],
+  ["/pages", "Pages"],
   ["/policy", "My policy"],
   ["/vault", "Vault"],
   ["/settings", "Settings"],

@@ -15,7 +15,7 @@ an Ample credential is set:
 | `ample_apps` | The apps deployed so far, with their URLs |
 | `ample_app_delete` | Takes an app offline |
 
-The `web-apps` skill tells the agent when to use them and how to build an app
+The `web-apps-ample` skill tells the agent when to use them and how to build an app
 that deploys cleanly.
 
 ## Setup

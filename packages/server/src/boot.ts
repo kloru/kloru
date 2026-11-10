@@ -14,7 +14,8 @@ import { steerFilter } from "./steer-filter.js";
 import { actionDecider } from "./action-decider.js";
 import { gmailNotifier } from "./notify.js";
 import { loadToolGuide } from "./tool-guide.js";
-import { Desk, MediaStore, Memory, Vault, type DraftCheck, vaultTools, type VaultKind, type MemberPlan, type Notice, type NoticeMedia, artifactTools, automationTools, deleteAutomation, type AutomationEvents, groceryTools, mediaTools, workerTools, TechnicalPM, memoryTools } from "@kloru/desk";
+import { appErrorsReader } from "./app-errors.js";
+import { Desk, MediaStore, Memory, Vault, type DraftCheck, vaultTools, type VaultKind, type MemberPlan, type Notice, type NoticeMedia, artifactTools, appTools, automationTools, deleteAutomation, type AutomationEvents, groceryTools, mediaTools, workerTools, TechnicalPM, memoryTools } from "@kloru/desk";
 import { mediaIngest } from "./media-ingest.js";
 import { RuntimeWorkerHost } from "./desk-host.js";
 import { langfuseFromEnv, prefsAllowContent } from "./telemetry.js";
@@ -929,6 +930,8 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       // What finishes after the owner hangs up is emailed to them (texts once A2P is approved).
       ...(artifactBase(env) ? { artifactBaseUrl: artifactBase(env)! } : {}),
       scheduler,
+      // Script errors an app threw in someone's browser, from the website's store, so a worker can fix them.
+      appErrors: appErrorsReader(env.KLORU_APPS_DB?.trim() || "/data/kloru/apps.db", log),
       ...(config.owner.timezone ? { timezone: config.owner.timezone } : {}),
       onWrite: (slug: string) => void storeRunner?.kick(slug).catch(() => undefined),
       // A model writes that email with only what wasn't heard on the call, or decides none is needed (#37).
@@ -939,7 +942,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       ...(router ? { notify: (n: Notice) => router.notify(n), channelsFor: (phone: string) => router.channelsFor(phone) } : apps && appsConnected?.includes("gmail") ? { notify: gmailNotifier({ apps, ownerPhones: config.owner.phones, ...(config.owner.emails[0] ? { ownerEmail: config.owner.emails[0] } : {}), people: (phone: string) => memberMail(phone), log }) } : {}),
     });
     // Photos and files people text or email Kloru, kept beside the desk's repo (the website serves them at /m/).
-    registry.registerMany([...artifactTools(desk), ...automationTools(desk, automationEvents), ...workerTools(desk), ...groceryTools(desk), ...mediaTools(desk, media, { workspaceDir: state.path("workspace") })]);
+    registry.registerMany([...artifactTools(desk), ...appTools(desk), ...automationTools(desk, automationEvents), ...workerTools(desk), ...groceryTools(desk), ...mediaTools(desk, media, { workspaceDir: state.path("workspace") })]);
     {
       const d = desk;
       events = new Events({

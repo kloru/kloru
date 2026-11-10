@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Desk, Vault, type Planner, type WorkerHost } from "@kloru/desk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { bounded, browserTools, findChromium, sameSite } from "../src/browser-tools.js";
+import { bounded, browserTools, findChromium, onSite, sameSite } from "../src/browser-tools.js";
 
 const chrome = findChromium(process.env);
 const EZRA = "+14155550190";
@@ -50,6 +50,64 @@ describe("which site a login belongs to", () => {
     expect(sameSite("10.0.0.1", "192.168.0.1")).toBe(false);
     expect(sameSite("pge.com", undefined)).toBe(false);
   });
+});
+
+describe("where an app being tried out may load from", () => {
+  it("its own site and what never leaves the page, nothing else", () => {
+    expect(onSite("https://kloru.com/a/abc?test=k", "https://kloru.com")).toBe(true);
+    expect(onSite("data:image/png;base64,AAAA", "https://kloru.com")).toBe(true);
+    expect(onSite("about:blank", "https://kloru.com")).toBe(true);
+    expect(onSite("https://kloru.com.evil.io/x", "https://kloru.com")).toBe(false);
+    expect(onSite("http://kloru.com/a/abc", "https://kloru.com")).toBe(false);
+    expect(onSite("not a url", "https://kloru.com")).toBe(false);
+  });
+});
+
+describe.skipIf(!chrome)("trying an app in a throwaway phone-sized browser (app_test, #43)", () => {
+  const APP = `<h1>Groceries</h1><input placeholder="Add an item"><button>Add</button><ul></ul><img src="https://example.com/leak.png">
+<script>document.querySelector("button").onclick = () => { const li = document.createElement("li"); li.textContent = document.querySelector("input").value + " @" + innerWidth; document.querySelector("ul").append(li); };</script>`;
+  let server: http.Server;
+  let base = "";
+  const asked: string[] = [];
+  beforeAll(async () => {
+    server = http.createServer((q, r) => {
+      asked.push(q.url ?? "");
+      r.setHeader("content-type", "text/html");
+      r.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0"><iframe id="kloru-app" style="border:0;width:100vw;height:100vh" srcdoc="${APP.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"></iframe>`);
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(() => new Promise<void>((r) => server.close(() => r())));
+
+  it("opens the app's test link fresh, hands the script the app, and reports what it threw; a member's task can use it", async () => {
+    const CLEO = "+14155550191";
+    const root = mkdtempSync(join(tmpdir(), "app-test-"));
+    const desk = new Desk({ root, host: new Host(), planner: { handle: async () => {} } as Planner, ownerPhone: EZRA, artifactBaseUrl: `${base}/a/`, appErrors: () => ["ReferenceError: qty is not defined (line 3)"] });
+    const { tools, pool } = browserTools({ desk, profilesDir: join(root, "browser"), executablePath: chrome!, log: () => {} });
+    const t = Object.fromEntries(tools.map((x) => [x.spec.name, x]));
+    expect(t.app_test!.spec.meta?.capabilities).toEqual([]);
+    const { call } = desk.startCall({ callSid: "CA1", phone: CLEO, channel: "voice" });
+    const issue = desk.fileIssue(call.id, "Make us a shared grocery list");
+    const ctx = { conversationKey: `desk:issue:${issue.id}:engineer` } as never;
+    const made = desk.publishApp(issue.id, "Grocery list", APP);
+    if (!made.ok) throw new Error(made.error);
+    const text = (r: unknown) => JSON.stringify(r);
+    const run = (code: string) => t.app_test!.spec.execute({ id: made.value.id, code }, ctx);
+    try {
+      const out = text(await run(`await app.getByPlaceholder("Add an item").fill("Milk"); await app.getByRole("button", { name: "Add" }).click(); return await app.locator("li").innerText();`));
+      expect(out).toContain("Milk @430"); // phone-sized
+      expect(out).toContain("qty is not defined");
+      expect(asked.at(-1)).toMatch(new RegExp(`^/a/${made.value.id}\\?test=[A-Za-z0-9_-]{16,}$`));
+      // Each run starts from a fresh load, and the script has no saved logins or other tabs to reach.
+      expect(text(await run(`return String(await app.locator("li").count()) + typeof fillSecret + typeof context`))).toContain("0undefinedundefined");
+      // Nothing off the app's own site loads.
+      expect(text(await run(`return await page.goto("https://example.com/").then(() => "left", () => "stayed")`))).toContain("stayed");
+      expect(text(await t.app_test!.spec.execute({ id: "nope-nope-nope-nope-00", code: "return 1" }, ctx))).toMatch(/isError/);
+    } finally {
+      await pool.closeAll();
+    }
+  }, 90_000);
 });
 
 describe.skipIf(!chrome)("browser tools on a real Chromium", () => {

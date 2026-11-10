@@ -220,10 +220,10 @@ export function artifactsSection(list: Artifact[], revoked: Set<string>, csrf: s
       const action = gone
         ? `<span class="state">taken down</span>`
         : `<form method="post" action="/admin/desk/artifacts/revoke" class="inline"><input type="hidden" name="csrf" value="${esc(csrf)}"><input type="hidden" name="id" value="${esc(a.id)}"><button class="link">take down</button></form>`;
-      return `<li>${gone ? esc(a.title) : `<a href="/a/${esc(a.id)}">${esc(a.title)}</a>`} <span class="muted small">${at(a.createdAt)} · <a href="/admin/desk/issues/${a.issue}">#${a.issue}</a>${a.emailedAt ? " · emailed" : ""}</span> · ${action}</li>`;
+      return `<li>${gone ? esc(a.title) : `<a href="/a/${esc(a.id)}">${esc(a.title)}</a>`} <span class="muted small">${a.kind === "app" ? "app · " : ""}${at(a.createdAt)} · <a href="/admin/desk/issues/${a.issue}">#${a.issue}</a>${a.emailedAt ? " · emailed" : ""}</span> · ${action}</li>`;
     })
     .join("");
-  return `<section><h2>Pages</h2>${rows ? `<ul class="rows">${rows}</ul>` : "<p>None yet.</p>"}<p class="muted small">Anyone with a page's link can open it. Taking one down is permanent.</p></section>`;
+  return `<section><h2>Pages and apps</h2>${rows ? `<ul class="rows">${rows}</ul>` : "<p>None yet.</p>"}<p class="muted small">Anyone with a page's link can open it; an app is the family's unless it was made for guests. Taking one down is permanent.</p></section>`;
 }
 
 

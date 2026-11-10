@@ -157,7 +157,18 @@ export interface Artifact {
   /** Living document: every edit bumps the version (old ones in versions/<id>.jsonl). */
   version?: number;
   updatedAt?: string;
+  /** A page (markdown) or an app (one HTML file with a data store). Missing means page. */
+  kind?: "page" | "app";
+  /** An app's file. Pages keep `markdown`; an app's `markdown` is "". */
+  html?: string;
+  /** What someone with the link who isn't signed in may do with an app. Missing means none. */
+  visitors?: AppVisitors;
+  /** Opens an app on scratch data (<link>?test=<key>), so a worker can try it in a browser without touching what people entered. */
+  testKey?: string;
 }
+
+/** none: family only. add: guests add records and see their own. all: guests see and change everything. */
+export type AppVisitors = "none" | "add" | "all";
 
 /** One kept version of an artifact. */
 export interface ArtifactVersion {
@@ -165,6 +176,8 @@ export interface ArtifactVersion {
   at: string;
   title: string;
   markdown: string;
+  html?: string;
+  visitors?: AppVisitors;
   /** The issue that wrote it, or who edited it on the website. */
   issue?: number;
   by?: string;

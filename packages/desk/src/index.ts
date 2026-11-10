@@ -7,6 +7,7 @@ export { PM_RULES, TechnicalPM, pmTools, snapshot, type TechnicalPMOptions } fro
 export { Memory, parseFile, type MemoryFile, type MemoryOwner } from "./memory.js";
 export { MEMORY_READ_TOOLS, MEMORY_WRITE_TOOLS, memoryTools } from "./memory-tools.js";
 export { artifactTools } from "./artifacts.js";
+export { APP_MAX, appTools, checkApp } from "./apps.js";
 export { ARTIFACT_ID } from "./repo.js";
 export { automationTools, deleteAutomation, describeAutomation, AUTOMATION_CREATE, AUTOMATION_DELETE, AUTOMATION_EVENTS, AUTOMATION_LIST, type AutomationEvents } from "./automations.js";
 export { workerTools } from "./worker-tools.js";

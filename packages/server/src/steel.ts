@@ -40,26 +40,27 @@ async function api(key: string, path: string, body?: unknown, f: Fetch = fetch):
  * saving from the last session answers 409 for a few seconds; without a proxy deposit, it runs
  * without the residential proxy and says so.
  */
-export async function openSteel(o: { apiKey: string; dir: string; log: (m: string) => void; fetchImpl?: Fetch }): Promise<SteelBrowser> {
+export async function openSteel(o: { apiKey: string; dir: string; log: (m: string) => void; fetchImpl?: Fetch; throwaway?: { width: number; height: number } }): Promise<SteelBrowser> {
   const file = join(o.dir, "steel.json");
-  const saved = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as { profileId?: string }) : {};
-  const base = { timeout: STEEL_SESSION_MS, solveCaptcha: false, persistProfile: true, dimensions: { width: 1280, height: 900 }, blockAds: true };
+  // A throwaway session (trying out an app) keeps no profile and needs no residential proxy.
+  const saved = !o.throwaway && existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as { profileId?: string }) : {};
+  const base = { timeout: STEEL_SESSION_MS, solveCaptcha: false, persistProfile: !o.throwaway, dimensions: o.throwaway ?? { width: 1280, height: 900 }, blockAds: true };
   let created: { status: number; json: Record<string, unknown> } | undefined;
-  for (const withProxy of [true, false]) {
+  for (const withProxy of o.throwaway ? [false] : [true, false]) {
     for (let i = 0; i < 6; i++) {
       created = await api(o.apiKey, "/sessions", { ...base, ...(withProxy ? { useProxy: true } : {}), ...(saved.profileId ? { profileId: saved.profileId } : {}) }, o.fetchImpl);
       if (created.status !== 409) break;
       await new Promise((r) => setTimeout(r, 2_000));
     }
     if (created!.status < 300) {
-      if (!withProxy) o.log("browser: Steel session without the residential proxy (Steel needs a paid deposit for proxies)");
+      if (!withProxy && !o.throwaway) o.log("browser: Steel session without the residential proxy (Steel needs a paid deposit for proxies)");
       break;
     }
     o.log(`browser: Steel session ${withProxy ? "with proxy " : ""}failed (${created!.status}): ${JSON.stringify(created!.json).slice(0, 200)}`);
   }
   if (!created || created.status >= 300) throw new Error(`Steel couldn't start a browser (${created?.status})`);
   const sessionId = String(created.json.id);
-  if (typeof created.json.profileId === "string") writeFileSync(file, JSON.stringify({ profileId: created.json.profileId }), { mode: 0o600 });
+  if (!o.throwaway && typeof created.json.profileId === "string") writeFileSync(file, JSON.stringify({ profileId: created.json.profileId }), { mode: 0o600 });
   const browser: Browser = await chromium.connectOverCDP(`wss://${CONNECT_HOST}?apiKey=${encodeURIComponent(o.apiKey)}&sessionId=${encodeURIComponent(sessionId)}`);
   const ctx = browser.contexts()[0] ?? (await browser.newContext());
   const relay = await relayTo(o.apiKey, sessionId);

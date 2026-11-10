@@ -182,6 +182,29 @@ The Inkbox tunnel (`INSTINCT_TUNNEL=1` or `instinct dev --tunnel`) exposes a sec
 loopback-only listener that answers `/health` and `/webhooks/inkbox` and nothing else.
 `/chat` is never public through it.
 
+### Apps Kloru makes
+
+An app is one HTML file a model wrote, so the website treats it as untrusted. It is served only
+inside a sandboxed frame (`sandbox="allow-scripts allow-forms"`, and the same as a response
+header), which gives it an opaque origin: no kloru.com cookies or storage, and no way to read
+the page around it. Its content policy is `default-src 'none'` with inline script and style
+only, so it can load nothing and send nothing. All it can do is ask the page around it, by
+`postMessage`, for its own records; that page calls the app's data routes as whoever is signed in,
+and the server scopes every call to that one app.
+
+- A family app answers only to a signed-in family member. Guests get in only when the app was
+  made with `visitors: add` (they see and change only their own entries) or `all`, and their
+  writes are rate-limited.
+- Writes need a key the shell page was given (the session's CSRF token, or a per-app key for
+  guests), so another site can't write through someone's cookie.
+- Records are capped (16 KB each, 5,000 per app). What people type is other people's input: the
+  skill tells the model to render it with `textContent`.
+- **Testing.** A worker tries its app through a test link (`?test=<key>`, a random key per app)
+  that opens it on scratch data, never the family's. The browser it uses (`app_test`) is a
+  throwaway: no profile, no sign-ins, no vault, and requests off the app's own site are blocked.
+  Unlike `browser_run`, any family member's request may use it, since it holds nothing of anyone's.
+- Taking a page down (`/admin/desk`) takes an app down too: its link and data routes answer 410.
+
 ### Group threads
 
 In an iMessage group, every participant gets their own transcript. A colleague in the group

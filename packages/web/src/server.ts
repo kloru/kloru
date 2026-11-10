@@ -11,8 +11,10 @@
 import { makeConnectToken, readConnectToken } from "./connect-link.js";
 import { readCalls } from "./calls.js";
 import { readTranscript } from "./transcripts.js";
-import { ARTIFACT_ID, MEDIA_ID, MediaStore } from "@kloru/desk";
+import { ARTIFACT_ID, MEDIA_ID, MediaStore, type Artifact } from "@kloru/desk";
 import { automationsSection, storeSection, artifactGonePage, artifactPage, artifactsSection, revokeArtifact, revokedArtifacts, deskCallPage, deskPage, issuePage, ledgerPage, memoryCommitPage, memoryFile, memoryPage, openMemory, openRepo, publicDiff, readAlerts } from "./desk-pages.js";
+import { appAccess, appFramePage, appShellPage, FRAME_CSP, pagesPage } from "./app-pages.js";
+import { AppStore, COLLECTION } from "./app-store.js";
 import { improveKloru, setImproveKloru } from "./prefs.js";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -91,6 +93,8 @@ export interface ConsoleOptions {
   revokedArtifactsPath?: string;
   /** Per-person voice preferences shared with the voice service. Unset: no Settings page. */
   prefsPath?: string;
+  /** Where apps keep what people enter (SQLite; ":memory:" in tests). Unset: apps open but can't keep data. */
+  appsDbPath?: string;
   log?: (m: string) => void;
 }
 
@@ -98,10 +102,12 @@ const FORM_LIMIT = 64 * 1024;
 const CODES_PER_PHONE = 3; // per 10 minutes
 const CODES_PER_ADDRESS = 10; // per hour
 const CHECKS_PER_PHONE = 5; // per 10 minutes
-const STATIC: Record<string, string> = { "app.css": "text/css; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "optin.png": "image/png", "editor.js": "text/javascript; charset=utf-8", "editor.css": "text/css; charset=utf-8", "takeover.js": "text/javascript; charset=utf-8", "takeover.css": "text/css; charset=utf-8" };
+const STATIC: Record<string, string> = { "app.css": "text/css; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "optin.png": "image/png", "editor.js": "text/javascript; charset=utf-8", "editor.css": "text/css; charset=utf-8", "takeover.js": "text/javascript; charset=utf-8", "takeover.css": "text/css; charset=utf-8", "app-shell.js": "text/javascript; charset=utf-8" };
 /** A page loads only its own editor script; media and PDFs come from this site. */
 const PAGE_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self'; frame-src 'self'; connect-src 'self'; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const UPLOAD_LIMIT = 25 * 1024 * 1024;
+const VISITOR_WRITES = 30; // per minute, per address
+const VISITOR_TOKEN = /^[A-Za-z0-9_-]{22,64}$/;
 const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self' https://*.composio.dev https://accounts.google.com; frame-ancestors 'none'",
   "X-Frame-Options": "DENY",
@@ -179,6 +185,13 @@ export function createConsole(o: ConsoleOptions): http.Server {
   /** A page's edit key: anyone holding the page can edit it; another site can't learn the key. */
   const editKey = (id: string) => createHmac("sha256", o.sessionSecret).update(`page-edit:${id}`).digest("base64url").slice(0, 32);
   const safeEqual = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  /** A guest's write key for an app, served in its page: another site can't read it, so it can't write for them. */
+  const appKey = (id: string) => createHmac("sha256", o.sessionSecret).update(`app-write:${id}`).digest("base64url").slice(0, 32);
+  /** Opens an app's frame: only its shell page carries it, so the frame is as private as the shell. */
+  const frameKey = (id: string) => createHmac("sha256", o.sessionSecret).update(`app-frame:${id}`).digest("base64url").slice(0, 32);
+  const visitorWrites = new RateLimiter(VISITOR_WRITES, 60_000);
+  let appStore: AppStore | undefined;
+  const apps = () => (appStore ??= o.appsDbPath ? new AppStore(o.appsDbPath) : undefined);
   /** The editor's content hash, so a page always loads the editor it was served with. */
   let editorVersion = "";
   for (const name of Object.keys(STATIC)) {
@@ -188,6 +201,16 @@ export function createConsole(o: ConsoleOptions): http.Server {
       log(`static file missing: ${name}`);
     }
   }
+
+  const appClient = (() => {
+    try {
+      return readFileSync(join(o.staticDir, "app-client.js"), "utf8");
+    } catch {
+      log("static file missing: app-client.js");
+      return "";
+    }
+  })();
+  const shellVersion = createHash("sha256").update(staticFiles.get("app-shell.js") ?? "").digest("hex").slice(0, 12);
 
   {
     const js = staticFiles.get("editor.js");
@@ -311,6 +334,98 @@ export function createConsole(o: ConsoleOptions): http.Server {
 
   const list = (v: string | null) => (v ?? "").split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
 
+  /**
+   * An app's routes. The shell (/a/<id>) is what's guarded: the family signed in, or guests when the
+   * app lets them in. The frame holds only the app's file. Data calls come from the shell's script,
+   * as whoever the shell was served to.
+   */
+  async function appRoute(ctx: Ctx, app: Artifact, sub: string | undefined, collection: string | undefined, record: string | undefined): Promise<void> {
+    const { req, res, url } = ctx;
+    const method = req.method ?? "GET";
+    const id = app.id;
+    const robots = { "X-Robots-Tag": "noindex, nofollow" };
+    const gone = revokedArtifacts(o.revokedArtifactsPath).has(id);
+    // A worker's test link: the same app, on scratch data nobody else sees.
+    const testKey = String(req.headers["x-test"] ?? url.searchParams.get("test") ?? "");
+    const test = !!app.testKey && !!testKey && safeEqual(testKey, app.testKey);
+    const access = appAccess(app, !!ctx.user);
+
+    if (sub === undefined) {
+      if (method !== "GET" || collection) return send(res, 404, "not found", { "content-type": "text/plain; charset=utf-8" });
+      const headers = { ...robots, "Content-Security-Policy": PAGE_CSP };
+      if (gone) return send(res, 410, artifactGonePage(), headers);
+      if (test) return send(res, 200, appShellPage(app, { key: app.testKey!, frameKey: frameKey(id), me: { name: "Test" }, test: true, assets: shellVersion }), headers);
+      if (access === "sign-in") return redirect(res, 302, `/signin?next=${encodeURIComponent(`/a/${id}`)}`);
+      const me = ctx.user ? { name: ctx.user.name ?? familyNow(ctx.user.phone)?.name ?? "Family" } : undefined;
+      return send(res, 200, appShellPage(app, { key: ctx.user ? ctx.csrf! : appKey(id), frameKey: frameKey(id), ...(me ? { me } : {}), assets: shellVersion }), headers);
+    }
+
+    if (sub === "app") {
+      if (method !== "GET" || collection) return send(res, 404, "not found", { "content-type": "text/plain; charset=utf-8" });
+      // Framed by this site's shell only; inside, the app's own inline script and nothing else.
+      const headers = { ...robots, "Content-Security-Policy": FRAME_CSP, "X-Frame-Options": "SAMEORIGIN" };
+      if (gone) return send(res, 410, artifactGonePage(), headers);
+      if (!safeEqual(url.searchParams.get("k") ?? "", frameKey(id))) return send(res, 403, messageBody("Not here", "Open the app from its link."), headers);
+      return send(res, 200, appFramePage(app, appClient), headers);
+    }
+
+    // Data and errors: JSON, for the shell's script.
+    if (gone) return sendJson(res, 410, { error: "this app was taken down" });
+    if (!test && access === "sign-in") return sendJson(res, 401, { error: "sign in to use this app" });
+    const store = apps();
+    if (!store) return sendJson(res, 503, { error: "this Kloru has nowhere to keep app data" });
+    const family = !test && !!ctx.user;
+    const guest = !test && !ctx.user;
+    const token = String(req.headers["x-visitor"] ?? "");
+    const who = test
+      ? { by: "Test", owner: "t" }
+      : ctx.user
+        ? { by: ctx.user.name ?? familyNow(ctx.user.phone)?.name ?? "Family", owner: `u:${ctx.user.phone}` }
+        : { by: "Guest", owner: VISITOR_TOKEN.test(token) ? `v:${createHash("sha256").update(token).digest("base64url").slice(0, 32)}` : "" };
+    // Scratch data lives beside the real app's, under a name no app id can be.
+    const space = test ? `${id}~test` : id;
+    // A guest of an "add" app sees and changes only their own entries.
+    const own = guest && app.visitors !== "all";
+    if (method !== "GET") {
+      const key = String(req.headers["x-csrf"] ?? "");
+      if (!safeEqual(key, test ? app.testKey! : family ? ctx.csrf! : appKey(id))) return sendJson(res, 403, { error: "this page expired; reload it" });
+      if (guest && !who.owner) return sendJson(res, 400, { error: "this browser can't be told apart from others; allow site storage and reload" });
+      if (guest && !visitorWrites.take(addressOf(req))) return sendJson(res, 429, { error: "too many changes; wait a minute" });
+    }
+
+    if (sub === "errors" && method === "POST" && !collection) {
+      const body = await readBytes(req, FORM_LIMIT).catch(() => undefined);
+      const said = (() => { try { return JSON.parse(body?.toString("utf8") ?? "") as { message?: unknown; version?: unknown }; } catch { return {}; } })();
+      // Only the version being served: an old tab's errors say nothing about the file as it is now.
+      if (typeof said.message === "string" && Number(said.version) === (app.version ?? 1)) store.reportError(id, app.version ?? 1, said.message);
+      return sendJson(res, 200, { ok: true });
+    }
+    if (sub !== "data") return sendJson(res, 404, { error: "not found" });
+    if (method === "GET" && !collection) return sendJson(res, 200, { rev: store.rev(space), version: app.version ?? 1 });
+    if (!collection || !COLLECTION.test(collection)) return sendJson(res, 400, { error: "a collection's name is lowercase letters, digits, - or _ (at most 40)" });
+    if (method === "GET" && !record) return sendJson(res, 200, { records: own ? (who.owner ? store.list(space, collection, who.owner) : []) : store.list(space, collection) });
+    if (method === "PUT" && !record) {
+      const body = await readBytes(req, FORM_LIMIT).catch(() => undefined);
+      if (!body) return sendJson(res, 413, { error: "too large" });
+      let value: unknown;
+      try {
+        value = JSON.parse(body.toString("utf8"));
+      } catch {
+        return sendJson(res, 400, { error: "a record is an object" });
+      }
+      const put = store.put(space, collection, value, who, { own });
+      return put.ok ? sendJson(res, 200, { record: put.record }) : sendJson(res, put.status, { error: put.error });
+    }
+    if (method === "DELETE" && record) {
+      let rid = "";
+      try {
+        rid = decodeURIComponent(record);
+      } catch {}
+      return sendJson(res, 200, { ok: store.remove(space, collection, rid, own ? who.owner : undefined) });
+    }
+    return sendJson(res, 405, { error: "method not allowed" });
+  }
+
   async function route(ctx: Ctx): Promise<void> {
     const { req, res, url } = ctx;
     const method = req.method ?? "GET";
@@ -335,6 +450,11 @@ export function createConsole(o: ConsoleOptions): http.Server {
       ctx.csrf = session.csrf;
     }
 
+    // An app: its shell, its frame, its data. (A page's own routes follow.)
+    const appPath = /^\/a\/([A-Za-z0-9_-]{22})(?:\/(app|data|errors)(?:\/([^/]+)(?:\/([^/]+))?)?)?$/.exec(path);
+    const maybeApp = appPath && o.deskDir ? openRepo(o.deskDir).artifact(appPath[1]!) : undefined;
+    if (appPath && maybeApp?.kind === "app") return appRoute(ctx, maybeApp, appPath[2], appPath[3], appPath[4]);
+
     if (method === "GET" && path.startsWith("/a/")) {
       // Anyone with the link can read it; the family, signed in, can edit. Kept out of search engines.
       const headers = { "X-Robots-Tag": "noindex, nofollow", "Content-Security-Policy": PAGE_CSP };
@@ -351,7 +471,7 @@ export function createConsole(o: ConsoleOptions): http.Server {
       // The page's own edit key, served in the page: another site can't read it, so it can't edit for you.
       if (!safeEqual(String(req.headers["x-csrf"] ?? ""), editKey(id))) return sendJson(res, 403, { error: "this page expired; reload it" });
       const page = o.deskDir ? openRepo(o.deskDir).artifact(id) : undefined;
-      if (!o.deskDir || !page || revokedArtifacts(o.revokedArtifactsPath).has(id)) return sendJson(res, 404, { error: "no such page" });
+      if (!o.deskDir || !page || page.kind === "app" || revokedArtifacts(o.revokedArtifactsPath).has(id)) return sendJson(res, 404, { error: "no such page" });
       const body = await readBytes(req, pageAction[2] === "upload" ? UPLOAD_LIMIT : FORM_LIMIT).catch(() => undefined);
       if (!body) return sendJson(res, 413, { error: "too large" });
       if (pageAction[2] === "upload") {
@@ -514,6 +634,13 @@ export function createConsole(o: ConsoleOptions): http.Server {
     }
 
     // Everyone in the family keeps their own policy.md here: always the signed-in person's, never anyone else's.
+    // Pages: what Kloru made for you, and the family's apps.
+    if (method === "GET" && path === "/pages" && (isAdmin(ctx.user) || memberOf(ctx.user))) {
+      const gone = revokedArtifacts(o.revokedArtifactsPath);
+      const mine = normPhone(ctx.user.phone);
+      const list = o.deskDir ? openRepo(o.deskDir).artifacts().filter((a) => !gone.has(a.id) && (a.kind === "app" || normPhone(a.phone) === mine)) : [];
+      return page(ctx, 200, "Pages", pagesPage(list), undefined, "/pages");
+    }
     if (path === "/policy" && (isAdmin(ctx.user) || memberOf(ctx.user))) {
       const client = o.clientFor(ctx.user);
       if (!client) return page(ctx, 503, "Your policy", messageBody("Kloru isn't reachable", "Try again in a minute."));
@@ -789,7 +916,7 @@ export function createConsole(o: ConsoleOptions): http.Server {
     return redirect(res, 303, next, { "set-cookie": [sessionCookie(signSession(o.sessionSecret, session), secure, SESSION_TTL_MS / 1000), `${PRE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`] });
   }
 
-  return http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     const ctx: Ctx = { req, res, url: new URL(req.url ?? "/", "http://console.local") };
     route(ctx).catch((err: unknown) => {
       log(`unhandled: ${(err as Error).message}`);
@@ -797,6 +924,8 @@ export function createConsole(o: ConsoleOptions): http.Server {
       else res.end();
     });
   });
+  server.on("close", () => appStore?.close());
+  return server;
 }
 
 /** One vault entry with its values, as the owner API exports it for the signed-in person. */

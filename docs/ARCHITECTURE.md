@@ -56,6 +56,7 @@ runs on that machine.
 | `/data/instinct/store` | mail and calendar synced from Composio, with full-text search |
 | `/data/instinct/secrets/vault.json` | the vault: AES-256-GCM, keyed by `KLORU_VAULT_KEY` |
 | `/data/instinct/browser` | each person's browser profile (or their Steel profile id) |
+| `/data/kloru/apps.db` | what people entered into apps Kloru made (the website's; the agent only reads script errors from it) |
 | `/data/instinct/metrics` | hourly OpenRouter usage and time-saved estimates |
 
 ## Packages

@@ -72,7 +72,10 @@ const fillSecret = (selector, ref) => new Promise((resolve, reject) => {
 const AsyncFunction = (async () => {}).constructor;
 const out = (m) => new Promise((r) => process.send(m, () => r()));
 try {
-  const value = await new AsyncFunction("page", "context", "fillSecret", code)(page, context, fillSecret);
+  // Trying out an app: the page and the app's frame, nothing of anyone's.
+  const value = process.env.KLORU_APP
+    ? await new AsyncFunction("page", "app", code)(page, page.frameLocator("#kloru-app"))
+    : await new AsyncFunction("page", "context", "fillSecret", code)(page, context, fillSecret);
   let text;
   try { text = value === undefined ? "" : typeof value === "string" ? value : JSON.stringify(value, null, 2); } catch { text = String(value); }
   await out({ done: true, value: text });
@@ -116,6 +119,7 @@ const KEYS = new Set(["Enter", "Backspace", "Tab", "Escape", "ArrowUp", "ArrowDo
 export class BrowserPool {
   private readonly contexts = new Map<string, { ctx: BrowserContext; cdp: string; close: () => Promise<void>; timer?: ReturnType<typeof setTimeout> }>();
   private readonly pages = new Map<number, Page>();
+  private readonly tests = new Map<number, Page>();
   constructor(private readonly o: BrowserOptions) {}
 
   private async contextFor(phone: string): Promise<BrowserContext> {
@@ -144,6 +148,42 @@ export class BrowserPool {
     return ctx;
   }
 
+  /**
+   * A throwaway phone-sized browser for trying out an app this task made: no profile, no sign-ins,
+   * and it loads nothing but the app's own site. Closed with the task, or after ten quiet minutes.
+   */
+  async attachTest(issue: Issue, origin: string): Promise<{ page: Page; cdp: string; target: string }> {
+    const key = `test-${issue.id}`;
+    let have = this.contexts.get(key);
+    if (have && have.ctx.browser()?.isConnected() === false) {
+      await this.closeKey(key);
+      have = undefined;
+    }
+    if (!have) {
+      const dir = join(this.o.profilesDir, `.${key}`);
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const tidy = () => rmSync(dir, { recursive: true, force: true });
+      if (this.o.steelApiKey) {
+        const steel = await openSteel({ apiKey: this.o.steelApiKey, dir, log: this.o.log, throwaway: PHONE_VIEW });
+        have = { ctx: steel.ctx, cdp: steel.cdp, close: () => steel.close().finally(tidy) };
+      } else {
+        const ctx = await chromium.launchPersistentContext(dir, { executablePath: this.o.executablePath, headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0"], viewport: PHONE_VIEW, isMobile: true, hasTouch: true });
+        have = { ctx, cdp: await devtoolsUrl(dir), close: () => ctx.close().finally(tidy) };
+      }
+      await have.ctx.route("**/*", (route) => (onSite(route.request().url(), origin) ? route.continue() : route.abort("blockedbyclient")));
+      this.contexts.set(key, have);
+    }
+    this.touch(key);
+    let page = this.tests.get(issue.id);
+    if (!page || page.isClosed()) {
+      page = have.ctx.pages()[0] ?? (await have.ctx.newPage());
+      await page.setViewportSize(PHONE_VIEW).catch(() => undefined);
+      this.tests.set(issue.id, page);
+    }
+    return { page, cdp: have.cdp, target: await targetOf(page) };
+  }
+
   /** Close a person's browser after ten quiet minutes; the profile (and its sign-ins) stays. */
   private touch(key: string): void {
     const c = this.contexts.get(key);
@@ -157,6 +197,7 @@ export class BrowserPool {
     const c = this.contexts.get(key);
     this.contexts.delete(key);
     for (const [id, p] of this.pages) if (p.context() === c?.ctx) this.pages.delete(id);
+    for (const [id, p] of this.tests) if (p.context() === c?.ctx) this.tests.delete(id);
     await c?.close().catch(() => undefined);
   }
 
@@ -173,10 +214,7 @@ export class BrowserPool {
   async attach(issue: Issue): Promise<{ page: Page; cdp: string; target: string }> {
     const page = await this.page(issue);
     const c = this.contexts.get(issue.filedBy.phone.replace(/\D/g, ""))!;
-    const s = await page.context().newCDPSession(page);
-    const { targetInfo } = (await s.send("Target.getTargetInfo")) as { targetInfo: { targetId: string } };
-    await s.detach().catch(() => undefined);
-    return { page, cdp: c.cdp, target: targetInfo.targetId };
+    return { page, cdp: c.cdp, target: await targetOf(page) };
   }
 
   private readonly takeovers = new Map<string, Takeover>();
@@ -249,10 +287,29 @@ export class BrowserPool {
   async closeIssue(issueId: number): Promise<void> {
     await this.pages.get(issueId)?.close().catch(() => undefined);
     this.pages.delete(issueId);
+    if (this.contexts.has(`test-${issueId}`)) await this.closeKey(`test-${issueId}`);
   }
 
   async closeAll(): Promise<void> {
     for (const key of [...this.contexts.keys()]) await this.closeKey(key);
+  }
+}
+
+/** The tab's id in the browser, by which a script finds it. */
+async function targetOf(page: Page): Promise<string> {
+  const s = await page.context().newCDPSession(page);
+  const { targetInfo } = (await s.send("Target.getTargetInfo")) as { targetInfo: { targetId: string } };
+  await s.detach().catch(() => undefined);
+  return targetInfo.targetId;
+}
+
+/** Whether a request stays on the app's own site (or never leaves the page: data:, blob:, about:). */
+export function onSite(url: string, origin: string): boolean {
+  if (/^(data|blob|about):/i.test(url)) return true;
+  try {
+    return new URL(url).origin === origin;
+  } catch {
+    return false;
   }
 }
 
@@ -345,6 +402,41 @@ export function browserTools(o: BrowserOptions): { tools: RegisteredTool[]; pool
     return `filled ${e.name}.${field}`;
   }
 
+  /** Run a worker's Playwright code against one tab, in a child process with none of Kloru's environment. */
+  async function runScript(code: string, timeout: number, signal: AbortSignal | undefined, at: { cdp: string; target: string; app?: boolean }, fill?: (selector: string, ref: string) => Promise<string>): Promise<{ result: { value?: string; error?: string }; logs: string }> {
+    const dir = mkdtempSync(join(o.profilesDir, ".run-"));
+    writeFileSync(join(dir, "runner.mjs"), RUNNER);
+    writeFileSync(join(dir, "code.js"), code);
+    // No environment but what it needs: none of Kloru's own keys.
+    const child = fork(join(dir, "runner.mjs"), [join(dir, "code.js")], {
+      cwd: dir,
+      env: { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", HOME: dir, NODE_NO_WARNINGS: "1", KLORU_PW: PLAYWRIGHT, KLORU_CDP: at.cdp, KLORU_TARGET: at.target, ...(at.app ? { KLORU_APP: "1" } : {}) },
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+      execArgv: [],
+    });
+    const kill = () => child.kill("SIGKILL");
+    signal?.addEventListener("abort", kill, { once: true });
+    let logs = "";
+    child.stdout?.on("data", (b: Buffer) => (logs += b.toString()));
+    child.stderr?.on("data", (b: Buffer) => (logs += b.toString()));
+    const result = await new Promise<{ value?: string; error?: string }>((resolve) => {
+      const timer = setTimeout(() => (child.kill("SIGKILL"), resolve({ error: `timed out after ${timeout / 1000} s` })), timeout);
+      child.on("message", (m: { done?: boolean; value?: string; error?: string; id?: number; op?: string; selector?: string; ref?: string }) => {
+        if (m.done) return clearTimeout(timer), resolve(m);
+        if (m.op === "fillSecret")
+          void (fill ? fill(String(m.selector), String(m.ref)) : Promise.reject(new Error("no saved logins here"))).then(
+            (value) => child.send({ id: m.id, value }),
+            (e: unknown) => child.send({ id: m.id, error: e instanceof Error ? e.message : String(e) }),
+          );
+      });
+      child.on("exit", (c) => (clearTimeout(timer), resolve({ error: `the script exited (${c}) before finishing` })));
+    });
+    signal?.removeEventListener("abort", kill);
+    child.kill();
+    rmSync(dir, { recursive: true, force: true });
+    return { result, logs };
+  }
+
   const tools: RegisteredTool[] = [
     defineTool({
       name: "browser_run",
@@ -364,40 +456,45 @@ export function browserTools(o: BrowserOptions): { tools: RegisteredTool[]; pool
         const timeout = Math.min(Math.max(timeout_seconds ?? 60, 1), 300) * 1000;
         return guard(issue, timeout + 60_000, signal, async () => {
           const { page, cdp, target } = await bounded(pool.attach(issue), 30_000, signal, "the tab");
-          const dir = mkdtempSync(join(o.profilesDir, ".run-"));
-          writeFileSync(join(dir, "runner.mjs"), RUNNER);
-          writeFileSync(join(dir, "code.js"), code);
-          // No environment but what it needs: none of Kloru's own keys.
-          const child = fork(join(dir, "runner.mjs"), [join(dir, "code.js")], {
-            cwd: dir,
-            env: { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", HOME: dir, NODE_NO_WARNINGS: "1", KLORU_PW: PLAYWRIGHT, KLORU_CDP: cdp, KLORU_TARGET: target },
-            stdio: ["ignore", "pipe", "pipe", "ipc"],
-            execArgv: [],
-          });
-          const kill = () => child.kill("SIGKILL");
-          signal?.addEventListener("abort", kill, { once: true });
-          let logs = "";
-          child.stdout?.on("data", (b: Buffer) => (logs += b.toString()));
-          child.stderr?.on("data", (b: Buffer) => (logs += b.toString()));
-          const result = await new Promise<{ value?: string; error?: string }>((resolve) => {
-            const timer = setTimeout(() => (child.kill("SIGKILL"), resolve({ error: `timed out after ${timeout / 1000} s` })), timeout);
-            child.on("message", (m: { done?: boolean; value?: string; error?: string; id?: number; op?: string; selector?: string; ref?: string }) => {
-              if (m.done) return clearTimeout(timer), resolve(m);
-              if (m.op === "fillSecret")
-                void fillSecret(issue, page, String(m.selector), String(m.ref)).then(
-                  (value) => child.send({ id: m.id, value }),
-                  (e: unknown) => child.send({ id: m.id, error: e instanceof Error ? e.message : String(e) }),
-                );
-            });
-            child.on("exit", (c) => (clearTimeout(timer), resolve({ error: `the script exited (${c}) before finishing` })));
-          });
-          signal?.removeEventListener("abort", kill);
-          child.kill();
-          rmSync(dir, { recursive: true, force: true });
+          const { result, logs } = await runScript(code, timeout, signal, { cdp, target }, (selector, ref) => fillSecret(issue, page, selector, ref));
           if (signal?.aborted) throw new Error("stopped");
           const where = `\n\n${await whereNow(page)}`;
           const body = scrub(`${result.error ? `Error: ${result.error}` : result.value || "(returned nothing)"}${logs.trim() ? `\n\nconsole:\n${logs.trim()}` : ""}`).slice(0, MAX_OUT);
           return result.error ? failed(body + scrub(where)) : textResult(body + scrub(where));
+        });
+      },
+    }),
+    defineTool({
+      name: "app_test",
+      label: "Try an app",
+      description:
+        "Try an app you made, in a phone-sized browser, before you send its link. It opens the app fresh on scratch data (nothing people entered is seen or changed), then runs `code`: the body of an async function given `app` (the app, a Playwright frame locator) and `page`. Use it like a person would and return what you see, e.g. " +
+        "`await app.getByPlaceholder('Add an item').fill('Milk'); await app.getByRole('button', { name: 'Add' }).click(); return await app.locator('body').ariaSnapshot()`. The result ends with any script errors the app threw.",
+      parameters: Type.Object({
+        id: Type.String({ description: "the app id" }),
+        code: Type.String({ description: "Playwright code, the body of an async function; return a value to see it" }),
+        timeout_seconds: Type.Optional(Type.Number({ description: "default 60, at most 300" })),
+      }),
+      meta: { capabilities: [], group: "files" as const },
+      execute: async ({ id, code, timeout_seconds }, ctx, signal) => {
+        const issue = issueOf(ctx);
+        if (!issue) return failed("Only desk workers try apps.");
+        const link = o.desk.appTestUrl(id, issue.filedBy.phone);
+        if (!link.ok) return failed(link.error);
+        const timeout = Math.min(Math.max(timeout_seconds ?? 60, 1), 300) * 1000;
+        return guard(issue, timeout + 90_000, signal, async () => {
+          const { page, cdp, target } = await bounded(pool.attachTest(issue, new URL(link.value).origin), 45_000, signal, "the browser");
+          await bounded(page.goto(link.value, { waitUntil: "load" }), 30_000, signal, "the app");
+          await bounded(page.frameLocator("#kloru-app").locator("body").waitFor({ state: "attached" }), 20_000, signal, "the app's frame");
+          const { result, logs } = await runScript(code, timeout, signal, { cdp, target, app: true });
+          if (signal?.aborted) throw new Error("stopped");
+          // The app reports its own script errors through its page; give the last one a moment to land.
+          await new Promise((r) => setTimeout(r, 500));
+          const read = o.desk.readApp(id, issue.filedBy.phone);
+          const errors = read.ok ? read.value.errors : [];
+          const thrown = errors.length ? `\n\nScript errors in this version:\n${errors.map((e) => `- ${e}`).join("\n")}` : "\n\nNo script errors.";
+          const body = `${result.error ? `Error: ${result.error}` : result.value || "(returned nothing)"}${logs.trim() ? `\n\nconsole:\n${logs.trim()}` : ""}`.slice(0, MAX_OUT) + thrown;
+          return result.error ? failed(body) : textResult(body);
         });
       },
     }),
