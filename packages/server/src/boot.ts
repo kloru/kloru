@@ -196,7 +196,6 @@ export function familyMembers(contacts: Pick<ContactStore, "all">, policy: Pick<
     .join("\n");
 }
 
-/** A co-owner: a contact an owner placed at tier owner. She has the owner's say, under her own name. */
 /** Where a number stands before a change, for the read-back: their tier and what they can do now ("" is anyone who calls). */
 export function standingOf(phone: string, contacts: Pick<ContactStore, "findByPhone">, policy: Pick<PolicyEngine, "listGrants" | "permissionFor" | "publicPolicy">): Standing | undefined {
   if (!phone) return { capabilities: policy.publicPolicy()?.capabilities ?? [] };
@@ -208,6 +207,7 @@ export function standingOf(phone: string, contacts: Pick<ContactStore, "findByPh
   return { tier: c.tier, capabilities: DELEGABLE.filter((cap) => !has(true, cap) && (has(false, cap) || policy.permissionFor(c.tier, cap) !== "no")) };
 }
 
+/** A co-owner: a contact an owner placed at tier owner. She has the owner's say, under her own name. */
 export const isCoOwner = (c: Pick<Contact, "tier"> | undefined): boolean => c?.tier === "owner";
 
 /** The owner or a co-owner, or a contact an owner placed at partner or family; nobody else. */

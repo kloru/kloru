@@ -838,16 +838,16 @@ export class Desk {
     if (!call) throw new DeskConflict(`no such call: ${callId}`);
     if (!c.by && !this.mayTouch(issue, call.phone)) throw new DeskConflict(`issue ${issueId} isn't this caller's`);
     if (c.by && !this.sameSay(c.by, call.phone, c.personal)) throw new DeskConflict(`only ${this.nameOf(c.by) ?? "the family owner"} can say yes to this one`);
-    issue.confirmation = { ...c, confirmedBy: call.phone, confirmedAt: new Date().toISOString() };
-    this.move(issue, issue.kind === "work" ? "in_progress" : "executing");
-    this.note(issue, "talker", `Confirmed: ${c.draft}`, callId);
-    if (issue.policyLine && issue.policyLine.draft === c.id && samePhone(call.phone, issue.filedBy.phone) && this.memory) {
-      const line = issue.policyLine.line;
     // Texting, a yes to who's in the family has to be newer than its read-back (Nov 10: a yes from a minute before lowered a co-owner).
     const asked = c.asked;
     const member = issue.member && c.draft === issue.member.readBack ? issue.member : undefined;
     if (member && asked && call.channel !== "voice" && !this.repo.turns(callId, 0).some((t) => t.role === "caller" && (callId === issue.filedBy.call ? t.n > asked.turn : t.at > asked.at)))
       throw new DeskConflict(`${this.nameOf(call.phone) ?? "the caller"} hasn't answered this read-back yet. Say it to them in full, then wait for their yes.`);
+    issue.confirmation = { ...c, confirmedBy: call.phone, confirmedAt: new Date().toISOString() };
+    this.move(issue, issue.kind === "work" ? "in_progress" : "executing");
+    this.note(issue, "talker", `Confirmed: ${c.draft}`, callId);
+    if (issue.policyLine && issue.policyLine.draft === c.id && samePhone(call.phone, issue.filedBy.phone) && this.memory) {
+      const line = issue.policyLine.line;
       delete issue.policyLine;
       const saved = this.memory.addPolicy(issue.filedBy.phone, line);
       this.note(issue, "system", saved.ok ? `Added to their policy: ${line}` : `Couldn't save their policy: ${saved.error}`);
@@ -1126,9 +1126,18 @@ export class Desk {
   private openNeed(issue: Issue, n: Need): boolean {
     const target = this.targetOf(issue, n.account);
     if (!target) return false;
-    if (samePhone(target, issue.filedBy.phone)) return true;
-    // Open within the family only: the public never reaches anyone's things by a silent policy.
-    return this.isFamily(issue.filedBy.phone) && !this.policyOf(target);
+    return this.shared(issue.filedBy.phone, target);
+  }
+
+  /**
+   * Whether this person reaches that person's things with nobody asked: their own, an owner's for
+   * another owner (owners share everything with each other), or, within the family only, a person
+   * whose policy says nothing. The public never reaches anyone's things by a silent policy.
+   */
+  private shared(asker: string, target: string): boolean {
+    if (samePhone(target, asker)) return true;
+    if (this.isOwner(asker) && this.isOwner(target)) return true;
+    return this.isFamily(asker) && !this.policyOf(target);
   }
 
   private isFamily(phone: string): boolean {
@@ -1158,8 +1167,7 @@ export class Desk {
    * whose policy says nothing. Anyone else's is theirs to share. Money also goes through the floor.
    */
   maySecret(issue: Issue, owner: string): boolean {
-    if (samePhone(owner, issue.filedBy.phone)) return true;
-    return this.isFamily(issue.filedBy.phone) && !this.policyOf(owner);
+    return this.shared(issue.filedBy.phone, owner);
   }
 
   /** A vault secret was used (or refused): recorded in the ledger like any change. */
@@ -1171,8 +1179,7 @@ export class Desk {
   mayReach(issueId: number, phone: string, permission: "read_mail" | "read_calendar"): boolean {
     const issue = this.repo.issue(issueId);
     if (!issue || !this.decideAccess) return true;
-    if (samePhone(phone, issue.filedBy.phone)) return true;
-    if (this.isFamily(issue.filedBy.phone) && !this.policyOf(phone)) return true;
+    if (this.shared(issue.filedBy.phone, phone)) return true;
     // Kloru's own runs (scouts, memory) have no review: only what's theirs or open.
     if (issue.purpose) return false;
     return this.inList(issue, issue.access?.allow, { permission, account: phone });
@@ -1283,6 +1290,27 @@ export class Desk {
   }
 
   /**
+   * One call for anyone: a permission the review hasn't seen (the PM didn't list it) is reviewed
+   * first, against that person's policy, so the review stays the one decision; then the call is
+   * held to it.
+   */
+  private async checkCall(issueId: number, toolName: string, args: unknown, capabilities: Capability[], summary: string, money: boolean): Promise<CallBlock | undefined> {
+    const now = this.mustIssue(issueId);
+    const unseen = this.needsOfCall(now, toolName, args, capabilities)
+      .needs.filter((n) => !this.openNeed(now, n) && !this.inList(now, now.access?.needs, n) && !this.inList(now, now.needs, n))
+      // Money and travel are the floor's: an owner is asked whatever a review says.
+      .filter((n) => !(money && (n.permission === "spend" || n.permission === "book_travel")))
+      // By name, as the PM lists them: the review reads that person's policy under it.
+      .map((n) => ({ ...n, account: this.nameOf(this.targetOf(now, n.account) ?? "") ?? n.account }));
+    if (unseen.length) {
+      now.needs = [...(now.needs ?? []), ...unseen];
+      this.repo.saveIssue(now);
+      await this.reviewAccess(issueId);
+    }
+    return this.crossCheck(issueId, toolName, args, capabilities, summary, money);
+  }
+
+  /**
    * One call against the review, for anyone: their own things and open ones pass; denied is refused;
    * anything else asks the person whose things they are, for that exact call.
    */
@@ -1337,7 +1365,7 @@ export class Desk {
   /** For a member's worker: the review's line in its prompt, and the check on each call. */
   private accessRole(issueId: number): Pick<WorkerRole, "access" | "accessNote"> {
     const issue = this.repo.issue(issueId);
-    // Owners keep the owner policy (spend caps); their reach into others' things is checked in the guard (crossCheck).
+    // Owners keep the owner policy (spend caps); their reach into a member's things is checked in the guard (checkCall).
     if (!issue || !this.reviews(issue) || this.isOwner(issue.filedBy.phone)) return {};
     return {
       accessNote: accessLine(issue.access, this.ownerName()),
@@ -1358,7 +1386,7 @@ export class Desk {
           const caps = isApp(toolName) ? (innerCalls(toolName, args) ?? [{ slug: toolName.slice(4).toUpperCase() }]).flatMap((c) => capabilitiesForSlug(c.slug)) : capabilities;
           if (needs.some((n) => !PUBLIC_NEEDS.has(n.permission)) || [...caps, ...capabilities].some((c) => PUBLIC_PLUMBING_NO.has(c) || c === "calendar.read")) return blocked("only the family can");
         }
-        return this.crossCheck(issueId, toolName, args, capabilities, summary, true);
+        return this.checkCall(issueId, toolName, args, capabilities, summary, true);
       },
     };
   }
@@ -2397,10 +2425,10 @@ export class Desk {
       guard: async (toolName, args) => {
         const outside = this.outsideScope(issueId, toolName, args);
         if (outside) return { block: true, reason: outside };
-        // An owner reaching someone else's account answers to that person's policy, as anyone does.
+        // An owner reaching a member's account answers to that member's policy; another owner's is shared.
         const filed = this.repo.issue(issueId);
         if (filed && this.reviews(filed) && this.isOwner(filed.filedBy.phone) && isApp(toolName)) {
-          const cross = this.crossCheck(issueId, toolName, args, [], toolName.replace(/^app_/, "").replace(/_/g, " "), false);
+          const cross = await this.checkCall(issueId, toolName, args, [], toolName.replace(/^app_/, "").replace(/_/g, " "), false);
           if (cross) return cross;
         }
         if (!isApp(toolName) || !isWriteCall(toolName, args)) return undefined;
