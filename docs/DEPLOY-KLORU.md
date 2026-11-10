@@ -57,7 +57,11 @@ Switch calls: set the Twilio number's VoiceUrl to `https://voice.kloru.com/twili
 ## Day to day
 
 - Logs: `fly logs`. Shell: `fly ssh console`.
-- Deploy: `fly deploy`. Bigger CPU if calls lag: `fly scale vm performance-1x`.
+- Deploy: push to `main`. When the `ci` workflow passes, `.github/workflows/deploy.yml` runs
+  `flyctl deploy` on that commit, using the repo secret `FLY_API_TOKEN` (a deploy token for this
+  app only: `fly tokens create deploy -a kloru -x 8760h | gh secret set FLY_API_TOKEN -R kloru/kloru`;
+  it expires after a year). By hand, when Actions is down: `fly deploy` from a clean checkout of `main`.
+- Bigger CPU if calls lag: `fly scale vm performance-1x`.
 - Backups: nightly to `r2://kloru-data/backups/YYYY/MM/DD/`, deleted after 30 days by the bucket
   lifecycle rule; Fly also snapshots the volume daily (7 kept).
 - Restore: `fly ssh console -C "node /app/packages/web/dist/backup.js restore /data"`, then restart.
