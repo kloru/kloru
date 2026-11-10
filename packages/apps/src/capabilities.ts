@@ -55,7 +55,10 @@ export function capabilitiesForSlug(slug: string): Capability[] {
 
   if (s.startsWith("OUTLOOK_")) return outlookCapabilities(s);
 
-  // Meta tools (manage connections, search, multi-execute) and every toolkit without
+  // Looking up which tools exist reaches nobody's account: plumbing, like any app call.
+  if (CATALOG_LOOKUPS.has(s)) return ["apps.use"];
+
+  // The other meta tools (manage connections, multi-execute) and every toolkit without
   // a row above are owner-only. COMPOSIO_MULTI_EXECUTE_TOOL can run any tool in one
   // call, so per-tool capabilities cannot be checked for it. See README.
   return [...sensitiveCapabilitiesForSlug(s), ...APPS_MANAGE];
@@ -117,6 +120,9 @@ export const CONTACTS_WRITE_PREFIXES: readonly string[] = [
   "GOOGLECONTACTS_PATCH",
   "GOOGLECONTACTS_COPY",
 ];
+
+/** Meta tools that only read Composio's catalog of tools: no account, nobody's data. */
+const CATALOG_LOOKUPS: ReadonlySet<string> = new Set(["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_GET_TOOL_SCHEMAS"]);
 
 /** Composio meta tools the Tool Router adds to every session. */
 export const COMPOSIO_META_TOOLS: readonly string[] = [

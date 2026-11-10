@@ -35,7 +35,8 @@ describe("capabilitiesForSlug", () => {
     ["GOOGLECONTACTS_BATCH_DELETE_CONTACTS", CONTACTS_WRITE],
     ["GOOGLECONTACTS_MODIFY_CONTACT_GROUP_MEMBERS", CONTACTS_WRITE],
     ["COMPOSIO_MANAGE_CONNECTIONS", APPS_MANAGE],
-    ["COMPOSIO_SEARCH_TOOLS", APPS_MANAGE],
+    ["COMPOSIO_SEARCH_TOOLS", ["apps.use"]],
+    ["COMPOSIO_GET_TOOL_SCHEMAS", ["apps.use"]],
     ["COMPOSIO_MULTI_EXECUTE_TOOL", APPS_MANAGE],
     ["NOTION_CREATE_PAGE", APPS_MANAGE],
     ["GITHUB_CREATE_ISSUE", APPS_MANAGE],
@@ -103,8 +104,8 @@ describe("capabilitiesForSlug", () => {
     }
   });
 
-  it("maps every meta tool to the owner-only set", () => {
-    for (const slug of COMPOSIO_META_TOOLS) expect(capabilitiesForSlug(slug)).toEqual([...APPS_MANAGE]);
+  it("maps every meta tool that can act to the owner-only set; a catalog lookup is plumbing", () => {
+    for (const slug of COMPOSIO_META_TOOLS) expect(capabilitiesForSlug(slug)).toEqual(slug === "COMPOSIO_SEARCH_TOOLS" ? ["apps.use"] : [...APPS_MANAGE]);
   });
 
   it("returns a fresh array each time so callers cannot mutate the table", () => {
@@ -150,7 +151,6 @@ describe("policy outcomes with the default tier table", () => {
   const ownerOnlySlugs = [
     "COMPOSIO_MULTI_EXECUTE_TOOL",
     "COMPOSIO_MANAGE_CONNECTIONS",
-    "COMPOSIO_SEARCH_TOOLS",
     "SLACK_SEND_MESSAGE",
     "NOTION_CREATE_PAGE",
     "STRIPE_LIST_CUSTOMERS",

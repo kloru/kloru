@@ -114,7 +114,8 @@ mail as the owner.
 | other `GOOGLECALENDAR_*` | `calendar.read` | yes | yes | no | no |
 | `GOOGLECONTACTS_CREATE*`, `UPDATE*`, `DELETE*`, `BATCH*`, `MODIFY*`, `ADD*`, `REMOVE*`, `PATCH*`, `COPY*` | `contacts.read` + `memory.write` | yes | no | no | no |
 | other `GOOGLECONTACTS_*` | `contacts.read` | yes | partial | no | no |
-| `COMPOSIO_MANAGE_CONNECTIONS`, `COMPOSIO_SEARCH_TOOLS`, `COMPOSIO_MULTI_EXECUTE_TOOL` | `apps.use` + `trust.manage` | yes | no | no | no |
+| `COMPOSIO_MANAGE_CONNECTIONS`, `COMPOSIO_MULTI_EXECUTE_TOOL` | `apps.use` + `trust.manage` | yes | no | no | no |
+| `COMPOSIO_SEARCH_TOOLS`, `COMPOSIO_GET_TOOL_SCHEMAS` (catalog lookups, no account) | `apps.use` | yes | yes | yes | yes |
 | `apps_list`, `apps_connect` | `apps.use` + `trust.manage` | yes | no | no | no |
 | any other toolkit, read (`*_GET_*`, `*_LIST_*`, `*_SEARCH_*`, `*_FETCH_*`, ...) | `apps.use` + `trust.manage` | yes | no | no | no |
 | any other toolkit, plain write (`NOTION_CREATE_PAGE`, `GITHUB_CREATE_ISSUE`, `LINEAR_UPDATE_ISSUE`, `GITHUB_DELETE_*`) | `apps.use` + `trust.manage` | yes | no | no | no |

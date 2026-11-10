@@ -147,7 +147,8 @@ mail as the owner.
 | other `GOOGLECALENDAR_*` | `calendar.read` |
 | `GOOGLECONTACTS_CREATE*`, `UPDATE*`, `DELETE*`, `BATCH*`, `MODIFY*`, `ADD*`, `REMOVE*`, `PATCH*`, `COPY*` | `contacts.read` + `memory.write` (owner only) |
 | other `GOOGLECONTACTS_*` | `contacts.read` |
-| `COMPOSIO_MANAGE_CONNECTIONS`, `COMPOSIO_SEARCH_TOOLS`, `COMPOSIO_MULTI_EXECUTE_TOOL` | `apps.use` + `trust.manage` (owner only) |
+| `COMPOSIO_MANAGE_CONNECTIONS`, `COMPOSIO_MULTI_EXECUTE_TOOL` | `apps.use` + `trust.manage` (owner only) |
+| `COMPOSIO_SEARCH_TOOLS`, `COMPOSIO_GET_TOOL_SCHEMAS` (catalog lookups, no account) | `apps.use` |
 | `apps_list`, `apps_connect` | `apps.use` + `trust.manage` (owner only) |
 | other toolkit, read: action word `GET`, `LIST`, `RETRIEVE`, `SEARCH`, `FETCH`, `FIND`, `READ`, `DESCRIBE`, `COUNT`, `LOOKUP`, `QUERY` | `apps.use` + `trust.manage` |
 | other toolkit, plain write (`NOTION_CREATE_PAGE`, `GITHUB_DELETE_REPOSITORY`) | `apps.use` + `trust.manage` |
