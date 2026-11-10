@@ -39,4 +39,6 @@ regexes = [
   '''whsec_(testsecret|fromcreate|local_test|0123456789abcdef)''',
   '''ApiKey_\.\.\.''',
   '''mk_\.\.\.''',
+  # The approval-code alphabet in packages/core/src/approvals.ts: letters and digits, not a key.
+  '''ABCDEFGHJKMNPQRSTUVWXYZ23456789''',
 ]
