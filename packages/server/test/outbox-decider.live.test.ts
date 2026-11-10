@@ -32,6 +32,16 @@ const CASES: Array<[string, FirstPassCheck, FirstPassChoice[]]> = [
     ["send"],
   ],
   [
+    "Nov 10: the same reminder set twice, a minute after the first one went",
+    base(item({ why: "reminder", text: "Call Dr. Lee.", from: { agent: "talker" }, sendAt: "2026-11-10T22:38:00.000Z" }), {
+      firing: true,
+      request: "Remind me in 5 min to call Dr. Lee",
+      recent: ["22:37 UTC sent (imessage to +14155550190): Call Dr. Lee."],
+      person: { localTime: "Tue, Nov 10, 2:38 PM", inConversation: "imessage", turns: ["Them: Remind me in 5 min to call Dr. Lee", "Kloru: Set for 2:37 PM.", "Kloru: Call Dr. Lee."] },
+    }),
+    ["drop", "organizer"],
+  ],
+  [
     "'On it' answering his text",
     base(item({ why: "reply", text: "On it. I'll have that link in a few seconds.", from: { agent: "talker" }, replyingTo: "What's the link to the parking at SFO?" }), { request: "What's the link to the parking at SFO?", person: { inConversation: "imessage", turns: ["Them: What's the link to the parking at SFO?"] } }),
     ["send"],

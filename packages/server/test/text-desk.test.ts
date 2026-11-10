@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Desk, type FirstPassCheck, type FirstPassChoice, type Planner, type WorkerHost } from "@kloru/desk";
 import { describe, expect, it } from "vitest";
 import { TextDesk, type TextDeskOptions, type TextIn } from "../src/text-desk.js";
-import type { TalkerTurn } from "../src/text-talker.js";
+import { textTalker, type TalkerTurn } from "../src/text-talker.js";
 
 class Host implements WorkerHost {
   run(): Promise<string> {
@@ -22,7 +22,7 @@ const settle = async (ms = 40) => {
   while (Date.now() < end) await new Promise((r) => setTimeout(r, 5));
 };
 
-function setup(o: { reply?: (t: TalkerTurn) => string; idleMs?: number; ingest?: TextDeskOptions["ingest"]; pass?: (c: FirstPassCheck) => FirstPassChoice | Promise<FirstPassChoice>; react?: (conversation: string, message: string, reaction: string) => Promise<boolean>; shape?: TextDeskOptions["shape"]; feedback?: TextDeskOptions["feedback"]; checkDraft?: TextDeskOptions["checkDraft"] } = {}) {
+function setup(o: { reply?: (t: TalkerTurn) => string; talker?: (t: TalkerTurn) => Promise<string>; idleMs?: number; ingest?: TextDeskOptions["ingest"]; pass?: (c: FirstPassCheck) => FirstPassChoice | Promise<FirstPassChoice>; react?: (conversation: string, message: string, reaction: string) => Promise<boolean>; shape?: TextDeskOptions["shape"]; feedback?: TextDeskOptions["feedback"]; checkDraft?: TextDeskOptions["checkDraft"] } = {}) {
   const planner: Planner = { handle: async () => {} };
   const passes: FirstPassCheck[] = [];
   const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "textdesk-")), host: new Host(), planner, notify: async () => true, firstPass: async (c) => (passes.push(c), (o.pass ?? (() => "send"))(c)) });
@@ -34,6 +34,7 @@ function setup(o: { reply?: (t: TalkerTurn) => string; idleMs?: number; ingest?:
     emailPerson: (e) => (e === "ezra@work.example.com" ? EZRA : undefined),
     talker: async (t) => {
       turns.push(t);
+      if (o.talker) return o.talker(t);
       if (!t.event) t.tools.fileIssue(t.thread.at(-1)!.text);
       return o.reply ? o.reply(t) : t.event ? "Here's what I found." : "On it.";
     },
@@ -52,6 +53,15 @@ function setup(o: { reply?: (t: TalkerTurn) => string; idleMs?: number; ingest?:
     log: () => {},
   });
   return { desk, text, turns, sent, passes };
+}
+
+/** The real talker on a scripted model: each turn makes the tool calls the script gives, then says nothing. */
+function textTalkerStub(script: (t: TalkerTurn) => Array<{ name: string; args: Record<string, unknown> }>) {
+  return async (t: TalkerTurn): Promise<string> => {
+    const replies = [{ tool_calls: script(t).map((c, i) => ({ id: `t${i}`, type: "function", function: { name: c.name, arguments: JSON.stringify(c.args) } })) }, { content: "[quiet]" }].filter((r) => !("tool_calls" in r) || r.tool_calls!.length);
+    const fetchImpl = (async () => new Response(JSON.stringify({ choices: [{ message: replies.shift() }] }), { status: 200 })) as typeof fetch;
+    return textTalker({ apiKey: "k", fetchImpl })(t);
+  };
 }
 
 /** The first pass most tests here use: answers and questions go now, everything else is the organizer's. */
@@ -353,6 +363,17 @@ describe("the talker's outbox tools", () => {
     await text.receive(imsg("m1", "Remind me at 9 on the 5th to call the dentist"));
     await settle(20);
     expect(desk.outbox.list(EZRA)).toMatchObject([{ why: "reminder", state: "scheduled", text: "Reminder: call the dentist.", from: { agent: "talker" } }]);
+  });
+
+  // Nov 10: a reminder set with only a reaction left no trace in the thread, so the next two turns set it again.
+  it("a reminder set in a quiet turn is in view on the next turn, so it isn't set twice", async () => {
+    const { desk, text, turns } = setup({ talker: textTalkerStub((t) => (t.thread.some((x) => x.role === "did") ? [] : [{ name: "remind", args: { text: "Call Dr. Lee.", at: "2099-01-05T09:00" } }])) });
+    await text.receive(imsg("m1", "Remind me at 9 on the 5th to call Dr. Lee"));
+    await text.receive(imsg("m2", "Also, what's on tomorrow?"));
+    expect(turns[0]!.thread.map((x) => x.role)).toEqual(["caller"]);
+    expect(turns[1]!.thread.map((x) => x.role)).toEqual(["caller", "did", "caller"]);
+    expect(turns[1]!.thread[1]!.text).toBe('remind {"text":"Call Dr. Lee.","at":"2099-01-05T09:00"} → Set for 2099-01-05T09:00.');
+    expect(desk.outbox.list(EZRA).filter((i) => i.why === "reminder")).toHaveLength(1);
   });
 
   it("it can list what's waiting and stop one", async () => {

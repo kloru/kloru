@@ -56,6 +56,22 @@ describe("the text talker", () => {
     expect(m.bodies[1].messages.at(-1)).toMatchObject({ role: "tool", content: "Set for 2026-10-31T09:00." });
   });
 
+  it("what an earlier turn already did is in the thread, and each tool call is recorded for the next", async () => {
+    const m = model([{ tool_calls: [{ name: "react", args: { reaction: "like" } }] }, { content: "[quiet]" }]);
+    const { t } = tools();
+    const did: string[] = [];
+    await textTalker({ apiKey: "k", fetchImpl: m.fetchImpl, now: () => NOW })({
+      brief: "",
+      channel: "imessage",
+      thread: [{ role: "caller", text: "Remind me at 9 tomorrow to call Dr. Lee" }, { role: "did", text: 'remind {"text":"Call Dr. Lee.","at":"2026-10-31T09:00"} → Set for 2026-10-31T09:00.' }, { role: "caller", text: "Thanks" }],
+      record: (x) => did.push(x),
+      tools: { ...t, react: () => "Reacted." },
+      timezone: "America/Los_Angeles",
+    });
+    expect(m.bodies[0].messages[2]).toEqual({ role: "user", content: '(Already done for the messages above; don\'t do it again: remind {"text":"Call Dr. Lee.","at":"2026-10-31T09:00"} → Set for 2026-10-31T09:00.)' });
+    expect(did).toEqual(['react {"reaction":"like"} → Reacted.']);
+  });
+
   it("a result that lands becomes one message", async () => {
     const m = model([{ content: "Tomorrow: drop-off at 8, dentist at 3." }]);
     const { t } = tools();

@@ -10,7 +10,7 @@ const URL = "https://openrouter.ai/api/alpha/decisions";
 const MODEL = "typesafe/jev-1.14";
 
 export const FIRST_PASS = {
-  send: "Send it now, as written: they are waiting for exactly this (the answer to what they just wrote, a question the work is stopped on, a reminder at the time they chose, a result they asked for moments ago in a conversation they're still in, even new results on a page they already have), it is short, and nothing else waiting or still being worked on for them belongs with it.",
+  send: "Send it now, as written: they are waiting for exactly this (the answer to what they just wrote, a question the work is stopped on, a reminder at the time they chose, a result they asked for moments ago in a conversation they're still in, even new results on a page they already have), they don't have it yet, it is short, and nothing else waiting or still being worked on for them belongs with it.",
   drop: "Don't send it: they already have this news (it was said or sent already, and no page it links has changed since), or it only says that another message was sent.",
   organizer: "Leave it for the organizer: it could go at a better time for them, belongs together with other things waiting or still being worked on, is long, nobody asked for it by hand, their guidelines say something about when or how they get messages like it, or it isn't clear.",
 };

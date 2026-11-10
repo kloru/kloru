@@ -15,6 +15,9 @@ function tools() {
     updateIssue: (n, x) => (calls.push(`update ${n}: ${x}`), "Updated."),
     confirm: (n, d) => (calls.push(`confirm ${n} ${d}`), "Confirmed; it's running."),
     remember: (x) => (calls.push(`remember: ${x}`), "Noted."),
+    remind: (x, at) => (calls.push(`remind ${at}: ${x}`), `Set for ${at}.`),
+    outboxList: () => "Nothing is waiting to be sent to them.",
+    outboxCancel: (id) => (calls.push(`cancel ${id}`), "Cancelled; it won't be sent."),
     react: (r) => (calls.push(`react ${r}`), "Reacted."),
   };
   return { t, calls };
@@ -31,6 +34,26 @@ describe.skipIf(!key)("the text talker, live", () => {
     expect(calls.some((c) => c.startsWith("file:"))).toBe(true);
     expect(calls).toContain("react eyes");
     expect(reply).toBe("");
+  }, 60_000);
+
+  // Nov 10: the reminder was set with only a reaction; the next text set it again, a minute later.
+  it("a reminder already set isn't set again when their next text arrives", async () => {
+    const { t, calls } = tools();
+    // Their local time four minutes from now, as remind takes it.
+    const at = new Date(Date.now() + 4 * 60_000).toLocaleString("sv-SE", { timeZone: "America/Los_Angeles" }).slice(0, 16).replace(" ", "T");
+    const reply = await talk({
+      brief: BRIEF,
+      channel: "imessage",
+      thread: [
+        { role: "caller", text: "Remind me in 5 min to call Dr. Lee" },
+        { role: "did", text: `remind {"text":"Call Dr. Lee.","at":"${at}"} → Set for ${at}.; react {"reaction":"like"} → Reacted.` },
+        { role: "caller", text: "Also the email alerts are too noisy. Only tell me about the very important ones." },
+      ],
+      tools: t,
+      timezone: "America/Los_Angeles",
+    });
+    console.log(reply, calls);
+    expect(calls.filter((c) => c.startsWith("remind"))).toEqual([]);
   }, 60_000);
 
   // Nov 9: with the reply shape at emoji, a new request got 👀 and was never filed.

@@ -61,6 +61,8 @@ interface Thread {
   timer?: ReturnType<typeof setTimeout>;
   /** One turn at a time per thread, in order. */
   chain: Promise<unknown>;
+  /** What the talker did in each turn (a reminder set, a reaction), and how many turns the conversation had then: it leaves no message, so later turns read it here. */
+  did?: Array<{ after: number; text: string }>;
   /** Their last message, and where a reaction on it goes. */
   lastAsk?: string;
   reactTo?: ReactTarget;
@@ -293,7 +295,8 @@ export class TextDesk {
     const turn = {
       brief: t.brief,
       channel: t.channel,
-      thread: this.o.desk.repo.turns(t.callId, 0).slice(-30).map((x) => ({ role: x.role === "caller" ? "caller" : "kloru", text: x.text })),
+      thread: this.thread(t),
+      record: (text) => (t.did ??= []).push({ after: this.o.desk.repo.turns(t.callId, 0).length, text }),
       ...(merges.length ? { event: merges.map(tag).join("\n") } : {}),
       pending: this.pending(t),
       open: this.openFor(t),
@@ -335,6 +338,7 @@ export class TextDesk {
       const done = (x: string) => () => `${x} (already done for this message).`;
       reply = await this.o.talker({
         ...turn,
+        record: undefined,
         tools: { ...turn.tools, fileIssue: done("Filed"), updateIssue: done("Updated"), confirm: done("Confirmed"), remember: done("Noted"), remind: async () => done("Set")(), outboxCancel: done("Cancelled") },
         redraft: { draft: reply, why },
       });
@@ -347,6 +351,18 @@ export class TextDesk {
     const r = await this.send(t, reply, merges.flatMap((m) => (m.issue !== undefined ? [m.issue] : [])), replyingTo, merges.some(asks));
     if (r === "sent" && result && shape) t.lastSent = { asked: t.lastAsk ?? "", text: reply, shape };
     return r;
+  }
+
+  /** The conversation as the talker reads it: the last turns, each followed by what Kloru already did about it. */
+  private thread(t: Thread): TalkerTurn["thread"] {
+    const turns = this.o.desk.repo.turns(t.callId, 0);
+    const out: TalkerTurn["thread"] = [];
+    turns.forEach((x, i) => {
+      out.push({ role: x.role === "caller" ? "caller" : "kloru", text: x.text });
+      const did = (t.did ?? []).filter((d) => d.after === i + 1).map((d) => d.text);
+      if (did.length) out.push({ role: "did", text: did.join("; ") });
+    });
+    return out.slice(-30);
   }
 
   /** The whole conversation for a decision: every turn, oldest first, each clipped; only a very long thread is cut to its last 60. */

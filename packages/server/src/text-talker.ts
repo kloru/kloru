@@ -35,13 +35,16 @@ export interface TalkerTools {
 export interface TalkerTurn {
   brief: string;
   channel: "imessage" | "email";
-  thread: Array<{ role: "caller" | "kloru"; text: string }>;
+  /** Their messages and Kloru's, oldest first; did: what Kloru already did about the messages before it (a reminder set, a reaction), which leaves no message behind. */
+  thread: Array<{ role: "caller" | "kloru" | "did"; text: string }>;
   /** A result that just landed (<info>/<events>), to turn into a message. */
   event?: string;
   /** Drafts waiting on their yes, with the issue and draft ids confirm needs. */
   pending?: string[];
   /** Their requests still being worked on, by issue number, so a follow-up updates one instead of filing it again. */
   open?: string[];
+  /** Each tool call this turn makes, in words, so a later turn knows it was done. */
+  record?: (did: string) => void;
   /** A draft that went back before sending, and why: write it again. */
   redraft?: { draft: string; why: string };
   /** How this message should look for them, decided from their preferences (message-shape.ts). */
@@ -89,7 +92,7 @@ export function textTalker(o: { apiKey: string; model?: string; fetchImpl?: type
     const when = new Intl.DateTimeFormat("en-US", { timeZone: t.timezone, weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(now());
     const messages: Array<Record<string, unknown>> = [
       { role: "system", content: [TEXT_PROMPT, `This is ${t.channel === "email" ? "an email thread" : "an iMessage thread"}. Right now it is ${when} (${t.timezone}).`, t.shape ? shapeLine(t.shape, !!t.tools.react) : t.tools.react ? ON_IT.react : ON_IT.write, t.brief, t.pending?.length ? `Waiting for their yes:\n${t.pending.map((p) => `- ${p}`).join("\n")}` : "", t.open?.length ? `Being worked on now:\n${t.open.map((p) => `- ${p}`).join("\n")}` : ""].filter(Boolean).join("\n\n") },
-      ...t.thread.map((m) => ({ role: m.role === "caller" ? "user" : "assistant", content: m.text })),
+      ...t.thread.map((m) => (m.role === "did" ? { role: "user", content: `(Already done for the messages above; don't do it again: ${m.text})` } : { role: m.role === "caller" ? "user" : "assistant", content: m.text })),
       ...(t.event ? [{ role: "user", content: `(A result came in for you to pass on.)\n${t.event}` }] : []),
       ...(t.redraft ? [{ role: "user", content: `(Before it was sent, your draft went back.) Your draft: "${t.redraft.draft}"\n${t.redraft.why} Write the message again; react and reply [quiet] if a reaction says it all.` }] : []),
     ];
@@ -101,7 +104,11 @@ export function textTalker(o: { apiKey: string; model?: string; fetchImpl?: type
       const calls = reply.tool_calls ?? [];
       if (!calls.length) return quiet(reply.content ?? "");
       messages.push({ role: "assistant", content: reply.content ?? "", tool_calls: calls });
-      for (const c of calls) messages.push({ role: "tool", tool_call_id: c.id, content: await run(c, t.tools) });
+      for (const c of calls) {
+        const result = await run(c, t.tools);
+        if (c.function.name !== "outbox_list") t.record?.(`${c.function.name} ${c.function.arguments || "{}"} → ${result}`);
+        messages.push({ role: "tool", tool_call_id: c.id, content: result });
+      }
     }
     return "";
   };
