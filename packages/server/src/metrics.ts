@@ -78,9 +78,12 @@ export class Metrics {
   private readonly dir: string;
   readonly db: MetricsDb;
   private prices: { at: number; byModel: Map<string, Price> } | undefined;
+  /** One formatter for every date: each holds ~25 KB outside the heap, and a report asks for a day 100,000 times. */
+  private readonly dayFormat: Intl.DateTimeFormat;
 
   constructor(private readonly o: MetricsOptions) {
     this.now = o.now ?? (() => new Date());
+    this.dayFormat = new Intl.DateTimeFormat("en-CA", { timeZone: o.timezone, year: "numeric", month: "2-digit", day: "2-digit" });
     this.fetch = o.fetchImpl ?? fetch;
     this.dir = join(o.dataDir, "metrics");
     this.db = new MetricsDb(join(this.dir, "metrics.db"));
@@ -88,7 +91,7 @@ export class Metrics {
   }
 
   private day(iso: string | number | Date): string {
-    return new Intl.DateTimeFormat("en-CA", { timeZone: this.o.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+    return this.dayFormat.format(new Date(iso));
   }
 
   /** Record each OpenRouter key's running usage; run hourly. */

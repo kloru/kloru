@@ -57,6 +57,19 @@ describe("metrics", () => {
     expect(today.modelSource).toBe("sessions");
     expect(today.cost.models).toBeCloseTo(0.5);
   });
+
+  it("a report builds one date formatter, however much it reads (each holds ~25 KB the heap doesn't count; 2026-11-09 they filled the machine)", async () => {
+    const { m } = setup((async () => new Response("", { status: 500 })) as unknown as typeof fetch);
+    const Real = Intl.DateTimeFormat;
+    let built = 0;
+    Intl.DateTimeFormat = new Proxy(Real, { construct: (t, args) => (built++, new t(...(args as ConstructorParameters<typeof Real>))) });
+    try {
+      await m.report(30);
+    } finally {
+      Intl.DateTimeFormat = Real;
+    }
+    expect(built).toBeLessThanOrEqual(1);
+  });
 });
 
 describe("metrics.db (2026-11-04)", () => {
