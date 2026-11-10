@@ -103,10 +103,12 @@ async function fromWeb(url: string, o: { fetchImpl?: typeof fetch; lookup?: Look
 /**
  * A PDF's text, read in its own short-lived process: these files come from strangers, and a bad one
  * can only stall or crash that process. (The library file itself: the package's index reads a test PDF.)
+ * The bytes are copied: Node 22 reads a small file into its shared buffer pool, and the library reads
+ * the whole pool instead of the file ("bad XRef entry").
  */
 function pdfText(path: string): Promise<string> {
   const lib = createRequire(import.meta.url).resolve("pdf-parse/lib/pdf-parse.js");
-  const script = `require(process.argv[1])(require("fs").readFileSync(process.argv[2])).then((r) => process.stdout.write(r.text), (e) => { process.stderr.write(String(e && e.message || e)); process.exit(1); })`;
+  const script = `require(process.argv[1])(new Uint8Array(require("fs").readFileSync(process.argv[2]))).then((r) => process.stdout.write(r.text), (e) => { process.stderr.write(String(e && e.message || e)); process.exit(1); })`;
   return new Promise((resolve, reject) =>
     execFile(process.execPath, ["-e", script, lib, path], { timeout: 20_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => (error ? reject(new Error(stderr.trim() || error.message)) : resolve(stdout.trim()))),
   );
