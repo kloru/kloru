@@ -47,7 +47,7 @@ import {
 } from "@kloru/core";
 import type { Capability, Contact, InboundMessage, InstinctConfig, Outbox, Policy, Principal, RegisteredTool, Tier } from "@kloru/core";
 import type { Caller } from "./desk-routes.js";
-import { DELEGABLE, memberPolicy } from "./member-policy.js";
+import { DELEGABLE, memberPolicy, PLUMBING, type Standing } from "./member-policy.js";
 import { accountScope, accountsLine } from "./account-scope.js";
 import { notifyRouter } from "./notify-router.js";
 import { resendClient, type ReceivedEmail } from "./resend.js";
@@ -163,8 +163,6 @@ export function appsUserFor(config: Pick<InstinctConfig, "agent">, inkbox: { han
 /** Grants that come from what the owner said about a family member; replaced each time he says it again. */
 const MEMBER_GRANT = "member";
 const MEMBER_DENY = "member (not given)";
-/** Transport capabilities: the specific capability on each tool does the gating, so words never take these away. */
-const PLUMBING: ReadonlySet<Capability> = new Set(["apps.use", "web.read"]);
 
 /** Saves what the owner said yes to: the contact with his words, and one grant replacing what his earlier words gave. */
 export function saveMember(plan: MemberPlan, contacts: Pick<ContactStore, "upsert">, policy: Pick<PolicyEngine, "listGrants" | "revokeGrant" | "addGrant" | "setPublic" | "permissionFor">): Contact | undefined {
@@ -188,7 +186,7 @@ export function saveMember(plan: MemberPlan, contacts: Pick<ContactStore, "upser
 export function familyMembers(contacts: Pick<ContactStore, "all">, policy: Pick<PolicyEngine, "listGrants">): string {
   return contacts
     .all()
-    .filter((c) => MEMBER_TIERS.has(c.tier) || c.tier === "friend")
+    .filter((c) => MEMBER_TIERS.has(c.tier) || c.tier === "friend" || isCoOwner(c))
     .map((c) => {
       const all = policy.listGrants(`contact:${c.id}`);
       const given = all.filter((g) => !g.deny).flatMap((g) => g.capabilities);
@@ -199,6 +197,17 @@ export function familyMembers(contacts: Pick<ContactStore, "all">, policy: Pick<
 }
 
 /** A co-owner: a contact an owner placed at tier owner. She has the owner's say, under her own name. */
+/** Where a number stands before a change, for the read-back: their tier and what they can do now ("" is anyone who calls). */
+export function standingOf(phone: string, contacts: Pick<ContactStore, "findByPhone">, policy: Pick<PolicyEngine, "listGrants" | "permissionFor" | "publicPolicy">): Standing | undefined {
+  if (!phone) return { capabilities: policy.publicPolicy()?.capabilities ?? [] };
+  const c = contacts.findByPhone(phone);
+  if (!c) return undefined;
+  if (isCoOwner(c)) return { tier: c.tier, capabilities: DELEGABLE };
+  const all = policy.listGrants(`contact:${c.id}`);
+  const has = (deny: boolean, cap: Capability) => all.some((g) => !!g.deny === deny && g.capabilities.includes(cap));
+  return { tier: c.tier, capabilities: DELEGABLE.filter((cap) => !has(true, cap) && (has(false, cap) || policy.permissionFor(c.tier, cap) !== "no")) };
+}
+
 export const isCoOwner = (c: Pick<Contact, "tier"> | undefined): boolean => c?.tier === "owner";
 
 /** The owner or a co-owner, or a contact an owner placed at partner or family; nobody else. */
@@ -842,7 +851,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       ...(fastKey ? { steerFilter: steerFilter({ apiKey: fastKey }) } : {}),
       // Every change is weighed before it happens: do, ask the caller, or revise (decision-models skill).
       ...(fastKey && env.KLORU_DECIDE?.trim() !== "off" ? { decideAction: actionDecider({ apiKey: fastKey }) } : {}),
-      ...(fastKey ? { setMember: memberPolicy({ apiKey: fastKey, members: () => familyMembers(contacts, policy) }) } : {}),
+      ...(fastKey ? { setMember: memberPolicy({ apiKey: fastKey, members: () => familyMembers(contacts, policy), standing: (phone) => standingOf(phone, contacts, policy) }) } : {}),
       applyMember: (plan: MemberPlan) => {
         const c = saveMember(plan, contacts, policy);
         persistPolicy(policy.toJSON());

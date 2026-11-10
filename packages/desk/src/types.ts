@@ -64,7 +64,7 @@ export interface Issue {
    * Set by the ops guard when a write needs the caller's yes. `draft` is written from the exact
    * call; `id` names it, and a yes must name the same id. One yes allows one send (`used`).
    */
-  confirmation?: { id: string; draft: string; argsHash: string; /** The phone whose yes counts (the owner, for a member's ask); unset: anyone's on the call. */ by?: string; /** Asked about their own things: only their own yes counts (not any owner's). */ personal?: boolean; /** For an owner's yes: the exact tool it covers (with argsHash). */ tool?: string; confirmedBy?: string; confirmedAt?: string; used?: boolean; writesBefore?: number };
+  confirmation?: { id: string; draft: string; argsHash: string; /** The phone whose yes counts (the owner, for a member's ask); unset: anyone's on the call. */ by?: string; /** Asked about their own things: only their own yes counts (not any owner's). */ personal?: boolean; /** For an owner's yes: the exact tool it covers (with argsHash). */ tool?: string; /** When it was asked, and the last turn of the asker's call then: where a yes must be newer than its question. */ asked?: { at: string; turn: number }; confirmedBy?: string; confirmedAt?: string; used?: boolean; writesBefore?: number };
   /** "Never mind" arrived while ops was mid-change: no more writes, and undo what was done. */
   cancelRequested?: boolean;
   /** How many times the sweeper has nudged the PM about this issue without it moving. */

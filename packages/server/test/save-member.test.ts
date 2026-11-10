@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ContactStore, PolicyEngine, StateDir, defaultPolicy } from "@kloru/core";
 import { describe, expect, it } from "vitest";
-import { appsUserFor, familyCallers, familyMembers, saveMember } from "../src/boot.js";
+import { appsUserFor, familyCallers, familyMembers, saveMember, standingOf } from "../src/boot.js";
+import { DELEGABLE } from "../src/member-policy.js";
 
 const CARA = "+14155550191";
 const plan = (capabilities: string[], words: string) => ({ who: "person" as const, name: "Cara", phone: CARA, tier: "partner" as const, capabilities: capabilities as never[], leftOut: [], readBack: "", words });
@@ -63,6 +64,28 @@ describe("saving what Evan said yes to", () => {
     policy.addGrant({ to: "contact:cara", capabilities: ["purchase"], note: "dinner this week" });
     saveMember(plan(["calendar.read"], "y"), contacts, policy);
     expect(policy.listGrants("contact:cara").map((g) => g.note).sort()).toEqual(["dinner this week", "member", "member (not given)"]);
+  });
+});
+
+describe("where someone stands before a change, for the read-back", () => {
+  it("a stranger is nobody; a member has what his words gave; a co-owner has everything and is on the family list", () => {
+    const { contacts, policy } = setup();
+    expect(standingOf(CARA, contacts, policy)).toBeUndefined();
+    saveMember(plan(["email.read", "calendar.write"], "she can read my mail and add to my calendar"), contacts, policy);
+    const member = standingOf(CARA, contacts, policy)!;
+    expect(member.tier).toBe("partner");
+    expect(member.capabilities).toEqual(expect.arrayContaining(["email.read", "calendar.write"]));
+    expect(member.capabilities).not.toContain("purchase");
+    saveMember({ ...plan([], "make Cara a co-owner"), tier: "owner" as never }, contacts, policy);
+    expect(standingOf(CARA, contacts, policy)).toEqual({ tier: "owner", capabilities: DELEGABLE });
+    expect(familyMembers(contacts, policy)).toContain("Cara (+14155550191), owner");
+  });
+
+  it("anyone who calls: what's open to the public now", () => {
+    const { contacts, policy } = setup();
+    expect(standingOf("", contacts, policy)).toEqual({ capabilities: [] });
+    saveMember({ ...plan(["calendar.freebusy"], "anyone can see when I'm free"), who: "anyone" as const }, contacts, policy);
+    expect(standingOf("", contacts, policy)).toEqual({ capabilities: ["calendar.freebusy"] });
   });
 });
 

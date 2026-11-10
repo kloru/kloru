@@ -28,6 +28,7 @@ class PM implements Planner {
 
 const EVAN = "+14155550190";
 const CARA = "+14155550191";
+const DAD = "+14155550192";
 const MOVE = { toolName: "app_googlecalendar_patch_event", args: { event_id: "e1" }, summary: "move Evan's 3 PM to 4 PM" };
 
 function setup(o: { evanOnCall?: boolean } = {}) {
@@ -105,7 +106,7 @@ describe("Evan says who's in the family and what they may do", () => {
   function family() {
     const host = new Host();
     const applied: unknown[] = [];
-    const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "members-")), host, planner: new PM(), ownerPhone: EVAN, nameOf: (p) => (p === EVAN ? "Evan" : undefined), setMember: async () => PLAN, applyMember: (p) => void applied.push(p) });
+    const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "members-")), host, planner: new PM(), ownerPhone: EVAN, nameOf: (p) => (p === EVAN ? "Evan" : undefined), coOwner: (p) => p === DAD, setMember: async () => PLAN, applyMember: (p) => void applied.push(p) });
     const evanCall = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" }).call;
     const caraCall = desk.startCall({ callSid: "CA2", phone: CARA, channel: "voice" }).call;
     const tool = workerTools(desk).find((t) => t.spec.name === "set_member")!;
@@ -129,6 +130,34 @@ describe("Evan says who's in the family and what they may do", () => {
     expect(applied).toEqual([PLAN]);
     expect(desk.repo.issue(issue.id)!.status).toBe("done");
     expect(desk.repo.inbox(evanCall.id, 0).at(-1)).toMatchObject({ kind: "events" });
+  });
+
+  it("texting: a yes sent before the read-back doesn't save it (Nov 10, #698); a yes after it does", async () => {
+    const { desk, applied, run } = family();
+    const text = desk.startCall({ callSid: "SM1", phone: EVAN, channel: "text" }).call;
+    desk.addTurn(text.id, { role: "caller", text: "Yes, she can do everything." });
+    const { issue, result } = run(text.id, PLAN.words);
+    await result;
+    const draft = desk.repo.issue(issue.id)!.confirmation!.id;
+    expect(() => desk.confirm(issue.id, text.id, draft)).toThrow(/hasn't answered/);
+    expect(applied).toEqual([]);
+    expect(desk.repo.issue(issue.id)!.status).toBe("needs_confirmation");
+    desk.addTurn(text.id, { role: "kloru", text: PLAN.readBack });
+    desk.addTurn(text.id, { role: "caller", text: "Yes" });
+    desk.confirm(issue.id, text.id, draft);
+    expect(applied).toEqual([PLAN]);
+    expect(desk.repo.inbox(text.id, 0).at(-1)!.text).toBe("Done: Cara is saved as partner.");
+  });
+
+  it("only the owner who said it can say yes to it, and only to that read-back", async () => {
+    const { desk, applied, evanCall, run } = family();
+    const { issue, result } = run(evanCall.id, PLAN.words);
+    await result;
+    const waiting = desk.repo.issue(issue.id)!;
+    expect(waiting.confirmation).toMatchObject({ by: EVAN, personal: true, draft: PLAN.readBack });
+    const other = desk.startCall({ callSid: "CA3", phone: DAD, channel: "voice" }).call;
+    expect(() => desk.confirm(issue.id, other.id, waiting.confirmation!.id)).toThrow(/only Evan/);
+    expect(applied).toEqual([]);
   });
 
   it("a member can't set anyone's permissions", async () => {

@@ -843,6 +843,11 @@ export class Desk {
     this.note(issue, "talker", `Confirmed: ${c.draft}`, callId);
     if (issue.policyLine && issue.policyLine.draft === c.id && samePhone(call.phone, issue.filedBy.phone) && this.memory) {
       const line = issue.policyLine.line;
+    // Texting, a yes to who's in the family has to be newer than its read-back (Nov 10: a yes from a minute before lowered a co-owner).
+    const asked = c.asked;
+    const member = issue.member && c.draft === issue.member.readBack ? issue.member : undefined;
+    if (member && asked && call.channel !== "voice" && !this.repo.turns(callId, 0).some((t) => t.role === "caller" && (callId === issue.filedBy.call ? t.n > asked.turn : t.at > asked.at)))
+      throw new DeskConflict(`${this.nameOf(call.phone) ?? "the caller"} hasn't answered this read-back yet. Say it to them in full, then wait for their yes.`);
       delete issue.policyLine;
       const saved = this.memory.addPolicy(issue.filedBy.phone, line);
       this.note(issue, "system", saved.ok ? `Added to their policy: ${line}` : `Couldn't save their policy: ${saved.error}`);
@@ -850,12 +855,13 @@ export class Desk {
       this.deliver(issue.filedBy.call, { kind: "events", text: saved.ok ? `Done: your policy now says "${line}".` : `I couldn't save that to your policy (${saved.error}).`, issue: issue.id });
       return issue;
     }
-    if (issue.member && this.applyMember) {
-      const plan = issue.member;
+    if (member && this.applyMember) {
+      const plan = member;
+      delete issue.member;
       this.applyMember(plan);
       this.note(issue, "system", plan.who === "anyone" ? `Anyone who calls may now: ${plan.capabilities.join(", ") || "nothing (off)"}.` : `Saved ${plan.name} (${plan.phone}) as ${plan.tier}: ${plan.capabilities.join(", ") || "the tier's defaults"}.`);
       this.move(issue, "done");
-      const said = plan.who === "anyone" ? (plan.capabilities.length ? "Done: anyone who calls Kloru can now do that." : "Done: Kloru is just for your family again; anyone else who calls is turned away.") : `Done: ${plan.name} can call Kloru now, as you said.`;
+      const said = plan.who === "anyone" ? (plan.capabilities.length ? "Done: anyone who calls Kloru can now do that." : "Done: Kloru is just for your family again; anyone else who calls is turned away.") : `Done: ${plan.name} is saved as ${plan.tier === "owner" ? "a co-owner" : plan.tier}.`;
       this.deliver(issue.filedBy.call, { kind: "events", text: said, issue: issue.id });
       return issue;
     }
@@ -1559,7 +1565,13 @@ export class Desk {
     }
     issue.member = plan;
     this.repo.saveIssue(issue);
-    return this.askForYes(issueId, plan.readBack);
+    const asked = this.askForYes(issueId, plan.readBack);
+    if (!asked.ok) return asked;
+    const now = this.mustIssue(issueId);
+    // The yes of the owner who said it, nobody else's, and only one that comes after this read-back.
+    now.confirmation = { ...now.confirmation!, by: issue.filedBy.phone, personal: true, asked: { at: new Date().toISOString(), turn: this.repo.turns(issue.filedBy.call, 0).at(-1)?.n ?? 0 } };
+    this.repo.saveIssue(now);
+    return asked;
   }
 
   /**

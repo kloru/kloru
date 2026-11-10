@@ -1,8 +1,8 @@
 /**
  * The owner says who's in the family and what they may do ("Add my wife Cara, she should be able
  * to do and see everything"); a structured decision model (decision-models skill; Flash until a Jev
- * key) maps the words to a tier and grants. Code keeps out what no member may hold, Kloru reads it
- * back, and the owner's yes saves it with the words, which every later decision reads.
+ * key) maps the words to a tier and grants. Code keeps out what no member may hold and writes the read-back (what they
+ * are now, what they'd become, what they'd lose), and the owner's yes saves it with the words, which every later decision reads.
  */
 import type { MemberPlan } from "@kloru/desk";
 import { normalizePhone, type Capability } from "@kloru/core";
@@ -51,7 +51,7 @@ export const PUBLIC_OK: readonly Capability[] = ["calendar.freebusy", "calendar.
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["who", "name", "phone", "email", "tier", "capabilities", "read_back"],
+  required: ["who", "name", "phone", "email", "tier", "capabilities"],
   properties: {
     who: { type: "string", enum: ["person", "anyone"], description: "anyone: the owner means everyone who calls, not one person" },
     name: { type: "string" },
@@ -59,15 +59,13 @@ const SCHEMA = {
     email: { type: "string", description: "empty if not given" },
     tier: { type: "string", enum: [...TIERS] },
     capabilities: { type: "array", items: { type: "string", enum: DELEGABLE } },
-    read_back: { type: "string" },
   },
 };
 
 export const MEMBER_PROMPT = `The family owner is telling Kloru, their family's assistant, about a person, or about anyone who calls, and what they may do through Kloru.
 "Anyone who calls", "the public", "everyone else": who is anyone, with no name or number; turning it off means no capabilities.
 Pick the tier closest to the relationship (partner: spouse; family: other relatives; friend; owner only for a co-owner, "the same as me"), then every capability the owner's words give them.
-"Everything" means every capability listed. "See" means the ones that see or know; "do" means the rest. Leave out what the words don't give.
-read_back: one sentence Kloru says to the owner about what they may do, without their name or number (Kloru says those first), e.g. "As your partner: she can see and do everything except change who's in the family. Okay?" or "Anyone who calls Kloru can see when you're free and book a meeting with you. Okay?"`;
+"Everything" means every capability listed. "See" means the ones that see or know; "do" means the rest. Leave out what the words don't give.`;
 
 interface Raw {
   who?: string;
@@ -76,7 +74,6 @@ interface Raw {
   email: string;
   tier: string;
   capabilities: string[];
-  read_back: string;
 }
 
 /** A phone number as Kloru says it: "4 1 5, 5 5 5, 0 1 9 1". */
@@ -85,35 +82,58 @@ function spoken(phone: string): string {
   return [d.slice(0, 3), d.slice(3, 6), d.slice(6)].map((g) => g.split("").join(" ")).join(", ");
 }
 
-/** Code's part: a real number, a member tier, and only what a member may hold. */
-export function clampMember(raw: Raw, words: string): MemberPlan {
+/** Where someone stands before the change: their tier (none: not in the family) and what they can do. */
+export interface Standing {
+  tier?: string;
+  capabilities: readonly Capability[];
+}
+
+/** Transport capabilities: the specific capability on each tool does the gating, so words never take these away. */
+export const PLUMBING: ReadonlySet<Capability> = new Set(["apps.use", "web.read"]);
+
+const TIER_WORDS: Record<MemberPlan["tier"], string> = { owner: "a co-owner", partner: "your partner", family: "family", friend: "a friend" };
+const RANK: Record<MemberPlan["tier"], number> = { friend: 0, family: 1, partner: 2, owner: 3 };
+const plain = (caps: readonly Capability[]): string => caps.map((c) => PLAIN[c] ?? c).join("; ");
+
+/** What the owner hears before a yes: who, what they are now, what they'd become, what they could do, what they'd lose. Said by code from what will be saved. */
+function readBack(name: string, phone: string, tier: MemberPlan["tier"], capabilities: Capability[], now: Standing | undefined): string {
+  const was = now?.tier && now.tier in RANK ? (now.tier as MemberPlan["tier"]) : undefined;
+  const head = `${name}, ${spoken(phone)}: ${was ? `${TIER_WORDS[was]} now` : "not in the family yet"}.`;
+  if (tier === "owner") return `${head} ${was === "owner" ? "Nothing would change." : `This would make ${name} a co-owner: the same say as you, over everything.`}`;
+  const to = TIER_WORDS[tier];
+  const move = !was ? `This would add ${name} as ${to}.` : RANK[tier] < RANK[was] ? `This would lower ${name} to ${to}.` : RANK[tier] > RANK[was] ? `This would raise ${name} to ${to}.` : `${name} would stay ${to}.`;
+  const could = capabilities.length === DELEGABLE.length ? "everything a family member can" : plain(capabilities) || "nothing";
+  const lost = (now?.capabilities ?? []).filter((c) => !capabilities.includes(c) && !PLUMBING.has(c));
+  const loses = was === "owner" ? ` ${name} would no longer be a co-owner, and would lose everything else.` : lost.length ? ` ${name} would lose: ${plain(lost)}.` : "";
+  return `${head} ${move} ${name} could: ${could}.${loses}`;
+}
+
+/** Code's part: a real number, a member tier, only what a member may hold, and the read-back. */
+export function clampMember(raw: Raw, words: string, now?: Standing): MemberPlan {
   if (raw.who === "anyone") {
     const asked = [...new Set(raw.capabilities)];
     const capabilities = asked.filter((c): c is Capability => (PUBLIC_OK as string[]).includes(c));
     const leftOut = asked.filter((c) => !(PUBLIC_OK as string[]).includes(c)) as Capability[];
     const not = leftOut.map((c) => PLAIN[c as Capability] ?? OWNER_ONLY_PLAIN[c] ?? c);
-    const readBack = raw.read_back.trim() + (not.length ? ` (Not ${not.join(", ")}: only you can.)` : "");
+    const said = `Anyone who calls can now: ${plain(now?.capabilities ?? []) || "nothing, Kloru is just for your family"}. This would change it to: ${plain(capabilities) || "nothing, Kloru would be just for your family"}.`;
+    const readBack = said + (not.length ? ` (Not ${not.join(", ")}: only you can.)` : "") + " Okay?";
     return { who: "anyone", name: "Anyone who calls", phone: "", tier: "friend", capabilities, leftOut, readBack, words };
   }
   const phone = normalizePhone(raw.phone);
   if (phone.replace(/\D/g, "").length < 11) throw new Error(`I didn't catch a full phone number for ${raw.name || "them"}.`);
+  const name = raw.name.trim();
   const named = (TIERS as readonly string[]).includes(raw.tier) ? (raw.tier as MemberPlan["tier"]) : "partner";
   const tier = named === "owner" && !CO_OWNER_WORDS.test(words) ? "partner" : named;
-  if (tier === "owner") {
-    const readBack = `${raw.name.trim()}, ${spoken(phone)}: as a co-owner, the same say as you, over everything. Okay?`;
-    return { who: "person", name: raw.name.trim(), phone, ...(raw.email.trim() ? { email: raw.email.trim().toLowerCase() } : {}), tier, capabilities: [], leftOut: [], readBack, words };
-  }
-  const asked = [...new Set(raw.capabilities)];
+  const asked = tier === "owner" ? [] : [...new Set(raw.capabilities)];
   const capabilities = asked.filter((c): c is Capability => (DELEGABLE as string[]).includes(c));
   const leftOut = asked.filter((c) => !(DELEGABLE as string[]).includes(c)) as Capability[];
   const not = leftOut.map((c) => OWNER_ONLY_PLAIN[c] ?? c);
-  // The name and number Evan hears come from what will be saved, never from the model's words.
-  const said = raw.read_back.trim().replace(/\+?\d[\d\s,.()-]{5,}\d,?\s*/g, "").replace(new RegExp(`^${raw.name.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[,:]?\s*`, "i"), "");
-  const readBack = `${raw.name.trim()}, ${spoken(phone)}: ${said}` + (not.length ? ` (Not ${not.join(", ")}: only you can.)` : "");
-  return { who: "person", name: raw.name.trim(), phone, ...(raw.email.trim() ? { email: raw.email.trim().toLowerCase() } : {}), tier, capabilities, leftOut, readBack, words };
+  // Every word Evan hears comes from what will be saved, never from the model's sentence.
+  const said = readBack(name, phone, tier, capabilities, now) + (not.length ? ` (Not ${not.join(", ")}: only you can.)` : "") + " Okay?";
+  return { who: "person", name, phone, ...(raw.email.trim() ? { email: raw.email.trim().toLowerCase() } : {}), tier, capabilities, leftOut, readBack: said, words };
 }
 
-export function memberPolicy(o: { apiKey: string; members: () => string; fetchImpl?: typeof fetch; model?: string; timeoutMs?: number }): (words: string) => Promise<MemberPlan> {
+export function memberPolicy(o: { apiKey: string; members: () => string; /** Where a number stands now ("" for anyone who calls), for the read-back. */ standing?: (phone: string) => Standing | undefined; fetchImpl?: typeof fetch; model?: string; timeoutMs?: number }): (words: string) => Promise<MemberPlan> {
   return async (words) => {
     const user = [
       `The owner said: "${words}"`,
@@ -131,6 +151,6 @@ export function memberPolicy(o: { apiKey: string; members: () => string; fetchIm
     });
     const raw = JSON.parse(content || "{}") as Partial<Raw>;
     if ((!raw.name && raw.who !== "anyone") || !Array.isArray(raw.capabilities)) throw new Error(`no membership in ${JSON.stringify(raw).slice(0, 200)}`);
-    return clampMember({ who: raw.who ?? "person", name: raw.name ?? "", phone: raw.phone ?? "", email: raw.email ?? "", tier: raw.tier ?? "partner", capabilities: raw.capabilities, read_back: raw.read_back ?? "" }, words);
+    return clampMember({ who: raw.who ?? "person", name: raw.name ?? "", phone: raw.phone ?? "", email: raw.email ?? "", tier: raw.tier ?? "partner", capabilities: raw.capabilities }, words, o.standing?.(raw.who === "anyone" ? "" : normalizePhone(raw.phone ?? "")));
   };
 }
