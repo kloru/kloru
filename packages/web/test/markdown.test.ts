@@ -3,18 +3,18 @@ import { renderMarkdown } from "../src/markdown.js";
 
 describe("markdown for artifact pages", () => {
   it("renders headings, paragraphs, lists, emphasis, code and links", () => {
-    const html = renderMarkdown("# Dentists\n\nThree **good** options, *all* close.\n\n- Rockridge Kids\n- Smile Kids\n\n1. Call\n2. Book\n\nSee [their site](https://example.com/a?b=1&c=2) or `ask`.");
+    const html = renderMarkdown("# Dentists\n\nThree **good** options, *all* close.\n\n- Maplewood Kids\n- Smile Kids\n\n1. Call\n2. Book\n\nSee [their site](https://example.com/a?b=1&c=2) or `ask`.");
     expect(html).toContain("<h1>Dentists</h1>");
     expect(html).toContain("<p>Three <strong>good</strong> options, <em>all</em> close.</p>");
-    expect(html).toContain("<ul><li>Rockridge Kids</li><li>Smile Kids</li></ul>");
+    expect(html).toContain("<ul><li>Maplewood Kids</li><li>Smile Kids</li></ul>");
     expect(html).toContain("<ol><li>Call</li><li>Book</li></ol>");
     expect(html).toContain('<a href="https://example.com/a?b=1&amp;c=2" rel="noopener noreferrer nofollow">their site</a>');
     expect(html).toContain("<code>ask</code>");
   });
 
   it("renders a table, the shape comparisons take", () => {
-    const html = renderMarkdown("| Name | Stars |\n|---|---:|\n| Rockridge Kids | 4.9 |\n| Smile | 4.6 |");
-    expect(html).toBe("<table><thead><tr><th>Name</th><th>Stars</th></tr></thead><tbody><tr><td>Rockridge Kids</td><td>4.9</td></tr><tr><td>Smile</td><td>4.6</td></tr></tbody></table>");
+    const html = renderMarkdown("| Name | Stars |\n|---|---:|\n| Maplewood Kids | 4.9 |\n| Smile | 4.6 |");
+    expect(html).toBe("<table><thead><tr><th>Name</th><th>Stars</th></tr></thead><tbody><tr><td>Maplewood Kids</td><td>4.9</td></tr><tr><td>Smile</td><td>4.6</td></tr></tbody></table>");
   });
 
   it("never lets HTML, scripts or script links through, whatever the model wrote", () => {
@@ -26,9 +26,9 @@ describe("markdown for artifact pages", () => {
   });
 
   it("bare links become links; mail links work; nothing else is linked", () => {
-    const html = renderMarkdown("Book at https://rockridgekids.com/book. Or [email](mailto:hi@rk.com).");
+    const html = renderMarkdown("Book at https://rockridgekids.com/book. Or [email](mailto:hi@rk.example).");
     expect(html).toContain('<a href="https://rockridgekids.com/book" rel="noopener noreferrer nofollow">https://rockridgekids.com/book</a>.');
-    expect(html).toContain('<a href="mailto:hi@rk.com" rel="noopener noreferrer nofollow">email</a>');
+    expect(html).toContain('<a href="mailto:hi@rk.example" rel="noopener noreferrer nofollow">email</a>');
   });
 });
 

@@ -34,13 +34,13 @@ const settle = async () => {
   for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 5));
 };
 const later = (min: number) => new Date(Date.now() + min * 60_000);
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 
 function setup() {
   const host = new Host();
   const pm = new PM();
   const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "sweep-")), host, planner: pm, retryMs: 5 });
-  const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+  const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
   return { host, pm, desk, call };
 }
 
@@ -100,7 +100,7 @@ describe("the sweeper", () => {
     const { host, pm, desk, call } = setup();
     const issue = desk.fileIssue(call.id, "Find a dentist");
     desk.assign(issue.id, "work", "Find one", []);
-    host.last(issue.id).finish("Rockridge Kids Dental");
+    host.last(issue.id).finish("Maplewood Kids Dental");
     await settle();
     pm.seen = [];
     desk.sweep(later(1));
@@ -195,7 +195,7 @@ describe("an ops worker lost after it changed something", () => {
     const issue = desk.fileIssue(call.id, "Delete the promo");
     desk.assign(issue.id, "ops", "Delete it", []);
     await settle();
-    desk.repo.appendLedger({ issue: issue.id, call: call.id, phone: EVAN, tool: "app_gmail_trash", slug: "GMAIL_MOVE_TO_TRASH", args: {}, ok: true, result: "trashed" });
+    desk.repo.appendLedger({ issue: issue.id, call: call.id, phone: EZRA, tool: "app_gmail_trash", slug: "GMAIL_MOVE_TO_TRASH", args: {}, ok: true, result: "trashed" });
     void host;
     desk.sweep(later(45));
     await settle();

@@ -350,7 +350,7 @@ type FetchPublicResult = { ok: true; res: Response; target: URL; hops: string[] 
  */
 export async function fetchPublic(doFetch: typeof fetch, url: string, opts: FetchPublicOptions = {}): Promise<FetchPublicResult> {
   const headers = opts.headers ?? {
-    "user-agent": "kloru/0.1 (+https://github.com/evanmarshall/kloru)",
+    "user-agent": "kloru/0.1 (+https://github.com/kloru/kloru)",
     accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5",
   };
   const hops: string[] = [];

@@ -13,7 +13,7 @@ describe("is this how they want Kloru to work? (Jev)", () => {
 
   it("below even odds is no; a bad answer throws", async () => {
     const at = (noul: unknown) => guidelineCheck({ apiKey: "k", fetchImpl: (async () => new Response(JSON.stringify({ answers: { guideline: { type: "noul", noul } } }))) as unknown as typeof fetch });
-    expect(await at(0.2)("Cara's birthday is March 3")).toBe(false);
+    expect(await at(0.2)("Cleo's birthday is March 3")).toBe(false);
     await expect(at("x")("y")).rejects.toThrow();
   });
 });

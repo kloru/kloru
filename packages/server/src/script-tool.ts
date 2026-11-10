@@ -15,7 +15,7 @@ import { Type } from "@earendil-works/pi-ai";
 const failed = (text: string) => ({ content: [{ type: "text" as const, text }], isError: true });
 const MAX_OUT = 20_000;
 
-/** VAULT_EVAN_PGE_API_KEY for evan-pge-api.key */
+/** VAULT_EZRA_PGE_API_KEY for ezra-pge-api.key */
 export const envName = (name: string, field: string) => `VAULT_${name}_${field}`.toUpperCase().replace(/[^A-Z0-9]/g, "_");
 
 export function scriptTool(o: { desk: Desk; vault: Vault; workspaceDir: string }): RegisteredTool {
@@ -26,7 +26,7 @@ export function scriptTool(o: { desk: Desk; vault: Vault; workspaceDir: string }
       "Run a short Node.js script (ESM, Node 22, fetch built in) for an API or a calculation. Secrets go in by name: list them in `secrets` as name.field and read process.env.VAULT_<NAME>_<FIELD> (dashes and dots become underscores). Never print a secret; output is scrubbed anyway.",
     parameters: Type.Object({
       code: Type.String({ description: "the script; print results with console.log" }),
-      secrets: Type.Optional(Type.Array(Type.String({ description: "name.field, e.g. evan-weather-api.key" }))),
+      secrets: Type.Optional(Type.Array(Type.String({ description: "name.field, e.g. ezra-weather-api.key" }))),
       timeout_seconds: Type.Optional(Type.Number({ description: "default 60, at most 300" })),
     }),
     meta: { capabilities: ["computer.use"], group: "files" as const },

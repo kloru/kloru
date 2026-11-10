@@ -11,8 +11,8 @@ const CASES: Array<[string, boolean]> = [
   ["Prefers to be texted, not emailed, unless he asks", true],
   ["Always ask me before spending money", true],
   ["Don't recap work I already know about", true],
-  ["Cara's birthday is March 3", false],
-  ["Evan prefers Uber over rental cars in Atlanta", false],
+  ["Cleo's birthday is March 3", false],
+  ["Ezra prefers Uber over rental cars in Tucson", false],
   ["Parks at SFO long-term parking", false],
 ];
 

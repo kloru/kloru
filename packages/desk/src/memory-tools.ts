@@ -41,7 +41,7 @@ export function memoryTools(memory: Memory, who?: (conversationKey: string) => s
       name: "memory_open",
       label: "Open memory file",
       description: "Read one memory file, or list every file when path is omitted.",
-      parameters: Type.Object({ path: Type.Optional(Type.String({ description: "e.g. household/people/maya.md" })) }),
+      parameters: Type.Object({ path: Type.Optional(Type.String({ description: "e.g. household/people/nora.md" })) }),
       meta,
       execute: async ({ path }, ctx) => {
         const visible = memory.visibleTo(memory.list(), asker(ctx));

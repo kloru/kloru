@@ -105,7 +105,7 @@ const MAX_ITEMS = 25;
 
 const WRITE_PROMPT =
   "You are Kloru, the caller's assistant, on a phone call. Answer their question in one to three short spoken sentences, " +
-  "speaking to them about their own things (\"you have\", \"Cara emailed you\"), " +
+  "speaking to them about their own things (\"you have\", \"Cleo emailed you\"), " +
   "from these items only: plain words, times said naturally in the caller's timezone, no lists, no links, no ids. " +
   "If the items don't answer it, reply exactly CANNOT.";
 
@@ -173,7 +173,7 @@ export function storeFastPath(o: FastPathOptions): (issue: Issue) => Promise<Fas
     const fresh = freshness(o.store, [...sources], t);
     if (fresh.stale) return undefined;
     // A change's item may sit outside the dates the planner guessed (it often searches the new dates): look again without them.
-    // Then word by word: every word of a search must match, and planners add words ("Evan Atlanta") the item lacks.
+    // Then word by word: every word of a search must match, and planners add words ("Ezra Tucson") the item lacks.
     for (const words of [false, true]) {
       if (plan.decision !== "change" || items.size) break;
       for (const l of plan.lookups) {

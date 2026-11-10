@@ -28,7 +28,7 @@ Ample is configured; without them, say the agent's operator needs to set
 ## Build
 
 1. One folder per app: `workspace/apps/<name>/`, where `<name>` is short,
-   lowercase, with hyphens (`apps/maya-birthday`). For a single app the name
+   lowercase, with hyphens (`apps/nora-birthday`). For a single app the name
    becomes part of the URL. Never deploy the workspace itself or a folder holding the owner's
    other files: everything in the folder is uploaded.
 2. Write the files with `write`. Make it look good on a phone first: a
@@ -55,13 +55,13 @@ Ample is configured; without them, say the agent's operator needs to set
    then remove the test entry if you can). If it fails, read `ample_logs`
    with `kind: "runtime"`, fix, and deploy again. Then send the URL in one line.
 
-Agent: It's live: https://maya-birthday-acc-1a2b.apps.ample.computer. The RSVP
+Agent: It's live: https://nora-birthday-acc-1a2b.apps.ample.computer. The RSVP
 form saves names and you can see the list at /guests.
 
    The first deploy may create the owner's Ample account and give you a claim
    link. Send it in the same message, once, and say why:
 
-Agent: It's live: https://maya-birthday-acc-1a2b.apps.ample.computer. One
+Agent: It's live: https://nora-birthday-acc-1a2b.apps.ample.computer. One
 thing: open this link and confirm your email, or the site comes down in two
 days. https://ample.computer/claim?token=...
 
@@ -100,7 +100,7 @@ after a quiet spell can take a moment. That is normal.
 ## Memory
 
 `journal_append` one line per launch: app name, folder, URL. `memory_write`
-only for something the owner will want again ("Maya's party site is at ...").
+only for something the owner will want again ("Nora's party site is at ...").
 
 ## Do not
 

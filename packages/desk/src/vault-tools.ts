@@ -32,7 +32,7 @@ export function vaultTools(desk: Desk, vault: Vault, nameOf: (phone: string) => 
       label: "Save a new login",
       description: "After signing up on a site for the person who asked: makes a strong password (you never see it) and saves the login as theirs. Then fillSecret(selector, '<name>.password') in browser_run where the site asks for it.",
       parameters: Type.Object({
-        name: Type.String({ description: "lowercase, e.g. evan-acme-login" }),
+        name: Type.String({ description: "lowercase, e.g. ezra-acme-login" }),
         site: Type.String({ description: "the site's address, e.g. acme.com" }),
         username: Type.String({ description: "the email or username used to sign up" }),
       }),

@@ -362,7 +362,7 @@ describe("console: connections", () => {
   it("connected apps first; every other app Kloru supports is one click away", async () => {
     const client = new FakeClient({
       "apps.list": () => [
-        { slug: "gmail", connected: true, accounts: [{ id: "ca_1", email: "evan@gmail.com", status: "connected" }] },
+        { slug: "gmail", connected: true, accounts: [{ id: "ca_1", email: "ezra@gmail.example", status: "connected" }] },
         { slug: "notion", connected: false, accounts: [] },
         { slug: "outlook", connected: false, accounts: [] },
         { slug: "someapp", connected: false, accounts: [] },
@@ -370,7 +370,7 @@ describe("console: connections", () => {
     });
     const c = await start({ client });
     const page = await (await c.get("/connections", (await c.signedIn()).cookie)).text();
-    expect(page.indexOf("evan@gmail.com")).toBeLessThan(page.indexOf("Add an app"));
+    expect(page.indexOf("ezra@gmail.example")).toBeLessThan(page.indexOf("Add an app"));
     expect(page).toContain("Notion");
     expect(page).toContain("Outlook");
     expect(page).toContain("Someapp");
@@ -379,7 +379,7 @@ describe("console: connections", () => {
 
   // Nov 9: with every Composio app allowed, apps.list holds only what's connected; the rest is a search away.
   it("with nothing searched, Popular lists the common apps not yet connected", async () => {
-    const client = new FakeClient({ "apps.list": () => [{ slug: "gmail", connected: true, accounts: [{ id: "ca_1", email: "evan@gmail.com", status: "connected" }] }] });
+    const client = new FakeClient({ "apps.list": () => [{ slug: "gmail", connected: true, accounts: [{ id: "ca_1", email: "ezra@gmail.example", status: "connected" }] }] });
     const c = await start({ client });
     const page = await (await c.get("/connections", (await c.signedIn()).cookie)).text();
     expect(page).toContain('<form method="get" action="/connections" class="search" role="search">');
@@ -416,19 +416,19 @@ describe("console: connections", () => {
   });
 
   it("shows Kloru's texting number and whether this person has texted with it", async () => {
-    const yes = new FakeClient({ "apps.list": () => [], "texting.status": () => ({ number: "+16504849720", handle: "kloru-marshalls", texted: "2026-10-31T09:00:00Z" }) });
+    const yes = new FakeClient({ "apps.list": () => [], "texting.status": () => ({ number: "+16505550142", handle: "kloru-vegas", texted: "2026-10-31T09:00:00Z" }) });
     const c = await start({ client: yes });
     const page = await (await c.get("/connections", (await c.signedIn()).cookie)).text();
-    expect(page).toContain("(650) 484-9720");
+    expect(page).toContain("(650) 555-0142");
     expect(page).toContain("Texts work");
     expect(yes.calls.find(([op]) => op === "texting.status")![1]).toEqual({ phone: "+14155550190" });
 
-    const no = new FakeClient({ "apps.list": () => [], "texting.status": () => ({ number: "+16504849720", handle: "kloru-marshalls" }) });
+    const no = new FakeClient({ "apps.list": () => [], "texting.status": () => ({ number: "+16505550142", handle: "kloru-vegas" }) });
     const d = await start({ client: no });
     const page2 = await (await d.get("/connections", (await d.signedIn()).cookie)).text();
     expect(page2).toContain("Not yet");
-    expect(page2).toContain("connect @kloru-marshalls");
-    expect(page2).toContain("sms:+16504849720");
+    expect(page2).toContain("connect @kloru-vegas");
+    expect(page2).toContain("sms:+16505550142");
   });
 
   it("payments: connect Stripe Link from the page; a test wallet says so", async () => {
@@ -470,21 +470,21 @@ describe("console: connections", () => {
   it("shows every connected account by its address, and how to add another", async () => {
     const client = new FakeClient({
       "apps.list": () => [
-        { slug: "gmail", connected: true, accounts: [{ id: "ca_1", email: "evan@gmail.com", status: "connected" }, { id: "ca_2", email: "evan@work.example.com", status: "connected" }] },
-        { slug: "googlecalendar", connected: true, accounts: [{ id: "ca_3", email: "evan@gmail.com", status: "connected" }, { id: "ca_4", status: "expired" }] },
+        { slug: "gmail", connected: true, accounts: [{ id: "ca_1", email: "ezra@gmail.example", status: "connected" }, { id: "ca_2", email: "ezra@work.example.com", status: "connected" }] },
+        { slug: "googlecalendar", connected: true, accounts: [{ id: "ca_3", email: "ezra@gmail.example", status: "connected" }, { id: "ca_4", status: "expired" }] },
         { slug: "googledrive", connected: false, accounts: [] },
       ],
     });
     const c = await start({ client });
     const page = await (await c.get("/connections", (await c.signedIn()).cookie)).text();
-    expect(page).toContain("evan@gmail.com");
-    expect(page).toContain("evan@work.example.com");
+    expect(page).toContain("ezra@gmail.example");
+    expect(page).toContain("ezra@work.example.com");
     expect(page).toContain("Add another Gmail account");
     expect(page).toContain("Add another Google Calendar account");
     expect(page).toContain("Needs reconnecting");
     expect(page).toContain("Connect Google Drive");
     expect(page).toContain(`name="account" value="ca_2"`);
-    expect(page).toContain("Disconnect evan@work.example.com from Gmail?");
+    expect(page).toContain("Disconnect ezra@work.example.com from Gmail?");
   });
 
   it("disconnecting one account names it", async () => {
@@ -496,10 +496,10 @@ describe("console: connections", () => {
   });
 
   it("coming back from sign-in names the account that was added", async () => {
-    const client = new FakeClient({ "apps.list": () => [{ slug: "gmail", connected: true, accounts: [{ id: "ca_1", email: "evan@gmail.com", status: "connected" }, { id: "ca_2", email: "evan@work.example.com", status: "connected" }] }] });
+    const client = new FakeClient({ "apps.list": () => [{ slug: "gmail", connected: true, accounts: [{ id: "ca_1", email: "ezra@gmail.example", status: "connected" }, { id: "ca_2", email: "ezra@work.example.com", status: "connected" }] }] });
     const c = await start({ client });
     const page = await (await c.get("/connections/return?toolkit=gmail&status=success&connected_account_id=ca_2", (await c.signedIn()).cookie)).text();
-    expect(page).toContain("evan@work.example.com is connected to Gmail.");
+    expect(page).toContain("ezra@work.example.com is connected to Gmail.");
   });
 
   it("disconnect calls the agent and comes back with a banner", async () => {
@@ -618,9 +618,9 @@ describe("console: contacts", () => {
     const client = new FakeClient({ "contacts.upsert": () => ({ id: "sam" }) });
     const c = await start({ client });
     const { cookie, csrf } = await c.signedIn();
-    const res = await c.post("/contacts", { name: "Sam", phones: "(415) 555-0190, +1 415 555 0100", emails: "sam@x.com", tier: "friend", csrf }, cookie);
+    const res = await c.post("/contacts", { name: "Sam", phones: "(415) 555-0190, +1 415 555 0100", emails: "sam@x.example", tier: "friend", csrf }, cookie);
     expect(res.status).toBe(303);
-    expect(client.calls[0]).toEqual(["contacts.upsert", { name: "Sam", phones: ["(415) 555-0190", "+1 415 555 0100"], emails: ["sam@x.com"], tier: "friend" }]);
+    expect(client.calls[0]).toEqual(["contacts.upsert", { name: "Sam", phones: ["(415) 555-0190", "+1 415 555 0100"], emails: ["sam@x.example"], tier: "friend" }]);
   });
 
   it("refuses a dollar cap that isn't a number instead of saving an uncapped grant", async () => {
@@ -695,7 +695,7 @@ describe("console: admin", () => {
     writeFileSync(join(tx, at.slice(0, 10), `${sid}.jsonl`), [
       { at, kind: "call_started", call_sid: sid, from: "+14155550190" },
       { at, kind: "caller", text: "Who's doing drop-off <Wednesday>?" },
-      { at, kind: "task_started", task: 2, request: "Identify who drops Maya off on Oct 28", size: "quick" },
+      { at, kind: "task_started", task: 2, request: "Identify who drops Nora off on Oct 28", size: "quick" },
       { at, kind: "kloru", text: "Let me check", interrupted: true },
       { at, kind: "task_finished", task: 2, status: "done", result: "It doesn't say who.", after_call: true },
       { at, kind: "call_ended" },
@@ -707,7 +707,7 @@ describe("console: admin", () => {
     expect(res.status).toBe(200);
     const page = await res.text();
     expect(page).toContain("Who&#39;s doing drop-off &lt;Wednesday&gt;?");
-    expect(page).toContain("Identify who drops Maya off on Oct 28");
+    expect(page).toContain("Identify who drops Nora off on Oct 28");
     expect(page).toContain("cut off");
     expect(page).toContain("after the call ended");
     expect((await c.get("/admin/calls/CA0000000000000000000000000000000f", admin.cookie)).status).toBe(404);
@@ -752,10 +752,10 @@ describe("console: the desk, read-only", () => {
     repo.saveIssue(issue);
     repo.appendLedger({ issue: issue.id, call: call.id, phone: ADMIN, tool: "app_googlecalendar_create_event", slug: "GOOGLECALENDAR_CREATE_EVENT", args: { summary: "Pickup" }, ok: true, result: "created evt_123" });
     repo.appendInbox(call.id, { kind: "info", text: "Drop-off at 8", issue: issue.id });
-    const memory = new Memory(join(dir, "memory"), { owner: { name: "Evan Marshall", phones: [ADMIN] } });
+    const memory = new Memory(join(dir, "memory"), { owner: { name: "Ezra Vega", phones: [ADMIN] } });
     memory.init();
-    memory.save("household/people/maya.md", "---\nid: maya\ntype: person\n---\n- Evan's daughter, 3\n");
-    const commit = memory.commit("Update memory from call: Maya")!;
+    memory.save("household/people/nora.md", "---\nid: nora\ntype: person\n---\n- Ezra's daughter, 3\n");
+    const commit = memory.commit("Update memory from call: Nora")!;
     return { dir, call, issue, commit };
   }
 
@@ -813,12 +813,12 @@ describe("console: the desk, read-only", () => {
     const c = await start({ deskDir: d.dir });
     const admin = await c.signedIn();
     const tree = await (await c.get("/admin/desk/memory", admin.cookie)).text();
-    expect(tree).toContain("household/people/maya.md");
+    expect(tree).toContain("household/people/nora.md");
     expect(tree).toContain(`href="/admin/desk/memory/commits/${d.commit}"`);
-    const file = await (await c.get("/admin/desk/memory?file=household/people/maya.md", admin.cookie)).text();
-    expect(file).toContain("Evan&#39;s daughter, 3");
+    const file = await (await c.get("/admin/desk/memory?file=household/people/nora.md", admin.cookie)).text();
+    expect(file).toContain("Ezra&#39;s daughter, 3");
     const diff = await (await c.get(`/admin/desk/memory/commits/${d.commit}`, admin.cookie)).text();
-    expect(diff).toContain("+- Evan&#39;s daughter, 3");
+    expect(diff).toContain("+- Ezra&#39;s daughter, 3");
     expect((await c.get("/admin/desk/memory?file=../issues/1.json", admin.cookie)).status).toBe(404);
     expect((await c.get("/admin/desk/memory/commits/HEAD", admin.cookie)).status).toBe(404);
   });
@@ -852,7 +852,7 @@ describe("artifact pages: anyone with the link", () => {
     const call = repo.startCall({ callSid: "CA393c42478ffcd5855c7dfd5d38fe7007", phone: ADMIN, channel: "voice" });
     const issue = repo.newIssue({ request: "Compare dentists", filedBy: { phone: ADMIN, call: call.id }, baseTurn: 0 });
     const id = "Qm9vZ2xlR29vZ2xlR29vZ2";
-    repo.saveArtifact({ id, title: "Pediatric dentists <near> Rockridge", markdown: "| Name | Stars |\n|---|---|\n| Rockridge Kids | 4.9 |\n\n<script>alert(1)</script>", issue: issue.id, call: call.id, phone: ADMIN, createdAt: new Date().toISOString() });
+    repo.saveArtifact({ id, title: "Pediatric dentists <near> Maplewood", markdown: "| Name | Stars |\n|---|---|\n| Maplewood Kids | 4.9 |\n\n<script>alert(1)</script>", issue: issue.id, call: call.id, phone: ADMIN, createdAt: new Date().toISOString() });
     return { dir, id, issue };
   }
 
@@ -864,8 +864,8 @@ describe("artifact pages: anyone with the link", () => {
     expect(res.headers.get("x-robots-tag")).toMatch(/noindex/);
     expect(res.headers.get("referrer-policy")).toBe("no-referrer");
     const page = await res.text();
-    expect(page).toContain("Pediatric dentists &lt;near&gt; Rockridge");
-    expect(page).toContain("<td>Rockridge Kids</td>");
+    expect(page).toContain("Pediatric dentists &lt;near&gt; Maplewood");
+    expect(page).toContain("<td>Maplewood Kids</td>");
     expect(page).not.toContain("<script>alert");
     expect(page).not.toContain("Sign out"); // no console chrome
   });
@@ -902,11 +902,11 @@ describe("the desk page also shows the store and automations", () => {
     const agentDir = join(dir, "..");
     const { Store } = await import("@kloru/store");
     const store = new Store(join(agentDir, "store", "store.db"));
-    store.upsert([{ source: "googlecalendar", account: "evan@example.com", kind: "event", externalId: "e1", title: "Dentist", body: "", people: [], data: {} }]);
-    store.setSyncState("googlecalendar", "evan@example.com", { lastOkAt: new Date().toISOString() });
-    store.setSyncState("gmail", "evan@example.com", { lastError: "rate limited", lastErrorAt: new Date().toISOString() });
+    store.upsert([{ source: "googlecalendar", account: "ezra@example.com", kind: "event", externalId: "e1", title: "Dentist", body: "", people: [], data: {} }]);
+    store.setSyncState("googlecalendar", "ezra@example.com", { lastOkAt: new Date().toISOString() });
+    store.setSyncState("gmail", "ezra@example.com", { lastError: "rate limited", lastErrorAt: new Date().toISOString() });
     store.close();
-    writeFileSync(join(agentDir, "schedules.json"), JSON.stringify([{ id: "s1", name: "Morning debrief", enabled: true, cron: "0 7 * * 1-5", tz: "America/Los_Angeles", nextRunAt: "2026-10-30T14:00:00Z", prompt: "Debrief Evan on today", createdAt: "2026-10-29T00:00:00Z", target: "desk", phone: ADMIN }]));
+    writeFileSync(join(agentDir, "schedules.json"), JSON.stringify([{ id: "s1", name: "Morning debrief", enabled: true, cron: "0 7 * * 1-5", tz: "America/Los_Angeles", nextRunAt: "2026-10-30T14:00:00Z", prompt: "Debrief Ezra on today", createdAt: "2026-10-29T00:00:00Z", target: "desk", phone: ADMIN }]));
     const c = await start({ deskDir: dir });
     const admin = await c.signedIn();
     const page = await (await c.get("/admin/desk", admin.cookie)).text();
@@ -920,48 +920,48 @@ describe("the desk page also shows the store and automations", () => {
 });
 
 describe("console: a family member connects her own accounts by link", () => {
-  const CARA = { id: "cara", name: "Cara", tier: "partner", phones: ["+14155550191"], emails: [] };
+  const CLEO = { id: "cleo", name: "Cleo", tier: "partner", phones: ["+14155550191"], emails: [] };
 
   async function linkFor(c: Awaited<ReturnType<typeof start>>) {
     const { cookie, csrf } = await c.signedIn();
-    const res = await c.post("/contacts/connect-link", { contactId: "cara", name: "Cara", csrf }, cookie);
+    const res = await c.post("/contacts/connect-link", { contactId: "cleo", name: "Cleo", csrf }, cookie);
     expect(res.status).toBe(200);
     const url = /(http:\/\/localhost:8790\/connect\/[A-Za-z0-9._-]+)/.exec(await res.text())?.[1];
     expect(url).toBeDefined();
     return new URL(url!).pathname;
   }
 
-  it("Evan makes a link on People; opening it (no sign-in) offers Gmail and Calendar, and connecting tags the account as hers", async () => {
-    const client = new FakeClient({ "contacts.list": () => [CARA], "policy.get": () => POLICY, "apps.connect": () => ({ url: "https://connect.composio.dev/x" }) });
+  it("Ezra makes a link on People; opening it (no sign-in) offers Gmail and Calendar, and connecting tags the account as hers", async () => {
+    const client = new FakeClient({ "contacts.list": () => [CLEO], "policy.get": () => POLICY, "apps.connect": () => ({ url: "https://connect.composio.dev/x" }) });
     const c = await start({ client });
     const people = await (await c.get("/contacts", (await c.signedIn()).cookie)).text();
     expect(people).toContain('action="/contacts/connect-link"');
     const path = await linkFor(c);
     const page = await (await c.get(path)).text();
-    expect(page).toContain("Cara");
+    expect(page).toContain("Cleo");
     expect(page).toContain("Gmail");
     const go = await c.post(path, { toolkit: "gmail" });
     expect(go.status).toBe(303);
     expect(go.headers.get("location")).toBe("https://connect.composio.dev/x");
-    expect(client.calls.at(-1)).toEqual(["apps.connect", { toolkit: "gmail", person: "cara", callbackUrl: `http://localhost:8790${path}/done` }]);
+    expect(client.calls.at(-1)).toEqual(["apps.connect", { toolkit: "gmail", person: "cleo", callbackUrl: `http://localhost:8790${path}/done` }]);
     expect((await (await c.get(`${path}/done`)).text())).toContain("connected");
   });
 
   it("a member's page offers mail and calendar apps (Outlook too), shows whether her texts work, and refuses other apps", async () => {
-    const client = new FakeClient({ "contacts.list": () => [CARA], "policy.get": () => POLICY, "apps.connect": () => ({ url: "https://connect.composio.dev/x" }), "texting.status": () => ({ number: "+16504849720", handle: "kloru-marshalls" }) });
+    const client = new FakeClient({ "contacts.list": () => [CLEO], "policy.get": () => POLICY, "apps.connect": () => ({ url: "https://connect.composio.dev/x" }), "texting.status": () => ({ number: "+16505550142", handle: "kloru-vegas" }) });
     const c = await start({ client });
     const path = await linkFor(c);
     const page = await (await c.get(path)).text();
     expect(page).toContain("Outlook");
-    expect(page).toContain("(650) 484-9720");
-    expect(page).toContain("connect @kloru-marshalls");
-    expect(client.calls.find(([op]) => op === "texting.status")![1]).toEqual({ person: "cara" });
+    expect(page).toContain("(650) 555-0142");
+    expect(page).toContain("connect @kloru-vegas");
+    expect(client.calls.find(([op]) => op === "texting.status")![1]).toEqual({ person: "cleo" });
     expect((await c.post(path, { toolkit: "outlook" })).status).toBe(303);
     expect((await c.post(path, { toolkit: "notion" })).status).toBe(400);
   });
 
   it("a tampered, unknown or expired link shows a plain error and no connect button", async () => {
-    const client = new FakeClient({ "contacts.list": () => [CARA], "policy.get": () => POLICY, "apps.connect": () => ({ url: "https://x" }) });
+    const client = new FakeClient({ "contacts.list": () => [CLEO], "policy.get": () => POLICY, "apps.connect": () => ({ url: "https://x" }) });
     const c = await start({ client });
     const path = await linkFor(c);
     const tampered = path.slice(0, -2) + (path.endsWith("AA") ? "BB" : "AA");
@@ -977,8 +977,8 @@ describe("console: a family member connects her own accounts by link", () => {
 
 describe("console: automations (recurring jobs)", () => {
   const list = [
-    { id: "s_1", name: "Morning <debrief>", when: "weekdays at 7:00 AM", request: "Text me my day", enabled: true, nextRunAt: "2026-11-02T15:00:00.000Z", for: "Evan" },
-    { id: "s_2", name: "Rent reminder", when: "on the 1st", request: "Remind me to pay rent", enabled: false, for: "Evan" },
+    { id: "s_1", name: "Morning <debrief>", when: "weekdays at 7:00 AM", request: "Text me my day", enabled: true, nextRunAt: "2026-11-02T15:00:00.000Z", for: "Ezra" },
+    { id: "s_2", name: "Rent reminder", when: "on the 1st", request: "Remind me to pay rent", enabled: false, for: "Ezra" },
   ];
 
   it("lists them in words, escaped, with pause or resume and delete", async () => {
@@ -1020,7 +1020,7 @@ describe("artifact pages: Notion-style, editable by the family", () => {
     const call = repo.startCall({ callSid: "imessage:1", phone: ADMIN, channel: "imessage" });
     const issue = repo.newIssue({ request: "Flights", filedBy: { phone: ADMIN, call: call.id }, baseTurn: 0 });
     const id = "Qm9vZ2xlR29vZ2xlR29vZ2";
-    repo.saveArtifact({ id, title: "Atlanta flights", markdown, issue: issue.id, call: call.id, phone: ADMIN, createdAt: new Date().toISOString() });
+    repo.saveArtifact({ id, title: "Tucson flights", markdown, issue: issue.id, call: call.id, phone: ADMIN, createdAt: new Date().toISOString() });
     return { dir, id };
   }
   const data = (html: string) => JSON.parse(/<script type="application\/json" id="kloru-page-data">([\s\S]*?)<\/script>/.exec(html)![1]!);
@@ -1057,7 +1057,7 @@ describe("artifact pages: Notion-style, editable by the family", () => {
     expect(html).toMatch(/<script type="module" src="\/static\/editor\.js(\?v=[0-9a-f]{12})?"><\/script>/);
     expect(html).toMatch(/href="\/static\/editor\.css(\?v=[0-9a-f]{12})?"/);
     expect(html).not.toMatch(/<\/script><script>alert/);
-    expect(data(html)).toMatchObject({ id: p.id, title: "Atlanta flights", editable: true });
+    expect(data(html)).toMatchObject({ id: p.id, title: "Tucson flights", editable: true });
     expect(data(html).markdown).toContain("</script><script>alert(1)</script>");
     expect(res.headers.get("content-security-policy")).toMatch(/script-src 'self'/);
     expect(html).toContain('id="kloru-fallback"');
@@ -1106,14 +1106,14 @@ describe("artifact pages: Notion-style, editable by the family", () => {
 });
 
 describe("console: everyone in the family signs in (2026-11-02)", () => {
-  const CARA = "+14155550191";
+  const CLEO = "+14155550191";
   const DAD = "+14155550123";
   const STRANGER = "+14155550199";
   const family = () =>
     new FakeClient({
-      "family.lookup": (a) => (a.phone === CARA ? { role: "owner", name: "Cara" } : a.phone === DAD ? { role: "member", name: "Dad", person: "dad" } : null),
+      "family.lookup": (a) => (a.phone === CLEO ? { role: "owner", name: "Cleo" } : a.phone === DAD ? { role: "member", name: "Dad", person: "dad" } : null),
       "apps.list": () => [{ slug: "gmail", connected: false, accounts: [] }],
-      "texting.status": () => ({ number: "+16504849720", connected: false }),
+      "texting.status": () => ({ number: "+16505550142", connected: false }),
       "apps.connect": () => ({ url: "https://composio.example/connect" }),
     });
   const preOf = async (c: Awaited<ReturnType<typeof start>>) => {
@@ -1124,20 +1124,20 @@ describe("console: everyone in the family signs in (2026-11-02)", () => {
   it("an owner and a member get a code with no invite; a stranger doesn't", async () => {
     const c = await start({ client: family() });
     const { pre, token } = await preOf(c);
-    for (const phone of [CARA, DAD]) expect((await c.post("/signin/start", { phone, pre: token }, pre)).status).toBe(200);
+    for (const phone of [CLEO, DAD]) expect((await c.post("/signin/start", { phone, pre: token }, pre)).status).toBe(200);
     expect((await c.post("/signin/start", { phone: STRANGER, pre: token }, pre)).status).toBe(403);
-    expect(c.verifier.sent).toEqual([CARA, DAD]);
+    expect(c.verifier.sent).toEqual([CLEO, DAD]);
   });
 
   it("signing in links the family's Kloru; a co-owner sees the owners' pages", async () => {
     const c = await start({ client: family() });
     const { pre, token } = await preOf(c);
-    await c.post("/signin/start", { phone: CARA, pre: token }, pre);
-    expect((await c.post("/signin/check", { phone: CARA, code: "123456", pre: token }, pre)).status).toBe(303);
-    expect((await c.store.userByPhone(CARA))!.agent).toBeDefined();
-    const page = await (await c.get("/connections", (await c.signedIn(CARA)).cookie)).text();
+    await c.post("/signin/start", { phone: CLEO, pre: token }, pre);
+    expect((await c.post("/signin/check", { phone: CLEO, code: "123456", pre: token }, pre)).status).toBe(303);
+    expect((await c.store.userByPhone(CLEO))!.agent).toBeDefined();
+    const page = await (await c.get("/connections", (await c.signedIn(CLEO)).cookie)).text();
     expect(page).not.toContain("Owners only");
-    expect(page).not.toContain("Hi Cara");
+    expect(page).not.toContain("Hi Cleo");
   });
 
   it("a member linked to the family's Kloru never reaches the owners' pages, even when the lookup fails (review, 2026-11-02)", async () => {
@@ -1185,13 +1185,13 @@ describe("console: each person's own policy (2026-11-02)", () => {
     const saved: Array<Record<string, unknown>> = [];
     const client = new FakeClient({
       "family.lookup": (a) => (a.phone === DAD ? { role: "member", name: "Dad", person: "dad" } : null),
-      "mypolicy.get": (a) => ({ text: a.phone === DAD ? "- Evan can add to my calendar." : "" }),
+      "mypolicy.get": (a) => ({ text: a.phone === DAD ? "- Ezra can add to my calendar." : "" }),
       "mypolicy.set": (a) => (saved.push(a), { commit: "abc" }),
     });
     const c = await start({ client });
     const { cookie, csrf } = await c.signedIn(DAD);
     const page = await (await c.get("/policy", cookie)).text();
-    expect(page).toContain("- Evan can add to my calendar.");
+    expect(page).toContain("- Ezra can add to my calendar.");
     expect((await c.post("/policy", { text: "x", csrf: "wrong" }, cookie)).status).toBe(403);
     expect((await c.post("/policy", { text: "- Nobody reads my mail.", csrf, phone: "+14155550190" }, cookie)).status).toBe(303);
     expect(saved).toEqual([{ phone: DAD, text: "- Nobody reads my mail." }]);
@@ -1225,9 +1225,9 @@ describe("console: the vault (2026-11-02)", () => {
     const asked: Array<Record<string, unknown>> = [];
     const client = new FakeClient({
       "family.lookup": (a) => (a.phone === DAD ? { role: "member", name: "Dad", person: "dad" } : null),
-      "vault.list": () => [{ name: "dad-acme", kind: "login", meta: { site: "acme.com", username: "dad@x.com" }, createdAt: "2026-11-02T00:00:00Z", createdBy: "kloru" }],
+      "vault.list": () => [{ name: "dad-acme", kind: "login", meta: { site: "acme.com", username: "dad@x.example" }, createdAt: "2026-11-02T00:00:00Z", createdBy: "kloru" }],
       "vault.export": (a) => (asked.push(a), [
-        { name: "dad-acme", kind: "login", meta: { site: "acme.com", username: "dad@x.com" }, secret: { password: 'p,"w' }, createdBy: "kloru" },
+        { name: "dad-acme", kind: "login", meta: { site: "acme.com", username: "dad@x.example" }, secret: { password: 'p,"w' }, createdBy: "kloru" },
         { name: "dad-visa", kind: "card", meta: { brand: "Visa" }, secret: { number: "4242424242424242", exp: "12/29", cvc: "123" }, createdBy: DAD },
       ]),
     });
@@ -1245,7 +1245,7 @@ describe("console: the vault (2026-11-02)", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
     const csv = await res.text();
     expect(csv.split("\r\n")[0]).toBe("name,url,username,password,note,kind,card_number,card_exp,card_cvc,card_name,card_zip,api_key,made_by");
-    expect(csv).toContain('dad-acme,https://acme.com,dad@x.com,"p,""w",,login,');
+    expect(csv).toContain('dad-acme,https://acme.com,dad@x.example,"p,""w",,login,');
     expect(csv).toContain("4242424242424242,12/29,123");
     expect(asked).toEqual([{ phone: DAD }]);
   });
@@ -1283,7 +1283,7 @@ describe("a takeover link (2026-11-03)", () => {
 
 describe("admin metrics (2026-11-03)", () => {
   const day = (date: string, models: number) => ({ date, cost: { models, phone: 0.5, browser: null, speech: 0.1, hosting: 0.52 }, modelSource: "openrouter" as const, desk: { engineer: models / 2 }, requests: { filed: 3, finished: 2, failed: 0 }, actions: { "emails handled": 12 }, minutesSaved: 45 });
-  const report = { generatedAt: "2026-11-03T20:00:00Z", days: [day("2026-11-02", 6.75), day("2026-11-03", 16.52)], totals: { today: 17.64, week: 31.6, month: 31.6, requestsFinished: 4, minutesSaved: 90, activePeople: 2 }, people: [{ name: "Evan", phone: "…0190", conversations: 12, requests: 30, minutesSaved: 80, costUsd: 20.1 }], recent: [{ id: 269, at: "2026-11-03T06:47:00Z", who: "Evan", request: "Book SFO long term parking", outcome: "resolved", costUsd: 0.42, minutes: 15 }], sources: ["Models: OpenRouter's usage for Kloru's keys, recorded hourly."] };
+  const report = { generatedAt: "2026-11-03T20:00:00Z", days: [day("2026-11-02", 6.75), day("2026-11-03", 16.52)], totals: { today: 17.64, week: 31.6, month: 31.6, requestsFinished: 4, minutesSaved: 90, activePeople: 2 }, people: [{ name: "Ezra", phone: "…0190", conversations: 12, requests: 30, minutesSaved: 80, costUsd: 20.1 }], recent: [{ id: 269, at: "2026-11-03T06:47:00Z", who: "Ezra", request: "Book SFO long term parking", outcome: "resolved", costUsd: 0.42, minutes: 15 }], sources: ["Models: OpenRouter's usage for Kloru's keys, recorded hourly."] };
   it("an admin sees cost, what got done, time saved and who; the rest of the family doesn't", async () => {
     const DAD = "+14155550123";
     const client = new FakeClient({ "metrics.get": () => report, "family.lookup": (a) => (a.phone === DAD ? { role: "member", name: "Dad", person: "dad" } : null) });

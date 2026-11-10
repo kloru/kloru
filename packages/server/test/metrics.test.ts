@@ -5,18 +5,18 @@ import type { Issue, LedgerEntry } from "@kloru/desk";
 import { describe, expect, it } from "vitest";
 import { Metrics } from "../src/metrics.js";
 
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 const NOW = new Date("2026-11-03T20:00:00Z");
-const issue = (id: number, o: Partial<Issue>): Issue => ({ id, kind: "work", status: "done", request: `request ${id}`, filedBy: { phone: EVAN, call: "c1" }, baseTurn: 0, baseHash: "", resources: [], thread: [], prs: [], links: {}, createdAt: "2026-11-03T18:00:00Z", updatedAt: "2026-11-03T18:30:00Z", ...o }) as Issue;
+const issue = (id: number, o: Partial<Issue>): Issue => ({ id, kind: "work", status: "done", request: `request ${id}`, filedBy: { phone: EZRA, call: "c1" }, baseTurn: 0, baseHash: "", resources: [], thread: [], prs: [], links: {}, createdAt: "2026-11-03T18:00:00Z", updatedAt: "2026-11-03T18:30:00Z", ...o }) as Issue;
 
 function setup(fetchImpl: typeof fetch) {
   const dir = mkdtempSync(join(tmpdir(), "metrics-"));
   mkdirSync(join(dir, "sessions"));
   writeFileSync(join(dir, "sessions", `${encodeURIComponent("desk:issue:1:engineer")}.jsonl`), [JSON.stringify({ role: "assistant", usage: { cost: { total: 0.4 } }, timestamp: Date.parse("2026-11-03T18:10:00Z") }), JSON.stringify({ role: "assistant", usage: { cost: { total: 0.1 } }, timestamp: Date.parse("2026-11-03T18:20:00Z") })].join("\n") + "\n");
   mkdirSync(join(dir, "repo", "calls", "c1"), { recursive: true });
-  writeFileSync(join(dir, "repo", "calls", "c1", "call.json"), JSON.stringify({ id: "c1", callSid: "CA1", phone: EVAN, channel: "voice", startedAt: "2026-11-03T18:00:00Z", endedAt: "2026-11-03T18:10:00Z" }));
-  const ledger: LedgerEntry[] = [{ at: "2026-11-03T18:15:00Z", issue: 1, call: "c1", phone: EVAN, tool: "app", slug: "GOOGLECALENDAR_CREATE_EVENT", args: {}, ok: true, result: "ok", parent: "", hash: "" }];
-  const m = new Metrics({ dataDir: dir, issues: () => [issue(1, {}), issue(2, { status: "failed" }), issue(3, { purpose: "memory" } as Partial<Issue>)], ledger: () => ledger, nameOf: (p) => (p.endsWith("4155550190") ? "Evan" : undefined), timezone: "America/Los_Angeles", openrouterKeys: { main: "k", voice: "k" }, decisionKey: "d", twilio: { sid: "AC1", token: "t" }, steelKey: "s", fetchImpl, now: () => NOW });
+  writeFileSync(join(dir, "repo", "calls", "c1", "call.json"), JSON.stringify({ id: "c1", callSid: "CA1", phone: EZRA, channel: "voice", startedAt: "2026-11-03T18:00:00Z", endedAt: "2026-11-03T18:10:00Z" }));
+  const ledger: LedgerEntry[] = [{ at: "2026-11-03T18:15:00Z", issue: 1, call: "c1", phone: EZRA, tool: "app", slug: "GOOGLECALENDAR_CREATE_EVENT", args: {}, ok: true, result: "ok", parent: "", hash: "" }];
+  const m = new Metrics({ dataDir: dir, issues: () => [issue(1, {}), issue(2, { status: "failed" }), issue(3, { purpose: "memory" } as Partial<Issue>)], ledger: () => ledger, nameOf: (p) => (p.endsWith("4155550190") ? "Ezra" : undefined), timezone: "America/Los_Angeles", openrouterKeys: { main: "k", voice: "k" }, decisionKey: "d", twilio: { sid: "AC1", token: "t" }, steelKey: "s", fetchImpl, now: () => NOW });
   return { m, dir };
 }
 
@@ -45,7 +45,7 @@ describe("metrics", () => {
     expect(today.requests).toEqual({ filed: 2, finished: 1, failed: 1 });
     expect(today.actions).toEqual({ "calendar changes": 1 });
     expect(today.minutesSaved).toBe(15);
-    expect(r.people).toEqual([{ name: "Evan", phone: "…0190", conversations: 1, requests: 2, minutesSaved: 15, costUsd: 0.5 }]);
+    expect(r.people).toEqual([{ name: "Ezra", phone: "…0190", conversations: 1, requests: 2, minutesSaved: 15, costUsd: 0.5 }]);
     expect(r.recent.map((x) => [x.id, x.outcome, x.minutes])).toEqual([[2, "failed", null], [1, "done", 15]]);
   });
 

@@ -20,7 +20,7 @@ def transport(log, inbox_batches=None):
         assert request.headers["authorization"] == "Bearer chat"
         path = request.url.path
         if path == "/desk/calls":
-            return httpx.Response(200, json={"call": {"id": "2026-10-28T1803Z-1-CA1"}, "pending": 1, "brief": "Caller: Evan\nPeople: Maya: daughter, 3"})
+            return httpx.Response(200, json={"call": {"id": "2026-10-28T1803Z-1-CA1"}, "pending": 1, "brief": "Caller: Ezra\nPeople: Nora: daughter, 3"})
         if path.endswith("/turns"):
             await asyncio.sleep(0.01)
             return httpx.Response(200, json={"n": 1})
@@ -197,6 +197,6 @@ async def test_start_keeps_the_brief_and_notes_go_to_the_call():
     log = []
     desk = DeskClient(CFG, client=httpx.AsyncClient(transport=transport(log)))
     await desk.start("CA1", "+14155550190")
-    assert "Maya" in desk.brief
-    await desk.note("Maya is allergic to peanuts")
-    assert ("POST", "/desk/calls/2026-10-28T1803Z-1-CA1/notes", {}, {"text": "Maya is allergic to peanuts"}) in log
+    assert "Nora" in desk.brief
+    await desk.note("Nora is allergic to peanuts")
+    assert ("POST", "/desk/calls/2026-10-28T1803Z-1-CA1/notes", {}, {"text": "Nora is allergic to peanuts"}) in log

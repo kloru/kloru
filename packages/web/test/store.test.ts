@@ -16,12 +16,12 @@ for (const [name, make] of makers) {
       const s = await make();
       expect(await s.users()).toEqual([]);
       await s.invite("(415) 555-0100", "+14155550190");
-      const u = await s.upsertUser({ phone: "+1 415 555 0190", name: "Evan" });
+      const u = await s.upsertUser({ phone: "+1 415 555 0190", name: "Ezra" });
       expect(u.id).toMatch(/^u_[0-9a-f]{8}$/);
       expect(await s.isInvited("+14155550100")).toBe(true);
       expect((await s.invites())[0]).toMatchObject({ phone: "+14155550100", invitedBy: "+14155550190" });
       expect((await s.userByPhone("4155550190"))?.id).toBe(u.id);
-      expect((await s.user(u.id))?.name).toBe("Evan");
+      expect((await s.user(u.id))?.name).toBe("Ezra");
       expect(await s.user("u_missing")).toBeUndefined();
     });
 

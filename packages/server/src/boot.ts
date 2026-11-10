@@ -866,7 +866,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       ...(config.owner.phones[0] ? { ownerPhone: config.owner.phones[0] } : {}),
       // The CISO: one Jev review of each member request's needs, enforced on every call (owners skip it).
       ...(fastKey && env.KLORU_ACCESS?.trim() !== "off" ? { decideAccess: accessDecider({ apiKey: fastKey, ownerName: config.owner.name }) } : {}),
-      // Co-owners have every owner permission (Cara, 2026-11-02).
+      // Co-owners have every owner permission (Cleo, 2026-11-02).
       coOwner: (phone: string) => isCoOwner(contacts.findByPhone(phone)),
       // Whose things a need names, by the name the family uses, and whose a connected account is.
       // One person or nobody: a full name first, then a first name only when exactly one person has it.
@@ -879,7 +879,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
         return first.length === 1 ? first[0]!.phone : undefined;
       },
       phoneOfPerson: (id: string) => contacts.all().find((c) => c.id === id)?.phones[0],
-      // What Evan said about this caller: his words about her, or about anyone who calls.
+      // What Ezra said about this caller: his words about her, or about anyone who calls.
       isMember: (phone: string) => { const t = contacts.findByPhone(phone)?.tier; return !!t && MEMBER_TIERS.has(t); },
       ownerWords: (phone: string) => {
         const c = contacts.findByPhone(phone);

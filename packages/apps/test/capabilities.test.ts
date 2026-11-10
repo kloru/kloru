@@ -170,7 +170,7 @@ describe("policy outcomes with the default tier table", () => {
     expect(engine.evaluate(principalFor("owner"), meta, {}).outcome).toBe("allow");
   });
 
-  it("a batch call is judged by each action in it: Cara with a calendar grant books, but can't read Evan's mail", () => {
+  it("a batch call is judged by each action in it: Cleo with a calendar grant books, but can't read Ezra's mail", () => {
     const granted = new PolicyEngine(defaultPolicy());
     const family = principalFor("family");
     granted.addGrant({ to: family.id, capabilities: ["calendar.write"], note: "member" });

@@ -14,7 +14,7 @@ export function workerTools(desk: Desk): RegisteredTool[] {
       label: "Ask the caller for a yes",
       description:
         "When the caller's guidelines call for their yes before you act (by default: something reaching another person, spending money, or that can't be undone), give the exact draft of what you'll do. The caller hears it; their yes comes back to you. Then stop.",
-      parameters: Type.Object({ draft: Type.String({ description: "exactly what you'll do, in words the caller can say yes to, e.g. 'Email Cara: running 10 minutes late'" }) }),
+      parameters: Type.Object({ draft: Type.String({ description: "exactly what you'll do, in words the caller can say yes to, e.g. 'Email Cleo: running 10 minutes late'" }) }),
       meta: { capabilities: [], group: "files" as const },
       execute: async ({ draft }, ctx) => {
         const issue = Number(/^desk:issue:(\d+):/.exec(ctx?.conversationKey ?? "")?.[1] ?? NaN);
@@ -27,7 +27,7 @@ export function workerTools(desk: Desk): RegisteredTool[] {
       label: "Say who may use Kloru and what they may do",
       description:
         "Owner only: when the owner adds someone to the family, changes what someone may see and do through Kloru, or opens or closes Kloru to anyone who calls (e.g. 'anyone can book a meeting with me'). Pass the owner's own words, verbatim. They hear it read back; their yes saves it. Then stop.",
-      parameters: Type.Object({ words: Type.String({ description: "the owner's words, e.g. 'Add my wife Cara, 415 555 0191, she should be able to do and see everything'" }) }),
+      parameters: Type.Object({ words: Type.String({ description: "the owner's words, e.g. 'Add my wife Cleo, 415 555 0191, she should be able to do and see everything'" }) }),
       meta: { capabilities: [], group: "files" as const },
       execute: async ({ words }, ctx) => {
         const issue = Number(/^desk:issue:(\d+):/.exec(ctx?.conversationKey ?? "")?.[1] ?? NaN);
@@ -72,8 +72,8 @@ export function workerTools(desk: Desk): RegisteredTool[] {
       label: "Suggest something the caller will want",
       description: "Scouts only: something Kloru could do that the caller will likely want, offered on their next calls.",
       parameters: Type.Object({
-        ask: Type.String({ description: "what Kloru would do, in their terms, e.g. 'Book your flight to Atlanta for the evening of Nov 3'" }),
-        goal: Type.String({ description: "the goal it serves, e.g. 'Get to the Atlanta board visit Nov 4 to 5'" }),
+        ask: Type.String({ description: "what Kloru would do, in their terms, e.g. 'Book your flight to Tucson for the evening of Nov 3'" }),
+        goal: Type.String({ description: "the goal it serves, e.g. 'Get to the Tucson board visit Nov 4 to 5'" }),
         why: Type.String({ description: "why now: what you saw, e.g. 'the trip is on your calendar but no flight confirmation is in your email'" }),
         kind: Type.Union([Type.Literal("one_off"), Type.Literal("automation")], { description: "automation: something to run on a schedule" }),
       }),

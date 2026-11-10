@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { textTalker, type TalkerTools } from "../src/text-talker.js";
 
 const key = process.env.OPENROUTER_API_KEY;
-const BRIEF = "Caller: Evan. Lives in Oakland. People: Maya: Evan's daughter, 3 | Cara: Evan's wife";
+const BRIEF = "Caller: Ezra. Lives in Portland. People: Nora: Ezra's daughter, 3 | Cleo: Ezra's wife";
 
 function tools() {
   const calls: string[] = [];
@@ -46,7 +46,7 @@ describe.skipIf(!key)("the text talker, live", () => {
 ${BRIEF}
 Recent tasks (newest first; what each found):
 - Daily spam cleanup of the inbox: cleaned the work inbox; asked for a yes to read the personal Gmail.`;
-    const reply = await talk({ brief, channel: "imessage", thread: [{ role: "caller", text }], tools: t, shape: { form: "emoji", link: false }, pending: ["issue 515, draft d1: May I read your personal Gmail (evangeorgemarshall@gmail.com) for the daily spam cleanup too?"], open: ["issue 515, waiting for their yes, 15 h: Every day, clean spam out of my inboxes"], timezone: "America/Los_Angeles" });
+    const reply = await talk({ brief, channel: "imessage", thread: [{ role: "caller", text }], tools: t, shape: { form: "emoji", link: false }, pending: ["issue 515, draft d1: May I read your personal Gmail (ezra.vega@gmail.example) for the daily spam cleanup too?"], open: ["issue 515, waiting for their yes, 15 h: Every day, clean spam out of my inboxes"], timezone: "America/Los_Angeles" });
     console.log(reply, calls);
     expect(calls.some((c) => c.startsWith("file:"))).toBe(true);
     expect(calls).toContain("react eyes");
@@ -113,7 +113,7 @@ Recent tasks (newest first; what each found):
 
   it("a result becomes one short text, with no ids", async () => {
     const { t, calls } = tools();
-    const reply = await talk({ brief: BRIEF, channel: "imessage", thread: [{ role: "caller", text: "What's on my calendar tomorrow?" }, { role: "kloru", text: "Checking now, a few seconds." }], event: "<info>Tomorrow (Fri Oct 31): daycare drop-off 8 AM; Maya dentist 3 PM at Rockridge Kids Dental (event id e1).</info>", tools: t, timezone: "America/Los_Angeles" });
+    const reply = await talk({ brief: BRIEF, channel: "imessage", thread: [{ role: "caller", text: "What's on my calendar tomorrow?" }, { role: "kloru", text: "Checking now, a few seconds." }], event: "<info>Tomorrow (Fri Oct 31): daycare drop-off 8 AM; Nora dentist 3 PM at Maplewood Kids Dental (event id e1).</info>", tools: t, timezone: "America/Los_Angeles" });
     console.log(reply);
     expect(calls).toEqual([]);
     expect(reply).toMatch(/3/);
@@ -123,7 +123,7 @@ Recent tasks (newest first; what each found):
   it("an email result is as short as a text", async () => {
     const { t } = tools();
     delete t.react;
-    const reply = await talk({ brief: BRIEF, channel: "email", thread: [{ role: "caller", text: "What's on my calendar tomorrow?" }, { role: "kloru", text: "On it, a few seconds." }], event: "<info>Tomorrow (Fri Oct 31): daycare drop-off 8 AM; Maya dentist 3 PM at Rockridge Kids Dental; team sync 10 AM; Cara's flight lands 6:40 PM at OAK.</info>", tools: t, timezone: "America/Los_Angeles" });
+    const reply = await talk({ brief: BRIEF, channel: "email", thread: [{ role: "caller", text: "What's on my calendar tomorrow?" }, { role: "kloru", text: "On it, a few seconds." }], event: "<info>Tomorrow (Fri Oct 31): daycare drop-off 8 AM; Nora dentist 3 PM at Maplewood Kids Dental; team sync 10 AM; Cleo's flight lands 6:40 PM at OAK.</info>", tools: t, timezone: "America/Los_Angeles" });
     console.log(reply);
     expect(reply.length).toBeLessThan(220);
     expect(reply).not.toMatch(/^\s*[-*•]/m);
@@ -131,7 +131,7 @@ Recent tasks (newest first; what each found):
 
   it("'be more concise' is remembered, as Nov 1's thread should have been", async () => {
     const { t, calls } = tools();
-    const reply = await talk({ brief: BRIEF, channel: "imessage", thread: [{ role: "caller", text: "Is Uber good in Atlanta? I'd prefer that." }, { role: "kloru", text: "Yes, Uber is excellent in Atlanta. It's highly active, reliable, and usually much faster than rental car lines." }, { role: "caller", text: "Can you be more concise with all of your messages and writing?" }], tools: t, timezone: "America/Los_Angeles" });
+    const reply = await talk({ brief: BRIEF, channel: "imessage", thread: [{ role: "caller", text: "Is Uber good in Tucson? I'd prefer that." }, { role: "kloru", text: "Yes, Uber is excellent in Tucson. It's highly active, reliable, and usually much faster than rental car lines." }, { role: "caller", text: "Can you be more concise with all of your messages and writing?" }], tools: t, timezone: "America/Los_Angeles" });
     console.log(reply, calls);
     expect(calls.some((c) => /^remember: .*concise/i.test(c))).toBe(true);
     expect(reply.length).toBeLessThan(120);
@@ -139,7 +139,7 @@ Recent tasks (newest first; what each found):
 
   it("a clear yes confirms the draft it asked about", async () => {
     const { t, calls } = tools();
-    await talk({ brief: BRIEF, channel: "imessage", thread: [{ role: "caller", text: "Email Cara that I'll pick up Maya" }, { role: "kloru", text: "Needs your yes: email Cara \"I'll pick up Maya at 4:30.\" Send it?" }, { role: "caller", text: "Yes send it" }], pending: ['issue 7, draft ab12cd34: email Cara "I\'ll pick up Maya at 4:30."'], tools: t, timezone: "America/Los_Angeles" });
+    await talk({ brief: BRIEF, channel: "imessage", thread: [{ role: "caller", text: "Email Cleo that I'll pick up Nora" }, { role: "kloru", text: "Needs your yes: email Cleo \"I'll pick up Nora at 4:30.\" Send it?" }, { role: "caller", text: "Yes send it" }], pending: ['issue 7, draft ab12cd34: email Cleo "I\'ll pick up Nora at 4:30."'], tools: t, timezone: "America/Los_Angeles" });
     console.log(calls);
     expect(calls).toContain("confirm 7 ab12cd34");
   }, 60_000);

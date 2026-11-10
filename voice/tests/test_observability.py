@@ -146,7 +146,7 @@ def test_style_metrics_count_lines_that_mention_a_team():
 def test_style_metrics_count_lines_with_formatting_a_caller_cant_hear():
     lines = [
         "Caller: read me Friday",
-        "Kloru: Friday, October 30:\n- 7 AM: W14\n- 8 AM: Drop off Maya",
+        "Kloru: Friday, October 30:\n- 7 AM: W14\n- 8 AM: Drop off Nora",
         "Kloru: You may mean Docker's `sbx` sandbox command.",
         "Kloru: Friday you have three things: your shift at 7, drop-off at 8, and the party at 4.",
         "Kloru: It's on a page; the link is https://kloru.com/a/x",

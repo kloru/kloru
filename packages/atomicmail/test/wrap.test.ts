@@ -107,8 +107,8 @@ describe("describeCall", () => {
     expect(text).not.toContain("private");
   });
   it("joins several recipients and clips long lines", () => {
-    expect(describeCall("send_email", { to: ["a@x.io", "b@x.io"], subject: "S" })).toBe("send_email to a@x.io, b@x.io: S");
-    expect(describeCall("send_email", { to: "a@x.io", subject: "x".repeat(200) }).length).toBeLessThan(120);
+    expect(describeCall("send_email", { to: ["a@x.example", "b@x.example"], subject: "S" })).toBe("send_email to a@x.example, b@x.example: S");
+    expect(describeCall("send_email", { to: "a@x.example", subject: "x".repeat(200) }).length).toBeLessThan(120);
   });
   it("describes reads without bodies", () => {
     expect(describeCall("read_message", { message_id: "M1" })).toBe("read_message M1");
@@ -153,8 +153,8 @@ describe("wrapMcpTool execution", () => {
 
   it("drops agent_id even when the model sends one", async () => {
     const source = stubSource([]);
-    await run(wrapMcpTool(source, HOSTED.send_email!), { agent_id: "someone-elses-inbox", to: "a@x.io", subject: "S", body: "B" });
-    expect(source.calls[0]?.[1]).toEqual({ to: "a@x.io", subject: "S", body: "B" });
+    await run(wrapMcpTool(source, HOSTED.send_email!), { agent_id: "someone-elses-inbox", to: "a@x.example", subject: "S", body: "B" });
+    expect(source.calls[0]?.[1]).toEqual({ to: "a@x.example", subject: "S", body: "B" });
   });
 
   it("wraps what a read returns as untrusted data", async () => {
@@ -180,7 +180,7 @@ describe("wrapMcpTool execution", () => {
 
   it("does not wrap the result of a send", async () => {
     const source = stubSource([], { content: [{ type: "text", text: "sent" }] });
-    const out = textOf(await run(wrapMcpTool(source, HOSTED.send_email!), { to: "a@x.io", subject: "S", body: "B" }));
+    const out = textOf(await run(wrapMcpTool(source, HOSTED.send_email!), { to: "a@x.example", subject: "S", body: "B" }));
     expect(out).toBe("sent");
   });
 

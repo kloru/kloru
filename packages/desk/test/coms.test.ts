@@ -41,7 +41,7 @@ const settle = async (ms = 60) => {
   const end = Date.now() + ms;
   while (Date.now() < end) await new Promise((r) => setTimeout(r, 5));
 };
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 
 function setup(o: { decide?: (c: MessageCheck) => Promise<MessageDecision>; send?: (n: Notice) => Promise<boolean | NoticeChannel>; decideAction?: (c: ActionCheck) => Promise<never>; media?: MediaStore; root?: string; checkDraft?: DeskOptions["checkDraft"] } = {}) {
   const host = new Host();
@@ -59,17 +59,17 @@ function setup(o: { decide?: (c: MessageCheck) => Promise<MessageDecision>; send
     announceMs: 20,
     channelsFor: () => ["imessage", "email"],
     guidelines: () => "Text me short updates.",
-    ownEmails: () => ["evan@work.example.com", "evan@personal.example.com"],
+    ownEmails: () => ["ezra@work.example.com", "ezra@personal.example.com"],
     decideMessage: async (c) => (checks.push(c), (o.decide ?? (async () => ({ action: "send", channel: "imessage", p: 0.9 })))(c)),
     ...(o.decideAction ? { decideAction: o.decideAction } : {}),
     ...(o.media ? { media: o.media } : {}),
-    ownerPhone: EVAN,
+    ownerPhone: EZRA,
   });
   return { host, pm, desk, sent, checks };
 }
 
 async function issueOnCall(desk: Desk, request: string) {
-  const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+  const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
   desk.addTurn(call.id, { role: "caller", text: request });
   const issue = desk.fileIssue(call.id, request);
   await settle(20);
@@ -87,7 +87,7 @@ describe("send_to_caller passes the message check", () => {
     expect(checks[0]!.request).toContain("Text me the link");
     expect(checks[0]!.guidelines).toContain("Text me short updates.");
     const entry = desk.repo.ledger(issue.id).find((e) => e.slug === "MESSAGE")!;
-    expect(entry).toMatchObject({ ok: true, decision: "send", args: { to: EVAN, channel: "email", text: "Here's the link: https://example.com/gift" } });
+    expect(entry).toMatchObject({ ok: true, decision: "send", args: { to: EZRA, channel: "email", text: "Here's the link: https://example.com/gift" } });
   });
 
   it("the channel Jev picks is used unless the worker named one", async () => {
@@ -144,7 +144,7 @@ describe("send_to_caller passes the message check", () => {
 
 describe("sends from a connected account (Gmail, Outlook) pass the same check", () => {
   const toBoss = { recipient_email: "boss@work.example.com", subject: "Update", body: "Weekly update attached." };
-  const toMe = { recipient_email: "evan@personal.example.com", subject: "Bulky pickup", body: "Instructions: ..." };
+  const toMe = { recipient_email: "ezra@personal.example.com", subject: "Bulky pickup", body: "Instructions: ..." };
 
   async function role(desk: Desk, host: Host) {
     const { issue } = await issueOnCall(desk, "Email the update");
@@ -183,7 +183,7 @@ describe("sends from a connected account (Gmail, Outlook) pass the same check", 
     const { role: r } = await role(desk, host);
     await r.guard!("app_gmail_send_email", toMe);
     r.afterTool!("app_gmail_send_email", toMe, false, [{ type: "text", text: "sent, id 19a" }]);
-    expect(desk.recentMessages(EVAN).join("\n")).toContain("Bulky pickup");
+    expect(desk.recentMessages(EZRA).join("\n")).toContain("Bulky pickup");
   });
 });
 
@@ -191,11 +191,11 @@ describe("sending a saved draft is checked against what the draft says (#135)", 
   it("the check sees the draft's recipient and words, found from when it was created", async () => {
     const { desk, host, checks } = setup();
     const { issue } = await issueOnCall(desk, "Email Anthony that I want the $5M coverage");
-    desk.repo.appendLedger({ issue: issue.id, call: issue.filedBy.call, phone: EVAN, tool: "app_composio_multi_execute_tool", slug: "GMAIL_CREATE_EMAIL_DRAFT", args: { recipient_email: "anthony_george@pacificadvisors.com", subject: "Re: Life Insurance", body: "I'd like to proceed with $5 million in coverage." }, ok: true, result: '{"data":{"id":"r3430256160071719656","message":{"labelIds":["DRAFT"]}}}' });
+    desk.repo.appendLedger({ issue: issue.id, call: issue.filedBy.call, phone: EZRA, tool: "app_composio_multi_execute_tool", slug: "GMAIL_CREATE_EMAIL_DRAFT", args: { recipient_email: "jordan_kim@advisors.example", subject: "Re: Life Insurance", body: "I'd like to proceed with $5 million in coverage." }, ok: true, result: '{"data":{"id":"r3430256160071719656","message":{"labelIds":["DRAFT"]}}}' });
     const r = host.last(issue.id).role;
     await r.guard!("app_gmail_send_draft", { user_id: "me", draft_id: "r3430256160071719656" });
     expect(checks[0]).toMatchObject({ toCaller: false, action: "GMAIL_SEND_DRAFT" });
-    expect(checks[0]!.to).toContain("anthony_george@pacificadvisors.com");
+    expect(checks[0]!.to).toContain("jordan_kim@advisors.example");
     expect(checks[0]!.text).toContain("$5 million");
   });
 
@@ -237,7 +237,7 @@ describe("after the call: a message only when something asked for got done and w
   it("nothing when the call heard everything", async () => {
     const { desk, host, pm } = setup();
     const { call, issue } = await issueOnCall(desk, "Find a dentist");
-    host.last(issue.id).finish("Rockridge Kids Dental.");
+    host.last(issue.id).finish("Maplewood Kids Dental.");
     await settle(40);
     desk.ack(call.id, desk.repo.inbox(call.id, 0).at(-1)!.seq);
     desk.endCall(call.id);
@@ -253,12 +253,12 @@ describe("after the call: a message only when something asked for got done and w
     (desk as unknown as { scheduleNotice(id: string): void }).scheduleNotice(call.id);
     await settle(150);
     expect(pm.seen.some((x) => x.kind === "unheard")).toBe(false);
-    expect(desk.startCall({ callSid: "CA2", phone: EVAN, channel: "voice" }).pending).toBe(1);
+    expect(desk.startCall({ callSid: "CA2", phone: EZRA, channel: "voice" }).pending).toBe(1);
   });
 
   it("a call where nothing was asked wakes no one", async () => {
     const { desk, pm } = setup();
-    const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
     desk.endCall(call.id);
     await settle(150);
     expect(pm.seen.some((x) => x.kind === "unheard")).toBe(false);
@@ -272,7 +272,7 @@ describe("after the call: a message only when something asked for got done and w
     await settle(150);
     const r = await desk.tellCaller(call.id, "I moved your dentist to Friday at 3.");
     expect(r.ok).toBe(true);
-    expect(sent).toEqual([expect.objectContaining({ phone: EVAN, text: "I moved your dentist to Friday at 3.", channel: "imessage" })]);
+    expect(sent).toEqual([expect.objectContaining({ phone: EZRA, text: "I moved your dentist to Friday at 3.", channel: "imessage" })]);
     expect(checks.at(-1)).toMatchObject({ toCaller: true, from: "pm" });
     expect(desk.repo.undelivered(call.id)).toEqual([]);
   });
@@ -294,7 +294,7 @@ describe("the message history is the ledger", () => {
     const { desk } = setup();
     const { issue } = await issueOnCall(desk, "Text me");
     await desk.messageCaller(issue.id, "Hello.");
-    expect(desk.repo.notifications(EVAN)).toMatchObject([{ phone: EVAN, channel: "imessage", text: "Hello.", issues: [issue.id] }]);
+    expect(desk.repo.notifications(EZRA)).toMatchObject([{ phone: EZRA, channel: "imessage", text: "Hello.", issues: [issue.id] }]);
   });
 });
 
@@ -328,7 +328,7 @@ describe("'text' is the iMessage channel", () => {
 describe("replies come back in the conversation's channel (text first)", () => {
   async function onChannel(channel: string, o: Parameters<typeof setup>[0] = {}) {
     const s = setup(o);
-    const { call } = s.desk.startCall({ callSid: `${channel}:1`, phone: EVAN, channel });
+    const { call } = s.desk.startCall({ callSid: `${channel}:1`, phone: EZRA, channel });
     s.desk.addTurn(call.id, { role: "caller", text: "Can you give me the links for these flights?" });
     const issue = s.desk.fileIssue(call.id, "Give me the links for these flights");
     await settle(20);
@@ -352,7 +352,7 @@ describe("replies come back in the conversation's channel (text first)", () => {
 
   it("text_instead: an email to the caller from a text thread is stopped, and the worker is told to text it", async () => {
     const t = await onChannel("imessage", { decide: async () => ({ action: "text_instead", p: 0.8 }) });
-    const r = await t.host.last(t.issue.id).role.guard!("app_gmail_send_email", { recipient_email: "evan@personal.example.com", subject: "Flight links", body: "Delta 2:08 PM: https://delta.com/x" });
+    const r = await t.host.last(t.issue.id).role.guard!("app_gmail_send_email", { recipient_email: "ezra@personal.example.com", subject: "Flight links", body: "Delta 2:08 PM: https://delta.com/x" });
     expect(r).toMatchObject({ block: true, reason: expect.stringMatching(/send_to_caller/) });
     expect(t.desk.repo.ledger(t.issue.id).at(-1)).toMatchObject({ decision: "text_instead", ok: false });
   });
@@ -377,7 +377,7 @@ describe("replies come back in the conversation's channel (text first)", () => {
 
 describe("one outbox: the text talker's messages pass the same check (#37)", () => {
   async function thread(desk: Desk) {
-    const { call } = desk.startCall({ callSid: "imessage:evt_1", phone: EVAN, channel: "imessage" });
+    const { call } = desk.startCall({ callSid: "imessage:evt_1", phone: EZRA, channel: "imessage" });
     desk.addTurn(call.id, { role: "caller", text: "What's the link to the parking at SFO?" });
     return call;
   }
@@ -391,7 +391,7 @@ describe("one outbox: the text talker's messages pass the same check (#37)", () 
     expect(out).toEqual(["On it."]);
     expect(checks.at(-1)).toMatchObject({ from: "talker", toCaller: true, channels: ["imessage"], replyingTo: "What's the link to the parking at SFO?", conversation: "imessage" });
     expect(desk.repo.turns(call.id, 0).at(-1)).toMatchObject({ role: "kloru", text: "On it." });
-    expect(desk.recentMessages(EVAN).at(-1)).toMatch(/sent \(imessage to \+14155550190\): On it\./);
+    expect(desk.recentMessages(EZRA).at(-1)).toMatch(/sent \(imessage to \+14155550190\): On it\./);
   });
 
   it("drop and hold: nothing goes out, no turn, and the ledger keeps it", async () => {
@@ -403,7 +403,7 @@ describe("one outbox: the text talker's messages pass the same check (#37)", () 
       expect(r).toBe(action === "drop" ? "dropped" : "held");
       expect(out).toEqual([]);
       expect(desk.repo.turns(call.id, 0).map((t) => t.role)).toEqual(["caller"]);
-      expect(desk.recentMessages(EVAN).at(-1)).toMatch(new RegExp(`${action === "drop" ? "dropped" : "held"}, never sent \\(imessage`));
+      expect(desk.recentMessages(EZRA).at(-1)).toMatch(new RegExp(`${action === "drop" ? "dropped" : "held"}, never sent \\(imessage`));
     }
   });
 
@@ -446,7 +446,7 @@ describe("one outbox: the text talker's messages pass the same check (#37)", () 
     const call = await thread(desk);
     expect(await desk.sendInConversation(call.id, { text: "On it.", send: async () => false })).toBe("failed");
     expect(desk.repo.turns(call.id, 0).map((t) => t.role)).toEqual(["caller"]);
-    expect(desk.recentMessages(EVAN).at(-1)).toMatch(/failed, never sent \(imessage/);
+    expect(desk.recentMessages(EZRA).at(-1)).toMatch(/failed, never sent \(imessage/);
   });
 
   it("a page whose link went out counts as told, so the after-conversation note doesn't send it again", async () => {
@@ -460,11 +460,11 @@ describe("one outbox: the text talker's messages pass the same check (#37)", () 
   });
 });
 
-describe("a worker's text lands in the person's text thread (#37, Cara's wrong link)", () => {
+describe("a worker's text lands in the person's text thread (#37, Cleo's wrong link)", () => {
   it("sent by iMessage while their text thread is open: it's a turn there, so the talker knows it", async () => {
     const { desk } = setup({ send: async () => "imessage" });
     const { issue } = await issueOnCall(desk, "Make a shared to-do list and text me the link");
-    const { call: textThread } = desk.startCall({ callSid: "imessage:evt_2", phone: EVAN, channel: "imessage" });
+    const { call: textThread } = desk.startCall({ callSid: "imessage:evt_2", phone: EZRA, channel: "imessage" });
     const r = await desk.messageCaller(issue.id, "Here's your shared to-do list: https://kloru.com/a/todo");
     expect(r.ok).toBe(true);
     expect(desk.repo.turns(textThread.id, 0).at(-1)).toMatchObject({ role: "kloru", text: "Here's your shared to-do list: https://kloru.com/a/todo" });
@@ -486,7 +486,7 @@ describe("a result handed to another conversation carries its links (#37)", () =
     const page = desk.publishArtifact(issue.id, "Shared to-do list", "- taxes");
     if (!page.ok) throw new Error(page.error);
     desk.endCall(call.id);
-    const { call: textThread } = desk.startCall({ callSid: "imessage:evt_3", phone: EVAN, channel: "imessage" });
+    const { call: textThread } = desk.startCall({ callSid: "imessage:evt_3", phone: EZRA, channel: "imessage" });
     desk.resolve(issue.id, "I have texted you the link to the shared to-do list.");
     const got = desk.repo.inbox(textThread.id, 0).at(-1)!;
     expect(got.text).toContain(page.value.url);
@@ -505,18 +505,18 @@ describe("a result handed to another conversation carries its links (#37)", () =
 describe("one outbox review fixes", () => {
   it("a text reply is never recorded on an issue, so it never counts as a change an ops issue made", async () => {
     const { desk } = setup();
-    const { call } = desk.startCall({ callSid: "imessage:evt_9", phone: EVAN, channel: "imessage" });
-    desk.addTurn(call.id, { role: "caller", text: "Add Cara to the family" });
-    const issue = desk.fileIssue(call.id, "Add Cara to the family");
-    await desk.sendInConversation(call.id, { text: "On it.", replyingTo: "Add Cara to the family", send: async () => true });
-    await desk.sendInConversation(call.id, { text: "Cara's added.", issues: [issue.id], send: async () => true });
+    const { call } = desk.startCall({ callSid: "imessage:evt_9", phone: EZRA, channel: "imessage" });
+    desk.addTurn(call.id, { role: "caller", text: "Add Cleo to the family" });
+    const issue = desk.fileIssue(call.id, "Add Cleo to the family");
+    await desk.sendInConversation(call.id, { text: "On it.", replyingTo: "Add Cleo to the family", send: async () => true });
+    await desk.sendInConversation(call.id, { text: "Cleo's added.", issues: [issue.id], send: async () => true });
     expect(desk.repo.ledger(issue.id)).toEqual([]);
-    expect(desk.recentMessages(EVAN)).toHaveLength(2);
+    expect(desk.recentMessages(EZRA)).toHaveLength(2);
   });
 
   it("a direct reply Jev would hold is sent: they're waiting for it", async () => {
     const { desk } = setup({ decide: async () => ({ action: "hold", p: 0.9 }) });
-    const { call } = desk.startCall({ callSid: "imessage:evt_10", phone: EVAN, channel: "imessage" });
+    const { call } = desk.startCall({ callSid: "imessage:evt_10", phone: EZRA, channel: "imessage" });
     expect(await desk.sendInConversation(call.id, { text: "On it.", replyingTo: "Find SFO parking", send: async () => true })).toBe("sent");
   });
 
@@ -528,7 +528,7 @@ describe("one outbox review fixes", () => {
     if (!told.ok || !fresh.ok) throw new Error("publish failed");
     desk.repo.saveArtifact({ ...desk.repo.artifact(told.value.id)!, emailedAt: new Date().toISOString() });
     desk.endCall(call.id);
-    const { call: textThread } = desk.startCall({ callSid: "imessage:evt_11", phone: EVAN, channel: "imessage" });
+    const { call: textThread } = desk.startCall({ callSid: "imessage:evt_11", phone: EZRA, channel: "imessage" });
     desk.resolve(issue.id, "Done.");
     const got = desk.repo.inbox(textThread.id, 0).at(-1)!.text;
     expect(got).toContain(fresh.value.url);
@@ -538,12 +538,12 @@ describe("one outbox review fixes", () => {
 
 describe("a message can carry photos", () => {
   const PNG = Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64"));
-  const CARA = "+14155550191";
+  const CLEO = "+14155550191";
   const store = () => new MediaStore(mkdtempSync(join(tmpdir(), "coms-media-")));
 
   it("a worker sends the caller their photo: checked with it in view, attached, and recorded", async () => {
     const media = store();
-    const photo = media.put(PNG, { mime: "image/png", name: "receipt.png", phone: EVAN });
+    const photo = media.put(PNG, { mime: "image/png", name: "receipt.png", phone: EZRA });
     const { desk, sent, checks } = setup({ media });
     const { issue } = await issueOnCall(desk, "Text me that receipt");
     const r = await desk.messageCaller(issue.id, "Here's the receipt.", undefined, undefined, [photo.id]);
@@ -556,12 +556,12 @@ describe("a message can carry photos", () => {
 
   it("someone else's photo isn't sent, and says why", async () => {
     const media = store();
-    const hers = media.put(PNG, { mime: "image/png", name: "cara.png", phone: CARA });
+    const hers = media.put(PNG, { mime: "image/png", name: "cleo.png", phone: CLEO });
     const { desk, sent } = setup({ media });
-    const { call } = desk.startCall({ callSid: "CA2", phone: CARA, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA2", phone: CLEO, channel: "voice" });
     const issue = desk.fileIssue(call.id, "Text me the photo");
     await settle(20);
-    const mine = media.put(Uint8Array.from([...PNG, 0]), { mime: "image/png", name: "evan.png", phone: EVAN });
+    const mine = media.put(Uint8Array.from([...PNG, 0]), { mime: "image/png", name: "ezra.png", phone: EZRA });
     const r = await desk.messageCaller(issue.id, "Here it is.", undefined, undefined, [mine.id]);
     expect(r.ok ? "" : r.error).toMatch(new RegExp(`${mine.id.replace(".", "\\.")} isn't theirs`));
     expect((await desk.messageCaller(issue.id, "Here it is.", undefined, undefined, [hers.id])).ok).toBe(true);
@@ -578,7 +578,7 @@ describe("a message can carry photos", () => {
 
   it("a held message with a photo sends nothing; the ledger keeps the photo's id", async () => {
     const media = store();
-    const photo = media.put(PNG, { mime: "image/png", name: "receipt.png", phone: EVAN });
+    const photo = media.put(PNG, { mime: "image/png", name: "receipt.png", phone: EZRA });
     const { desk, sent } = setup({ media, decide: async () => ({ action: "hold", p: 0.9 }) });
     const { issue } = await issueOnCall(desk, "Text me that receipt");
     const r = await desk.messageCaller(issue.id, "Here's the receipt.", undefined, undefined, [photo.id]);
@@ -616,7 +616,7 @@ describe("Nov 2: the laundry-basket thread's lost results", () => {
     await desk.messageCaller(issue.id, `Here they are: ${page.value.url}`);
     expect(checks.at(-1)!.changedPages ?? []).toEqual([]);
     await settle(10);
-    desk.updateArtifact(page.value.id, { append: "- Two" }, { issue: issue.id, phone: EVAN });
+    desk.updateArtifact(page.value.id, { append: "- Two" }, { issue: issue.id, phone: EZRA });
     await desk.messageCaller(issue.id, `I added more: ${page.value.url}`);
     expect(checks.at(-1)!.changedPages).toEqual(["Laundry baskets"]);
   });
@@ -626,14 +626,14 @@ describe("a worker's draft that doesn't fit goes back once (2026-11-03)", () => 
   it("the first draft is sent back with the reason; the rewrite goes on to the send check", async () => {
     const drafts: string[] = [];
     const s = setup({ checkDraft: async (d) => (drafts.push(d.draft), d.draft.length > 30 ? { fits: false, why: "Too long for them: make it shorter." } : { fits: true }) });
-    const { call } = s.desk.startCall({ callSid: "voice:1", phone: EVAN, channel: "voice" });
+    const { call } = s.desk.startCall({ callSid: "voice:1", phone: EZRA, channel: "voice" });
     s.desk.addTurn(call.id, { role: "caller", text: "Find a dentist near us" });
     const t = { desk: s.desk, issue: s.desk.fileIssue(call.id, "Find a dentist near us") };
     await settle(20);
     const first = await t.desk.messageCaller(t.issue.id, "Here's everything I found about the dentists near you, with all the details.");
     expect(first.ok).toBe(false);
     if (!first.ok) expect(first.error).toBe("Not sent yet: redraft it. Too long for them: make it shorter. Then send the new version the same way.");
-    expect((await t.desk.messageCaller(t.issue.id, "Rockridge Kids Dental, Thu 4 PM.")).ok).toBe(true);
+    expect((await t.desk.messageCaller(t.issue.id, "Maplewood Kids Dental, Thu 4 PM.")).ok).toBe(true);
     expect(drafts).toHaveLength(1);
   });
 });

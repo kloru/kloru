@@ -35,7 +35,7 @@ const settle = async (ms = 60) => {
   const end = Date.now() + ms;
   while (Date.now() < end) await new Promise((r) => setTimeout(r, 5));
 };
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 const ctx = (key: string) => ({ conversationKey: key }) as never;
 
 function setup() {
@@ -44,8 +44,8 @@ function setup() {
   const root = mkdtempSync(join(tmpdir(), "artifacts-"));
   const desk = new Desk({ root, host, planner: new PM(), artifactBaseUrl: "https://kloru.com/a/", notify: async (n) => (sent.push(n), true), notifyDelayMs: 20, notifyWaitMs: 300 });
   const [publish] = artifactTools(desk);
-  const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
-  const issue = desk.fileIssue(call.id, "Compare pediatric dentists near Rockridge");
+  const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
+  const issue = desk.fileIssue(call.id, "Compare pediatric dentists near Maplewood");
   desk.assign(issue.id, "work", "Compare them", []);
   return { host, desk, publish: publish!, call, issue, sent, root };
 }
@@ -55,11 +55,11 @@ const text = (r: unknown) => (r as { content: Array<{ text: string }> }).content
 describe("publishing an artifact", () => {
   it("a worker publishes a page from its own issue and gets a link to put in its result", async () => {
     const { desk, publish, issue, call } = setup();
-    const out = await publish.spec.execute({ title: "Pediatric dentists near Rockridge", markdown: "| Name | Stars |\n|---|---|\n| Rockridge Kids | 4.9 |" }, ctx(`desk:issue:${issue.id}:engineer`));
+    const out = await publish.spec.execute({ title: "Pediatric dentists near Maplewood", markdown: "| Name | Stars |\n|---|---|\n| Maplewood Kids | 4.9 |" }, ctx(`desk:issue:${issue.id}:engineer`));
     const url = /https:\/\/kloru\.com\/a\/([\w-]+)/.exec(text(out))![1]!;
     expect(url.length).toBeGreaterThanOrEqual(22);
     const a = desk.repo.artifact(url)!;
-    expect(a).toMatchObject({ title: "Pediatric dentists near Rockridge", issue: issue.id, call: call.id, phone: EVAN });
+    expect(a).toMatchObject({ title: "Pediatric dentists near Maplewood", issue: issue.id, call: call.id, phone: EZRA });
     expect(desk.repo.issue(issue.id)!.thread.at(-1)!.text).toContain(`https://kloru.com/a/${url}`);
   });
 
@@ -80,14 +80,14 @@ describe("publishing an artifact", () => {
 
   it("a page's link reaches the caller by email even when the result was spoken on the call", async () => {
     const { host, desk, publish, issue, call, sent } = setup();
-    await publish.spec.execute({ title: "Pediatric dentists near Rockridge", markdown: "x" }, ctx(`desk:issue:${issue.id}:engineer`));
+    await publish.spec.execute({ title: "Pediatric dentists near Maplewood", markdown: "x" }, ctx(`desk:issue:${issue.id}:engineer`));
     host.last(issue.id).finish("Compared three; page published.");
     await settle(30);
     desk.repo.ack(call.id, desk.repo.inbox(call.id, 0).at(-1)!.seq); // spoken on the call
     desk.endCall(call.id);
     await settle(150);
     expect(sent).toHaveLength(1);
-    expect(sent[0]!.text).toMatch(/Pediatric dentists near Rockridge: https:\/\/kloru\.com\/a\/[\w-]{22}/);
+    expect(sent[0]!.text).toMatch(/Pediatric dentists near Maplewood: https:\/\/kloru\.com\/a\/[\w-]{22}/);
     desk.endCall(call.id);
     await settle(100);
     expect(sent).toHaveLength(1); // each page is emailed once

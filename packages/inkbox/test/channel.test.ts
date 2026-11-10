@@ -129,9 +129,9 @@ describe("InkboxChannel routing", () => {
   });
 
   it("starts a new email with a plain subject", async () => {
-    await channel().send({ channel: "email", to: ["a@b.co", "c@d.co"], text: "Hello" }, ctx("chat:x"));
+    await channel().send({ channel: "email", to: ["a@b.example", "c@d.example"], text: "Hello" }, ctx("chat:x"));
     const post = sends("/api/v1/mail/mailboxes/maria-instinct@inkbox.ai/messages")[0];
-    expect(post?.body).toEqual({ recipients: { to: ["a@b.co", "c@d.co"] }, subject: "Message from Kloru", body_text: "Hello" });
+    expect(post?.body).toEqual({ recipients: { to: ["a@b.example", "c@d.example"] }, subject: "Message from Kloru", body_text: "Hello" });
   });
 
   it("answers an A2A task with text and data parts", async () => {
@@ -294,7 +294,7 @@ describe("InkboxChannel.sendFile", () => {
     await expect(ch.sendFile({ channel: "imessage", conversationKey: "imessage:conv_1", filename: "big.bin", contentType: "application/octet-stream", content: big }, ctx("imessage:conv_1"))).rejects.toThrow(/10\.0 MiB.*email/);
     await expect(ch.sendFile({ channel: "sms", to: "+14155550100", filename: "big.bin", contentType: "application/octet-stream", content: big }, ctx("chat:x"))).rejects.toThrow(/SMS attachments are capped/);
     const huge = Buffer.alloc(25 * 1024 * 1024 + 1);
-    await expect(ch.sendFile({ channel: "email", to: "a@b.co", filename: "huge.bin", contentType: "application/octet-stream", content: huge }, ctx("chat:x"))).rejects.toThrow(/email attachments are capped/);
+    await expect(ch.sendFile({ channel: "email", to: "a@b.example", filename: "huge.bin", contentType: "application/octet-stream", content: huge }, ctx("chat:x"))).rejects.toThrow(/email attachments are capped/);
     expect(sends("/api/v1/imessage/media")).toHaveLength(0);
     expect(sends("/api/v1/mail/mailboxes/maria-instinct@inkbox.ai/messages")).toHaveLength(0);
   });
@@ -304,7 +304,7 @@ describe("InkboxChannel phone calls", () => {
   const callRow = (over: Record<string, unknown> = {}) => ({
     id: "call_1",
     local_phone_number: null,
-    remote_phone_number: "+14152609174",
+    remote_phone_number: "+14155550174",
     direction: "outbound",
     status: "initiated",
     client_websocket_url: null,
@@ -329,10 +329,10 @@ describe("InkboxChannel phone calls", () => {
   it("places a Voice AI call from the shared iMessage pool by default, leaving a voicemail message", async () => {
     fake = fakeFetch({ ...sdkRoutes({ imessage_number: null }), "POST /api/v1/phone/place-call": { body: callRow() } });
     vi.stubGlobal("fetch", fake.fetchImpl);
-    const out = await channel().placeCall({ toNumber: "+14152609174", reason: "Say hi", voicemailMessage: "Maria says hi." });
+    const out = await channel().placeCall({ toNumber: "+14155550174", reason: "Say hi", voicemailMessage: "Maria says hi." });
     expect(out).toEqual({ id: "call_1", status: "initiated", origination: "shared_imessage_number", minutesRemaining: 27 });
     expect(sends("/api/v1/phone/place-call")[0]?.body).toEqual({
-      to_number: "+14152609174",
+      to_number: "+14155550174",
       origination: "shared_imessage_number",
       mode: "hosted_agent",
       // Pinned on every call, so an org-level "yolo" authority never widens what Voice AI may do.
@@ -349,17 +349,17 @@ describe("InkboxChannel phone calls", () => {
     fake = fakeFetch({ ...sdkRoutes({ imessage_number: dedicated }), "POST /api/v1/phone/place-call": (req: Recorded) => ({ body: callRow({ origin: (req.body as { origination: string }).origination }) }) });
     vi.stubGlobal("fetch", fake.fetchImpl);
     const ch = channel();
-    expect((await ch.placeCall({ toNumber: "+14152609174", reason: "Say hi" })).origination).toBe("dedicated_imessage_number");
+    expect((await ch.placeCall({ toNumber: "+14155550174", reason: "Say hi" })).origination).toBe("dedicated_imessage_number");
     expect(sends("/api/v1/phone/place-call")[0]?.body).toMatchObject({ origination: "dedicated_imessage_number", agent_identity_id: "ident_1" });
     expect((sends("/api/v1/phone/place-call")[0]?.body as Record<string, unknown>).from_number).toBeUndefined();
-    await ch.placeCall({ toNumber: "+14152609174", reason: "Say hi", origination: "dedicated_number" });
+    await ch.placeCall({ toNumber: "+14155550174", reason: "Say hi", origination: "dedicated_number" });
     expect(sends("/api/v1/phone/place-call")[1]?.body).toMatchObject({ origination: "dedicated_number", from_number: "+16505550123", hosted_agent_authority_mode: "contact_scoped" });
   });
 
   it("refuses dedicated_number on an identity without a phone number", async () => {
     fake = fakeFetch(sdkRoutes({ phone_number: null }));
     vi.stubGlobal("fetch", fake.fetchImpl);
-    await expect(channel().placeCall({ toNumber: "+14152609174", reason: "Say hi", origination: "dedicated_number" })).rejects.toThrow(/no dedicated phone number/);
+    await expect(channel().placeCall({ toNumber: "+14155550174", reason: "Say hi", origination: "dedicated_number" })).rejects.toThrow(/no dedicated phone number/);
     expect(sends("/api/v1/phone/place-call")).toHaveLength(0);
   });
 

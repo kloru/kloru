@@ -7,7 +7,7 @@ import { Desk, type Planner, type Trigger, type WorkerHost } from "../src/desk.j
 import { Memory } from "../src/memory.js";
 import { memoryTools } from "../src/memory-tools.js";
 
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 
 class Host implements WorkerHost {
   runs: Array<{ issue: number; role: WorkerRole; prompt: string; phone?: string; finish: (t: string) => void; fail: (e: Error) => void }> = [];
@@ -26,7 +26,7 @@ const settle = async () => {
 
 function setup(legacy = "") {
   const root = mkdtempSync(join(tmpdir(), "desk-mem-"));
-  const memory = new Memory(join(root, "memory"), { owner: { name: "Evan Marshall", phones: [EVAN] } });
+  const memory = new Memory(join(root, "memory"), { owner: { name: "Ezra Vega", phones: [EZRA] } });
   memory.init();
   const host = new Host();
   const triggers: Trigger[] = [];
@@ -37,11 +37,11 @@ function setup(legacy = "") {
 
 const tool = (name: string) => memoryTools(new Memory("/nonexistent", { owner: { name: "x", phones: [] } })).find((t) => t.spec.name === name)!;
 
-function talk(desk: Desk, text = "Pick up Maya from daycare at 4:30") {
-  const { call } = desk.startCall({ callSid: `CA${Math.random()}`, phone: EVAN, channel: "voice" });
+function talk(desk: Desk, text = "Pick up Nora from daycare at 4:30") {
+  const { call } = desk.startCall({ callSid: `CA${Math.random()}`, phone: EZRA, channel: "voice" });
   desk.addTurn(call.id, { role: "caller", text });
-  desk.addTurn(call.id, { role: "kloru", text: "Sure. How old is Maya?" });
-  desk.addTurn(call.id, { role: "caller", text: "She's three, at Little Oaks." });
+  desk.addTurn(call.id, { role: "kloru", text: "Sure. How old is Nora?" });
+  desk.addTurn(call.id, { role: "caller", text: "She's three, at Little Pines." });
   return call;
 }
 
@@ -56,7 +56,7 @@ describe("memory after every call", () => {
     const run = host.runs.at(-1)!;
     expect(run.role.name).toBe("memory");
     expect(run.phone).toBeUndefined(); // household memory is written as the owner, whoever called
-    expect(run.prompt).toContain("She's three, at Little Oaks.");
+    expect(run.prompt).toContain("She's three, at Little Pines.");
     expect(triggers).toEqual([]); // the PM isn't involved
     expect(desk.openIssues()).toEqual([]); // nor is the talking model
   });
@@ -66,17 +66,17 @@ describe("memory after every call", () => {
     const call = talk(desk);
     desk.endCall(call.id);
     await settle();
-    memory.save("household/people/maya.md", "---\nid: maya\ntype: person\n---\n- Evan's daughter, 3\n");
-    host.runs.at(-1)!.finish("Added Maya.");
+    memory.save("household/people/nora.md", "---\nid: nora\ntype: person\n---\n- Ezra's daughter, 3\n");
+    host.runs.at(-1)!.finish("Added Nora.");
     await settle();
     const issue = desk.repo.issues((i) => i.purpose === "memory")[0]!;
     expect(issue.status).toBe("done");
     const [entry] = desk.repo.ledger(issue.id);
     expect(entry).toMatchObject({ slug: "MEMORY_COMMIT", ok: true });
-    expect(memory.open("household/people/maya.md")).toBeDefined();
+    expect(memory.open("household/people/nora.md")).toBeDefined();
     const undo = desk.fileOps({ spec: "Undo that memory change", resources: [], reverts: issue.id });
     expect(undo.ok).toBe(true);
-    expect(memory.open("household/people/maya.md")).toBeUndefined();
+    expect(memory.open("household/people/nora.md")).toBeUndefined();
     expect(desk.repo.issue(issue.id)!.status).toBe("reverted");
   });
 
@@ -109,7 +109,7 @@ describe("memory after every call", () => {
 
   it("a call where the caller said nothing files no memory issue, and each call files one at most", async () => {
     const { desk } = setup();
-    const { call } = desk.startCall({ callSid: "CA0", phone: EVAN, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA0", phone: EZRA, channel: "voice" });
     desk.endCall(call.id);
     const c = talk(desk);
     desk.endCall(c.id);
@@ -120,7 +120,7 @@ describe("memory after every call", () => {
   it("'remember that…' during a call reaches the memory worker as a note", async () => {
     const { desk, host } = setup();
     const call = talk(desk);
-    desk.noteForMemory(call.id, "Maya is allergic to peanuts");
+    desk.noteForMemory(call.id, "Nora is allergic to peanuts");
     desk.endCall(call.id);
     await settle();
     expect(host.runs.at(-1)!.prompt).toContain("allergic to peanuts");
@@ -130,27 +130,27 @@ describe("memory after every call", () => {
 describe("the brief", () => {
   it("startCall returns what Kloru knows, before the first word", () => {
     const { desk, memory } = setup();
-    memory.save("household/people/maya.md", "---\nid: maya\ntype: person\n---\n- Evan's daughter, 3\n");
+    memory.save("household/people/nora.md", "---\nid: nora\ntype: person\n---\n- Ezra's daughter, 3\n");
     memory.commit("x");
-    const out = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
-    expect(out.brief).toContain("Maya");
-    expect(out.brief).toContain("Evan Marshall");
+    const out = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
+    expect(out.brief).toContain("Nora");
+    expect(out.brief).toContain("Ezra Vega");
   });
 
   it("the brief includes what this phone's last call asked for", () => {
     const { desk } = setup();
-    const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
     desk.addTurn(call.id, { role: "caller", text: "Find us a pediatric dentist" });
-    desk.fileIssue(call.id, "Find a pediatric dentist near Rockridge");
+    desk.fileIssue(call.id, "Find a pediatric dentist near Maplewood");
     desk.endCall(call.id);
-    const empty = desk.startCall({ callSid: "CA-hangup", phone: EVAN, channel: "voice" }).call; // said nothing
+    const empty = desk.startCall({ callSid: "CA-hangup", phone: EZRA, channel: "voice" }).call; // said nothing
     desk.endCall(empty.id);
-    expect(desk.startCall({ callSid: "CA2", phone: EVAN, channel: "voice" }).brief).toContain("pediatric dentist");
+    expect(desk.startCall({ callSid: "CA2", phone: EZRA, channel: "voice" }).brief).toContain("pediatric dentist");
   });
 });
 
 describe("recent tasks", () => {
-  const CARA = "+14155550191";
+  const CLEO = "+14155550191";
   function finished(desk: Desk, phone: string, request: string, result: string, o: { daysAgo?: number; purpose?: "memory" } = {}) {
     const { call } = desk.startCall({ callSid: `CA${Math.random()}`, phone, channel: "voice" });
     desk.addTurn(call.id, { role: "caller", text: request });
@@ -167,12 +167,12 @@ describe("recent tasks", () => {
 
   it("the brief lists the caller's tasks from the last week with what each found, newest first, from every call", () => {
     const { desk } = setup();
-    finished(desk, EVAN, "Find passion fruit chocolates", "Done. I emailed three bonbon links from Casa de Chocolates.");
-    finished(desk, EVAN, "Look up Oakland bulky-item pickup", "Done. I emailed the Oakland bulky-item pickup instructions.");
-    finished(desk, EVAN, "Plan the Atlanta flights", "Found a 6 pm Delta flight.", { daysAgo: 9 });
-    finished(desk, CARA, "Find a pediatric dentist", "Emailed Cara two dentists.");
-    finished(desk, EVAN, "Update memory from the call", "Saved.", { purpose: "memory" });
-    const brief = desk.startCall({ callSid: "CA9", phone: EVAN, channel: "voice" }).brief;
+    finished(desk, EZRA, "Find passion fruit chocolates", "Done. I emailed three bonbon links from Casa de Chocolates.");
+    finished(desk, EZRA, "Look up Portland bulky-item pickup", "Done. I emailed the Portland bulky-item pickup instructions.");
+    finished(desk, EZRA, "Plan the Tucson flights", "Found a 6 pm Delta flight.", { daysAgo: 9 });
+    finished(desk, CLEO, "Find a pediatric dentist", "Emailed Cleo two dentists.");
+    finished(desk, EZRA, "Update memory from the call", "Saved.", { purpose: "memory" });
+    const brief = desk.startCall({ callSid: "CA9", phone: EZRA, channel: "voice" }).brief;
     expect(brief).toContain("Recent tasks");
     expect(brief).toContain("bonbon links");
     expect(brief.indexOf("bulky-item pickup instructions")).toBeLessThan(brief.indexOf("bonbon links"));
@@ -184,23 +184,23 @@ describe("recent tasks", () => {
   it("recentTasks gives the fast path a longer window and the whole result", () => {
     const { desk } = setup();
     const long = `Done. ${"Details about the flight. ".repeat(20)}Confirmation DL123.`;
-    finished(desk, EVAN, "Plan the Atlanta flights", long, { daysAgo: 9 });
-    const lines = desk.recentTasks(EVAN, { days: 30, limit: 15 });
+    finished(desk, EZRA, "Plan the Tucson flights", long, { daysAgo: 9 });
+    const lines = desk.recentTasks(EZRA, { days: 30, limit: 15 });
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("DL123");
-    expect(desk.recentTasks(EVAN, { days: 7, limit: 6 })).toEqual([]);
+    expect(desk.recentTasks(EZRA, { days: 7, limit: 6 })).toEqual([]);
   });
 });
 
 describe("backfill", () => {
   it("files one memory issue per past call, oldest first, with the old MEMORY.md facts on the first", async () => {
-    const { desk, host } = setup("Evan prefers concise updates.");
+    const { desk, host } = setup("Ezra prefers concise updates.");
     const calls = [talk(desk, "one"), talk(desk, "two")];
     for (const c of calls) desk.repo.endCall(c.id); // ended before memory existed: no issues yet
     expect(desk.backfillMemory()).toBe(2);
     expect(desk.backfillMemory()).toBe(0);
     await settle();
-    expect(host.runs.at(-1)!.prompt).toContain("Evan prefers concise updates.");
+    expect(host.runs.at(-1)!.prompt).toContain("Ezra prefers concise updates.");
   });
 });
 
@@ -211,7 +211,7 @@ describe("backfill again", () => {
     desk.endCall(c.id);
     await settle();
     expect(desk.backfillMemory({ again: true })).toBe(0); // still running
-    host.runs.at(-1)!.finish("Saved Maya.");
+    host.runs.at(-1)!.finish("Saved Nora.");
     await settle();
     expect(desk.backfillMemory()).toBe(0);
     expect(desk.backfillMemory({ again: true })).toBe(1);
@@ -229,11 +229,11 @@ describe("backfill again", () => {
 describe("the day view", () => {
   it("what's on today and tomorrow is in the brief before the first word, so the commonest questions need no lookup", () => {
     const root = mkdtempSync(join(tmpdir(), "desk-day-"));
-    const memory = new Memory(join(root, "memory"), { owner: { name: "Evan Marshall", phones: [EVAN] } });
+    const memory = new Memory(join(root, "memory"), { owner: { name: "Ezra Vega", phones: [EZRA] } });
     memory.init();
-    const desk = new Desk({ root, host: new Host(), planner: { handle: async () => {} }, memory, dayView: (phone) => (phone === EVAN ? "Today (Thu): 8:00 AM drop-off; 4:30 PM pickup\nUnread: Cara, Dinner Saturday?" : "") });
-    const brief = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" }).brief;
+    const desk = new Desk({ root, host: new Host(), planner: { handle: async () => {} }, memory, dayView: (phone) => (phone === EZRA ? "Today (Thu): 8:00 AM drop-off; 4:30 PM pickup\nUnread: Cleo, Dinner Saturday?" : "") });
+    const brief = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" }).brief;
     expect(brief).toContain("Today (Thu): 8:00 AM drop-off");
-    expect(brief).toContain("Evan Marshall");
+    expect(brief).toContain("Ezra Vega");
   });
 });

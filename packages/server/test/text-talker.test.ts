@@ -31,19 +31,19 @@ describe("the text talker", () => {
   it("files the request, then replies in a few words", async () => {
     const m = model([{ tool_calls: [{ name: "file_issue", args: { request: "What's on my calendar tomorrow?" } }] }, { content: "Checking your calendar now; a few seconds." }]);
     const { t, calls } = tools();
-    const reply = await textTalker({ apiKey: "k", fetchImpl: m.fetchImpl, now: () => NOW })({ brief: "Caller: Evan", channel: "imessage", thread: [{ role: "caller", text: "What's on my calendar tomorrow?" }], tools: t, timezone: "America/Los_Angeles" });
+    const reply = await textTalker({ apiKey: "k", fetchImpl: m.fetchImpl, now: () => NOW })({ brief: "Caller: Ezra", channel: "imessage", thread: [{ role: "caller", text: "What's on my calendar tomorrow?" }], tools: t, timezone: "America/Los_Angeles" });
     expect(calls).toEqual(["file What's on my calendar tomorrow?"]);
     expect(reply).toBe("Checking your calendar now; a few seconds.");
     const second = m.bodies[1];
     expect(second.messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "t0", content: "Filed #7." });
-    expect(m.bodies[0].messages[0].content).toContain("Caller: Evan");
+    expect(m.bodies[0].messages[0].content).toContain("Caller: Ezra");
     expect(m.bodies[0].tools.map((x: any) => x.function.name)).toEqual(["file_issue", "update_issue", "confirm", "remember"]);
   });
 
   it("a result that lands becomes one message", async () => {
     const m = model([{ content: "Tomorrow: drop-off at 8, dentist at 3." }]);
     const { t } = tools();
-    const reply = await textTalker({ apiKey: "k", fetchImpl: m.fetchImpl, now: () => NOW })({ brief: "", channel: "imessage", thread: [{ role: "caller", text: "What's on tomorrow?" }, { role: "kloru", text: "Checking." }], event: "<info>Tomorrow: drop-off 8 AM; Maya dentist 3 PM.</info>", tools: t, timezone: "America/Los_Angeles" });
+    const reply = await textTalker({ apiKey: "k", fetchImpl: m.fetchImpl, now: () => NOW })({ brief: "", channel: "imessage", thread: [{ role: "caller", text: "What's on tomorrow?" }, { role: "kloru", text: "Checking." }], event: "<info>Tomorrow: drop-off 8 AM; Nora dentist 3 PM.</info>", tools: t, timezone: "America/Los_Angeles" });
     expect(reply).toBe("Tomorrow: drop-off at 8, dentist at 3.");
     expect(m.bodies[0].messages.at(-1).content).toContain("<info>Tomorrow");
   });

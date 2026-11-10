@@ -59,7 +59,7 @@ you ── web ───► your domain (sign in, connections, vault, metrics) �
   line, or the whole answer, and whether to include a link). After it's written: does the draft
   fit? If not, it goes back to be rewritten once.
 - **Secrets by reference.** Cards, logins and API keys live in an encrypted vault. Models use
-  them by name (`{{vault:evan-visa}}`) and never see the values. Every use is in the ledger, and
+  them by name (`{{vault:ezra-visa}}`) and never see the values. Every use is in the ledger, and
   each card's own limits are enforced in code.
 - **Permissions by person.** Each person's `policy.md`, written in their own words, says what
   others in the family may see and do. One review per request decides, and anything private asks

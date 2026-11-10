@@ -146,7 +146,7 @@ export class Memory {
     return ok(p);
   }
 
-  /** A path as memory keeps it ("cara/./private//x.md" is "cara/private/x.md"), or undefined when it leaves memory. */
+  /** A path as memory keeps it ("cleo/./private//x.md" is "cleo/private/x.md"), or undefined when it leaves memory. */
   static clean(path: string): string | undefined {
     const p = normalize(path).split(sep).join("/").replace(/^\.\//, "");
     return !p || p.startsWith("/") || p === ".." || p.startsWith("../") ? undefined : p;

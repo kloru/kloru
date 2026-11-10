@@ -49,7 +49,7 @@ async def test_a_filed_request_comes_back_after_its_delay_and_silences_get_keepa
     ep = await run_scenario(SC, talker, caller, NOW)
     assert isinstance(ep, Episode)
     text = "\n".join(ep.lines)
-    assert ep.lines[0].startswith("[What Kloru knew before the call: Known names: Cara")
+    assert ep.lines[0].startswith("[What Kloru knew before the call: Known names: Cleo")
     assert ep.lines[1] == "Caller: What's on tomorrow?"
     assert "Kloru: Let me check." in text
     assert "Kloru: Do you want the kids' calendars too?" in text
@@ -91,13 +91,13 @@ async def test_the_brief_is_given_unless_turned_off():
 
 
 async def test_the_caller_sees_the_conversation_from_their_side():
-    talker = scripted([say("Hi Evan, what can I do?")])
+    talker = scripted([say("Hi Ezra, what can I do?")])
     caller = scripted([{"content": "[hang up]"}])
     await run_scenario(SC, talker, caller, NOW)
     msgs = caller.seen[0]["messages"]
     assert "busy parent" in msgs[0]["content"] and "[hang up]" in msgs[0]["content"]
     assert msgs[1] == {"role": "assistant", "content": "What's on tomorrow?"}
-    assert msgs[2] == {"role": "user", "content": "Hi Evan, what can I do?"}
+    assert msgs[2] == {"role": "user", "content": "Hi Ezra, what can I do?"}
 
 
 def test_scenarios_are_well_formed():

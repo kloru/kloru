@@ -55,7 +55,7 @@ key, saves them to `secrets/inkbox.json`, prints the matching `export` lines, an
 the connect instructions.
 
 ```
-instinct init --name <you> [--phone +1...] [--email you@x.com] [--handle <handle>]
+instinct init --name <you> [--phone +1...] [--email you@x.example] [--handle <handle>]
               [--model provider/model-id] [--timezone Area/City] [--city "..."]
               [--agent-name "..."] [--phone-number] [--skip-inkbox]
               [--use-existing] [--rotate-signing-key]

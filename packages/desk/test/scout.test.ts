@@ -1,7 +1,7 @@
 /**
  * Task discovery: after a call (and every few hours), a scout reads the caller's calendar, mail,
  * memory and recent work, and suggests what they'll likely want next, each with its goal and why
- * now ("Atlanta trip Nov 4 to 5, but no flight booked"). Kloru offers them on the next calls.
+ * now ("Tucson trip Nov 4 to 5, but no flight booked"). Kloru offers them on the next calls.
  */
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { Desk, type Planner, type Trigger, type WorkerHost } from "../src/desk.js";
 import { Memory } from "../src/memory.js";
 
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 
 class Host implements WorkerHost {
   runs: Array<{ issue: number; role: WorkerRole; prompt: string; finish: (t: string) => void }> = [];
@@ -30,18 +30,18 @@ const settle = async () => {
 
 function setup(now = () => new Date("2026-10-30T16:00:00Z")) {
   const root = mkdtempSync(join(tmpdir(), "scout-"));
-  const memory = new Memory(join(root, "memory"), { owner: { name: "Evan Marshall", phones: [EVAN] } });
+  const memory = new Memory(join(root, "memory"), { owner: { name: "Ezra Vega", phones: [EZRA] } });
   memory.init();
   const host = new Host();
   const triggers: Trigger[] = [];
   const planner: Planner = { handle: async (ts) => void triggers.push(...ts) };
-  const desk = new Desk({ root, host, planner, memory, now, dayView: () => "Tue, Nov 3 (all day) | Atlanta trip" });
+  const desk = new Desk({ root, host, planner, memory, now, dayView: () => "Tue, Nov 3 (all day) | Tucson trip" });
   return { desk, host, triggers };
 }
 
 async function afterCall(desk: Desk, host: Host) {
-  const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
-  desk.addTurn(call.id, { role: "caller", text: "Move my Atlanta trip to the 4th and 5th" });
+  const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
+  desk.addTurn(call.id, { role: "caller", text: "Move my Tucson trip to the 4th and 5th" });
   desk.endCall(call.id);
   await settle();
   host.runs.find((r) => r.role.name === "memory")!.finish("Noted the trip.");
@@ -53,8 +53,8 @@ describe("the scout: what the caller will want next", () => {
   it("runs after a call's memory update, with the caller's day, memory and recent requests", async () => {
     const { desk, host, triggers } = setup();
     const scout = await afterCall(desk, host);
-    expect(scout.prompt).toContain("Atlanta trip");
-    expect(scout.prompt).toContain("Move my Atlanta trip");
+    expect(scout.prompt).toContain("Tucson trip");
+    expect(scout.prompt).toContain("Move my Tucson trip");
     expect(triggers).toEqual([]);
     expect(desk.openIssues()).toEqual([]);
   });
@@ -62,7 +62,7 @@ describe("the scout: what the caller will want next", () => {
   it("only looks: an app write is refused and it's told to suggest instead", async () => {
     const { desk, host } = setup();
     const scout = await afterCall(desk, host);
-    const r = await scout.role.guard!("app_composio_multi_execute_tool", { tools: [{ tool_slug: "GMAIL_SEND_EMAIL", arguments: { recipient_email: "x@y.com" } }] });
+    const r = await scout.role.guard!("app_composio_multi_execute_tool", { tools: [{ tool_slug: "GMAIL_SEND_EMAIL", arguments: { recipient_email: "x@y.example" } }] });
     expect(r).toMatchObject({ block: true });
     expect(await scout.role.guard!("app_composio_multi_execute_tool", { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} }] })).toBeUndefined();
   });
@@ -70,17 +70,17 @@ describe("the scout: what the caller will want next", () => {
   it("its suggestions, each with a goal and why now, go in the next call's brief, offered at most twice", async () => {
     const { desk, host } = setup();
     const scout = await afterCall(desk, host);
-    const r = desk.suggest(scout.issue, { ask: "Book your flight to Atlanta for the evening of Nov 3", goal: "Get to the Atlanta board visit Nov 4 to 5", why: "The trip is on your calendar but there's no flight confirmation in your email", kind: "one_off" });
+    const r = desk.suggest(scout.issue, { ask: "Book your flight to Tucson for the evening of Nov 3", goal: "Get to the Tucson board visit Nov 4 to 5", why: "The trip is on your calendar but there's no flight confirmation in your email", kind: "one_off" });
     expect(r.ok).toBe(true);
     scout.finish("1 suggestion.");
     await settle();
     for (let n = 0; n < 2; n++) {
-      const { brief, call } = desk.startCall({ callSid: `CA${n + 2}`, phone: EVAN, channel: "voice" });
-      expect(brief).toContain("Book your flight to Atlanta");
+      const { brief, call } = desk.startCall({ callSid: `CA${n + 2}`, phone: EZRA, channel: "voice" });
+      expect(brief).toContain("Book your flight to Tucson");
       expect(brief).toContain("no flight confirmation");
       desk.endCall(call.id);
     }
-    expect(desk.startCall({ callSid: "CA9", phone: EVAN, channel: "voice" }).brief).not.toContain("Book your flight");
+    expect(desk.startCall({ callSid: "CA9", phone: EZRA, channel: "voice" }).brief).not.toContain("Book your flight");
   });
 
   it("a repeated suggestion isn't stored twice", async () => {

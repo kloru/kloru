@@ -14,11 +14,11 @@ describe("does this caller line change the work?", () => {
   it("asks a structured yes/no about this issue's request and this line", async () => {
     const m = model(false);
     const filter = steerFilter({ apiKey: "k", fetchImpl: m.fetchImpl });
-    expect(await filter({ request: "Weather in Oakland today", spec: "Look up today's forecast" } as never, "I'll just wait.")).toBe(false);
+    expect(await filter({ request: "Weather in Portland today", spec: "Look up today's forecast" } as never, "I'll just wait.")).toBe(false);
     const body = m.bodies[0]!;
     expect(body.model).toBe("google/gemini-3.5-flash-lite");
     expect(body.response_format).toMatchObject({ type: "json_schema", json_schema: { strict: true } });
-    expect(JSON.stringify(body.messages)).toContain("Weather in Oakland today");
+    expect(JSON.stringify(body.messages)).toContain("Weather in Portland today");
     expect(JSON.stringify(body.messages)).toContain("I'll just wait.");
   });
 

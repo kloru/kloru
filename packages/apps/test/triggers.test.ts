@@ -31,9 +31,9 @@ function setup(o: { existing?: { id: string; webhookUrl: string; secret?: string
   const t = new ComposioTriggers({
     triggers,
     subscriptions: { list: async () => ({ items: o.existing ? [o.existing] : [] }) },
-    userId: "evan-kloru",
+    userId: "ezra-kloru",
     state,
-    accountId: (_slug, account) => (account === "evan@example.com" ? "ca_1" : undefined),
+    accountId: (_slug, account) => (account === "ezra@example.com" ? "ca_1" : undefined),
   });
   return { t, calls, state };
 }
@@ -41,8 +41,8 @@ function setup(o: { existing?: { id: string; webhookUrl: string; secret?: string
 describe("ComposioTriggers", () => {
   it("watches an event of a connected account by its address, with its settings, and names it", async () => {
     const { t, calls } = setup();
-    expect(await t.watch("gmail_new_gmail_message", "evan@example.com", { labelIds: "INBOX" })).toEqual({ instance: "ti_1", label: "New Gmail Message" });
-    expect(calls).toContainEqual(["create", "evan-kloru", "GMAIL_NEW_GMAIL_MESSAGE", { connectedAccountId: "ca_1", triggerConfig: { labelIds: "INBOX" } }]);
+    expect(await t.watch("gmail_new_gmail_message", "ezra@example.com", { labelIds: "INBOX" })).toEqual({ instance: "ti_1", label: "New Gmail Message" });
+    expect(calls).toContainEqual(["create", "ezra-kloru", "GMAIL_NEW_GMAIL_MESSAGE", { connectedAccountId: "ca_1", triggerConfig: { labelIds: "INBOX" } }]);
   });
 
   it("won't watch an account that isn't connected", async () => {
@@ -77,18 +77,18 @@ describe("ComposioTriggers with the real SDK's signature check", () => {
     const { createHmac } = await import("node:crypto");
     const sdk = new Composio({ apiKey: "test-key" });
     const state = fakeState({ [WEBHOOK_STATE_FILE]: { url: "x", secret: "whsec_test" } });
-    const t = new ComposioTriggers({ triggers: sdk.triggers as unknown as ComposioTriggersLike, userId: "evan-kloru", state, accountId: () => undefined });
+    const t = new ComposioTriggers({ triggers: sdk.triggers as unknown as ComposioTriggersLike, userId: "ezra-kloru", state, accountId: () => undefined });
     const body = JSON.stringify({
       id: "evt_1",
       timestamp: "2026-11-08T16:00:00Z",
       type: "composio.trigger.message",
-      metadata: { log_id: "log_1", trigger_slug: "GMAIL_NEW_GMAIL_MESSAGE", trigger_id: "ti_mail", connected_account_id: "ca_1", auth_config_id: "ac_1", user_id: "evan-kloru" },
-      data: { subject: "Dinner?", sender: "cara@example.com" },
+      metadata: { log_id: "log_1", trigger_slug: "GMAIL_NEW_GMAIL_MESSAGE", trigger_id: "ti_mail", connected_account_id: "ca_1", auth_config_id: "ac_1", user_id: "ezra-kloru" },
+      data: { subject: "Dinner?", sender: "cleo@example.com" },
     });
     const ts = String(Math.floor(Date.now() / 1000));
     const sig = createHmac("sha256", "whsec_test").update(`msg_1.${ts}.${body}`).digest("base64");
     const headers = { "webhook-id": "msg_1", "webhook-timestamp": ts, "webhook-signature": `v1,${sig}` };
-    expect(await t.verify(body, headers)).toEqual({ id: "msg_1", instance: "ti_mail", trigger: "GMAIL_NEW_GMAIL_MESSAGE", account: "ca_1", data: { subject: "Dinner?", sender: "cara@example.com" } });
+    expect(await t.verify(body, headers)).toEqual({ id: "msg_1", instance: "ti_mail", trigger: "GMAIL_NEW_GMAIL_MESSAGE", account: "ca_1", data: { subject: "Dinner?", sender: "cleo@example.com" } });
     await expect(t.verify(body.replace("Dinner", "Lunch"), headers)).rejects.toThrow();
   });
 });

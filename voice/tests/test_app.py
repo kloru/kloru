@@ -113,7 +113,7 @@ def test_attestation_check_can_be_switched_off():
     assert load_config(FULL).require_attestation
 
 
-CARA = "+14155550191"
+CLEO = "+14155550191"
 A = "TN-Validation-Passed-A"
 DESK = replace(CFG, desk_enabled=True)
 
@@ -136,24 +136,24 @@ def test_a_family_member_is_admitted_and_runs_as_herself():
         ran.append(caller)
         await ws.close()
 
-    c = TestClient(create_app(DESK, record, members=members(CARA)))
-    r = post(c, {"From": CARA, "CallSid": "CA9", "StirVerstat": A})
+    c = TestClient(create_app(DESK, record, members=members(CLEO)))
+    r = post(c, {"From": CLEO, "CallSid": "CA9", "StirVerstat": A})
     token = re.search(r'name="token" value="([^"]+)"', r.text).group(1)
     with c.websocket_connect("/twilio/stream") as ws:
         ws.send_json({"event": "connected", "protocol": "Call", "version": "1.0.0"})
         ws.send_json({"event": "start", "start": {"streamSid": "MZ9", "callSid": "CA9", "customParameters": {"token": token}}})
         with pytest.raises(WebSocketDisconnect):
             ws.receive_text()
-    assert ran == [CARA]
+    assert ran == [CLEO]
 
 
 def test_someone_the_agent_doesnt_know_is_refused():
-    r = post(TestClient(create_app(DESK, no_call, members=members(CARA))), {"From": "+19995550000", "CallSid": "CA1", "StirVerstat": A})
+    r = post(TestClient(create_app(DESK, no_call, members=members(CLEO))), {"From": "+19995550000", "CallSid": "CA1", "StirVerstat": A})
     assert r.text == REJECT_TWIML
 
 
 def test_a_member_without_full_attestation_is_hung_up():
-    r = post(TestClient(create_app(DESK, no_call, members=members(CARA))), {"From": CARA, "CallSid": "CA1", "StirVerstat": "TN-Validation-Passed-B"})
+    r = post(TestClient(create_app(DESK, no_call, members=members(CLEO))), {"From": CLEO, "CallSid": "CA1", "StirVerstat": "TN-Validation-Passed-B"})
     assert r.text == HANGUP_TWIML
 
 
@@ -169,7 +169,7 @@ def test_when_the_agent_cant_be_reached_only_the_owner_gets_in():
         raise OSError("connection refused")
 
     c = TestClient(create_app(DESK, no_call, members=down))
-    assert post(c, {"From": CARA, "CallSid": "CA1", "StirVerstat": A}).text == REJECT_TWIML
+    assert post(c, {"From": CLEO, "CallSid": "CA1", "StirVerstat": A}).text == REJECT_TWIML
     assert "<Stream" in post(c, {"From": "+14155550100", "CallSid": "CA2", "StirVerstat": A}).text
 
 
@@ -177,6 +177,6 @@ def test_without_the_desk_only_the_owner_gets_in():
     # Off, calls go to the owner's own chat surface: a member or the public must never reach it.
     from dataclasses import replace
     cfg = replace(CFG, desk_enabled=False)
-    c = TestClient(create_app(cfg, no_call, members=members(CARA)))
-    assert post(c, {"From": CARA, "CallSid": "CA1", "StirVerstat": A}).text == REJECT_TWIML
+    c = TestClient(create_app(cfg, no_call, members=members(CLEO)))
+    assert post(c, {"From": CLEO, "CallSid": "CA1", "StirVerstat": A}).text == REJECT_TWIML
     assert "<Stream" in post(c, {"From": "+14155550100", "CallSid": "CA2", "StirVerstat": A}).text

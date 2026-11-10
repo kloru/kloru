@@ -1,7 +1,7 @@
 # Ample
 
 [Ample](https://ample.computer) lets the agent put the websites and small apps
-it builds online. The owner texts "make a page for Maya's birthday with an RSVP
+it builds online. The owner texts "make a page for Nora's birthday with an RSVP
 form", the agent writes it in its workspace, deploys it and texts back a public
 HTTPS link. Ask for a change and it redeploys to the same link.
 

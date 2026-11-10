@@ -10,7 +10,7 @@ const { textTalker } = await import(pathToFileURL(resolve("packages/server/dist/
 const key = process.env.OPENROUTER_API_KEY;
 const MODELS = process.argv.slice(2);
 const RUNS = Number(process.env.RUNS ?? 5);
-const BRIEF = "Caller: Evan. Lives in Oakland. People: Maya: Evan's daughter, 3 | Cara: Evan's wife";
+const BRIEF = "Caller: Ezra. Lives in Portland. People: Nora: Ezra's daughter, 3 | Cleo: Ezra's wife";
 const REAL = `How they want Kloru to work (their guidelines, which win):
 - Be eager: do the whole thing. Check with me first only before something reaches another person, spends money, or can't be undone.
 - For email response alerts, do not text before 7 AM or at or after 7 PM Pacific; continue checking email every 15 minutes.
@@ -21,7 +21,7 @@ Recent tasks (newest first; what each found):
 - Daily spam cleanup of the inbox: cleaned the work inbox; asked for a yes to read the personal Gmail.`;
 const CASES = {
   nov9_emoji_files: {
-    turn: { brief: REAL, channel: "imessage", thread: [{ role: "caller", text: "Everytime I get an email can you mark it as read? If it requires an action or is from someone important like my wife, leave it unread and text me a quick summary" }], shape: { form: "emoji", link: false }, pending: ["issue 515, draft d1: May I read your personal Gmail (evangeorgemarshall@gmail.com) for the daily spam cleanup too?"], open: ["issue 515, waiting for their yes, 15 h: Every day, clean spam out of my inboxes"], timezone: "America/Los_Angeles" },
+    turn: { brief: REAL, channel: "imessage", thread: [{ role: "caller", text: "Everytime I get an email can you mark it as read? If it requires an action or is from someone important like my wife, leave it unread and text me a quick summary" }], shape: { form: "emoji", link: false }, pending: ["issue 515, draft d1: May I read your personal Gmail (ezra.vega@gmail.example) for the daily spam cleanup too?"], open: ["issue 515, waiting for their yes, 15 h: Every day, clean spam out of my inboxes"], timezone: "America/Los_Angeles" },
     ok: (calls, reply) => calls.some((c) => c.startsWith("file")),
   },
   request_files_eyes: {

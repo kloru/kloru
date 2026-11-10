@@ -94,7 +94,7 @@ const callEndedEvent = {
   event_type: "call.ended",
   timestamp: "2026-10-16T18:04:05Z",
   data: {
-    call: { id: "call_1", remote_phone_number: "+14152609174", direction: "outbound", status: "completed", hangup_reason: "remote", duration_seconds: 30, mode: "hosted_agent", reason: "Say hi" },
+    call: { id: "call_1", remote_phone_number: "+14155550174", direction: "outbound", status: "completed", hangup_reason: "remote", duration_seconds: 30, mode: "hosted_agent", reason: "Say hi" },
     contacts: [],
     agent_identities: [],
     transcript: null,
@@ -697,7 +697,7 @@ describe("call.ended", () => {
     const again = await fetch(`${base}/webhooks/inkbox`, { method: "POST", headers: signed(body, "r_call_2"), body });
     expect(again.status).toBe(204);
     expect(app.calls).toHaveLength(1);
-    expect(app.calls[0]).toMatchObject({ id: "evt_call_1", callId: "call_1", remoteNumber: "+14152609174", outcome: "completed", transcript: null });
+    expect(app.calls[0]).toMatchObject({ id: "evt_call_1", callId: "call_1", remoteNumber: "+14155550174", outcome: "completed", transcript: null });
     expect(app.inbound).toHaveLength(0);
   });
 
@@ -739,7 +739,7 @@ describe("Resend inbound email", () => {
     app.textDesk = { receive: async (m) => void got.push(m) };
     app.resend = {
       webhookSecret: SECRET,
-      received: async (id) => ({ id, from: "evan@work.example.com", to: ["marshalls@mail.kloru.com"], subject: "Dentist", text: "When is it?\n\nOn Tue, Kloru wrote:\n> Earlier note", messageId: "<b@work.example.com>", references: ["<a@work.example.com>"], dmarc: "pass" }),
+      received: async (id) => ({ id, from: "ezra@work.example.com", to: ["vegas@mail.kloru.com"], subject: "Dentist", text: "When is it?\n\nOn Tue, Kloru wrote:\n> Earlier note", messageId: "<b@work.example.com>", references: ["<a@work.example.com>"], dmarc: "pass" }),
     };
     const server = createHttpServer(app, { signingKey: "whsec_x", env: {} });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
@@ -754,7 +754,7 @@ describe("Resend inbound email", () => {
       const res = await fetch(`${base}/webhooks/resend`, { method: "POST", headers: { "content-type": "application/json", ...svix(body) }, body });
       expect(res.status).toBe(204);
       await new Promise((r) => setTimeout(r, 20));
-      expect(got).toEqual([{ channel: "email", id: "e1", from: "evan@work.example.com", thread: "<a@work.example.com>", text: "When is it?", subject: "Dentist", messageId: "<b@work.example.com>", references: ["<a@work.example.com>"], dmarc: "pass" }]);
+      expect(got).toEqual([{ channel: "email", id: "e1", from: "ezra@work.example.com", thread: "<a@work.example.com>", text: "When is it?", subject: "Dentist", messageId: "<b@work.example.com>", references: ["<a@work.example.com>"], dmarc: "pass" }]);
     } finally {
       await close();
     }

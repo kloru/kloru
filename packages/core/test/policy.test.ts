@@ -448,11 +448,11 @@ describe("the general public (anyone who calls)", () => {
 describe("a deny grant: the owner's words take something a tier would give", () => {
   it("a partner whose owner said 'not my calendar' can't read it, and the tool is hidden", () => {
     const engine = new PolicyEngine(defaultPolicy());
-    const cara = principalOf("partner");
-    expect(engine.evaluate(cara, { capabilities: ["calendar.read"], group: "apps" }, {}).outcome).toBe("allow");
-    engine.addGrant({ to: cara.id, capabilities: ["calendar.read"], deny: true, note: "member" });
-    expect(engine.evaluate(cara, { capabilities: ["calendar.read"], group: "apps" }, {}).outcome).toBe("deny");
-    expect(engine.canEver(cara, "calendar.read")).toBe(false);
-    expect(engine.evaluate(cara, { capabilities: ["calendar.freebusy"], group: "apps" }, {}).outcome).toBe("allow");
+    const cleo = principalOf("partner");
+    expect(engine.evaluate(cleo, { capabilities: ["calendar.read"], group: "apps" }, {}).outcome).toBe("allow");
+    engine.addGrant({ to: cleo.id, capabilities: ["calendar.read"], deny: true, note: "member" });
+    expect(engine.evaluate(cleo, { capabilities: ["calendar.read"], group: "apps" }, {}).outcome).toBe("deny");
+    expect(engine.canEver(cleo, "calendar.read")).toBe(false);
+    expect(engine.evaluate(cleo, { capabilities: ["calendar.freebusy"], group: "apps" }, {}).outcome).toBe("allow");
   });
 });

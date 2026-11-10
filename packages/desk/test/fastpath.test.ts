@@ -28,13 +28,13 @@ const settle = async (ms = 60) => {
   const end = Date.now() + ms;
   while (Date.now() < end) await new Promise((r) => setTimeout(r, 5));
 };
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 
 function setup(fastPath: (request: string) => Promise<FastAnswer | undefined>, fastPathMs = 200) {
   const pm = new PM();
   const host = new Host();
   const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "fast-")), host, planner: pm, fastPath: async (issue) => fastPath(issue.request), fastPathMs });
-  const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+  const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
   return { desk, pm, host, call };
 }
 
@@ -88,8 +88,8 @@ describe("steering workers only with what changes their work", () => {
     const steered: string[] = [];
     const host = { run: () => new Promise<string>(() => {}), steer: (_i: number, t: string) => (steered.push(t), true), stop: () => {} };
     const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "steer-")), host, planner: new PM(), steerFilter: async (_issue, text) => !/wait|thanks/i.test(text) });
-    const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
-    const issue = desk.fileIssue(call.id, "Weather in Oakland today");
+    const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
+    const issue = desk.fileIssue(call.id, "Weather in Portland today");
     desk.assign(issue.id, "work", "Look it up", []);
     desk.addTurn(call.id, { role: "caller", text: "I'll just wait." });
     desk.addTurn(call.id, { role: "caller", text: "Actually make it Friday." });
@@ -103,7 +103,7 @@ describe("steering workers only with what changes their work", () => {
     const steered: string[] = [];
     const host = { run: () => new Promise<string>(() => {}), steer: (_i: number, t: string) => (steered.push(t), true), stop: () => {} };
     const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "steer-")), host, planner: new PM(), steerFilter: async () => { throw new Error("down"); } });
-    const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
     const issue = desk.fileIssue(call.id, "Weather");
     desk.assign(issue.id, "work", "Look it up", []);
     desk.addTurn(call.id, { role: "caller", text: "Make it Friday." });

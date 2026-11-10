@@ -16,7 +16,7 @@ class Host implements WorkerHost {
   stop(): void {}
 }
 
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 const settle = async (ms = 40) => {
   const end = Date.now() + ms;
   while (Date.now() < end) await new Promise((r) => setTimeout(r, 5));
@@ -29,8 +29,8 @@ function setup(o: { reply?: (t: TalkerTurn) => string; idleMs?: number; ingest?:
   const sent: string[] = [];
   const text = new TextDesk({
     desk,
-    callers: (p) => (p === EVAN ? { allowed: true, name: "Evan", tier: "owner" } : { allowed: false }),
-    emailPerson: (e) => (e === "evan@work.example.com" ? EVAN : undefined),
+    callers: (p) => (p === EZRA ? { allowed: true, name: "Ezra", tier: "owner" } : { allowed: false }),
+    emailPerson: (e) => (e === "ezra@work.example.com" ? EZRA : undefined),
     talker: async (t) => {
       turns.push(t);
       if (!t.event) t.tools.fileIssue(t.thread.at(-1)!.text);
@@ -54,18 +54,18 @@ function setup(o: { reply?: (t: TalkerTurn) => string; idleMs?: number; ingest?:
   return { desk, text, turns, sent };
 }
 
-const imsg = (id: string, body: string, from = EVAN): TextIn => ({ channel: "imessage", id, from, thread: `imessage:${from}`, text: body });
-const mail = (id: string, body: string, o: Partial<TextIn> = {}): TextIn => ({ channel: "email", id, from: "evan@work.example.com", thread: "<root@work.example.com>", text: body, subject: "Dentist", messageId: `<${id}@work.example.com>`, references: ["<root@work.example.com>"], dmarc: "pass", ...o });
+const imsg = (id: string, body: string, from = EZRA): TextIn => ({ channel: "imessage", id, from, thread: `imessage:${from}`, text: body });
+const mail = (id: string, body: string, o: Partial<TextIn> = {}): TextIn => ({ channel: "email", id, from: "ezra@work.example.com", thread: "<root@work.example.com>", text: body, subject: "Dentist", messageId: `<${id}@work.example.com>`, references: ["<root@work.example.com>"], dmarc: "pass", ...o });
 
 describe("texts and emails become desk conversations", () => {
-  it("a text from Evan opens a conversation, files the request, and gets a reply in the thread", async () => {
+  it("a text from Ezra opens a conversation, files the request, and gets a reply in the thread", async () => {
     const { desk, text, sent, turns } = setup();
     await text.receive(imsg("m1", "What's on tomorrow?"));
-    const call = desk.repo.liveCallFor(EVAN)!;
+    const call = desk.repo.liveCallFor(EZRA)!;
     expect(call.channel).toBe("imessage");
     expect(desk.repo.turns(call.id, 0).map((t) => `${t.role}: ${t.text}`)).toEqual(["caller: What's on tomorrow?", "kloru: On it."]);
     expect(desk.openIssues()).toHaveLength(1);
-    expect(sent).toEqual([`imessage ${EVAN}: On it.`]);
+    expect(sent).toEqual([`imessage ${EZRA}: On it.`]);
     expect(turns[0]!.channel).toBe("imessage");
   });
 
@@ -76,36 +76,36 @@ describe("texts and emails become desk conversations", () => {
     expect(desk.repo.liveCalls()).toEqual([]);
   });
 
-  it("an email from Evan's address only counts as Evan when it passed DMARC", async () => {
+  it("an email from Ezra's address only counts as Ezra when it passed DMARC", async () => {
     const { desk, text, sent } = setup();
     await text.receive(mail("e1", "When's the dentist?", { dmarc: "fail" }));
     expect(sent).toEqual([]);
     expect(desk.repo.liveCalls()).toEqual([]);
     await text.receive(mail("e2", "When's the dentist?"));
-    expect(sent).toEqual(["email evan@work.example.com [Re: Dentist] re <e2@work.example.com>: On it."]);
+    expect(sent).toEqual(["email ezra@work.example.com [Re: Dentist] re <e2@work.example.com>: On it."]);
   });
 
-  it("someone else replying in Evan's email thread never joins his conversation or gets his replies", async () => {
-    const CARA = "+14155550191";
+  it("someone else replying in Ezra's email thread never joins his conversation or gets his replies", async () => {
+    const CLEO = "+14155550191";
     const planner: Planner = { handle: async () => {} };
     const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "textdesk-")), host: new Host(), planner });
     const sent: string[] = [];
     const text = new TextDesk({
       desk,
-      callers: (p) => (p === EVAN || p === CARA ? { allowed: true, tier: p === EVAN ? "owner" : "partner" } : { allowed: false }),
-      emailPerson: (e) => (e === "evan@work.example.com" ? EVAN : e === "cara@gmail.com" ? CARA : undefined),
+      callers: (p) => (p === EZRA || p === CLEO ? { allowed: true, tier: p === EZRA ? "owner" : "partner" } : { allowed: false }),
+      emailPerson: (e) => (e === "ezra@work.example.com" ? EZRA : e === "cleo@gmail.example" ? CLEO : undefined),
       talker: async () => "On it.",
       send: { email: async (to) => (sent.push(to), true) },
       timezone: "America/Los_Angeles",
       log: () => {},
     });
     await text.receive(mail("e1", "Find a dentist"));
-    await text.receive(mail("e2", "Also book it for me", { from: "cara@gmail.com" }));
-    const evans = desk.repo.liveCallFor(EVAN)!;
-    const caras = desk.repo.liveCallFor(CARA)!;
-    expect(caras.id).not.toBe(evans.id);
-    expect(desk.repo.turns(evans.id, 0).map((t) => t.text)).not.toContain("Also book it for me");
-    expect(sent).toEqual(["evan@work.example.com", "cara@gmail.com"]);
+    await text.receive(mail("e2", "Also book it for me", { from: "cleo@gmail.example" }));
+    const ezras = desk.repo.liveCallFor(EZRA)!;
+    const cleos = desk.repo.liveCallFor(CLEO)!;
+    expect(cleos.id).not.toBe(ezras.id);
+    expect(desk.repo.turns(ezras.id, 0).map((t) => t.text)).not.toContain("Also book it for me");
+    expect(sent).toEqual(["ezra@work.example.com", "cleo@gmail.example"]);
   });
 
   it("the same message delivered twice is handled once", async () => {
@@ -118,22 +118,22 @@ describe("texts and emails become desk conversations", () => {
   it("a result that lands becomes one message in the thread, and is acknowledged", async () => {
     const { desk, text, sent, turns } = setup();
     await text.receive(imsg("m1", "What's on tomorrow?"));
-    const call = desk.repo.liveCallFor(EVAN)!;
+    const call = desk.repo.liveCallFor(EZRA)!;
     desk.resolve(1, "Tomorrow: drop-off at 8.");
     await settle(120);
     expect(turns.at(-1)!.event).toContain("Tomorrow: drop-off at 8.");
-    expect(sent.at(-1)).toBe(`imessage ${EVAN}: Here's what I found.`);
+    expect(sent.at(-1)).toBe(`imessage ${EZRA}: Here's what I found.`);
     expect(desk.repo.undelivered(call.id)).toEqual([]);
   });
 
   it("quiet for the idle time ends the conversation once; the next text starts a new one", async () => {
     const { desk, text } = setup({ idleMs: 50 });
     await text.receive(imsg("m1", "What's on tomorrow?"));
-    const first = desk.repo.liveCallFor(EVAN)!;
+    const first = desk.repo.liveCallFor(EZRA)!;
     await settle(120);
     expect(desk.repo.call(first.id)!.endedAt).toBeDefined();
     await text.receive(imsg("m2", "And Friday?"));
-    const second = desk.repo.liveCallFor(EVAN)!;
+    const second = desk.repo.liveCallFor(EZRA)!;
     expect(second.id).not.toBe(first.id);
   });
 
@@ -151,7 +151,7 @@ describe("a result that can't be sent", () => {
     let up = true;
     const text = new TextDesk({
       desk,
-      callers: (p) => (p === EVAN ? { allowed: true, tier: "owner" } : { allowed: false }),
+      callers: (p) => (p === EZRA ? { allowed: true, tier: "owner" } : { allowed: false }),
       emailPerson: () => undefined,
       talker: async (t) => (t.event ? "Found it." : (t.tools.fileIssue("x"), "On it.")),
       send: { imessage: async () => up },
@@ -160,7 +160,7 @@ describe("a result that can't be sent", () => {
       log: () => {},
     });
     await text.receive(imsg("m1", "What's on tomorrow?"));
-    const call = desk.repo.liveCallFor(EVAN)!;
+    const call = desk.repo.liveCallFor(EZRA)!;
     up = false;
     desk.resolve(1, "Tomorrow: drop-off at 8.");
     await settle(120);
@@ -168,21 +168,21 @@ describe("a result that can't be sent", () => {
   });
 });
 
-describe("Evan answers an ask by text", () => {
+describe("Ezra answers an ask by text", () => {
   it("a waiting ask is in the first turn's context with its draft id, and isn't asked again", async () => {
-    const CARA = "+14155550191";
+    const CLEO = "+14155550191";
     const planner: Planner = { handle: async () => {} };
-    const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "textdesk-")), host: new Host(), planner, ownerPhone: EVAN, nameOf: (p) => (p === CARA ? "Cara" : "Evan") });
-    const caraCall = desk.startCall({ callSid: "CA2", phone: CARA, channel: "voice" }).call;
-    const issue = desk.fileIssue(caraCall.id, "Move Evan's 3 PM to 4");
+    const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "textdesk-")), host: new Host(), planner, ownerPhone: EZRA, nameOf: (p) => (p === CLEO ? "Cleo" : "Ezra") });
+    const cleoCall = desk.startCall({ callSid: "CA2", phone: CLEO, channel: "voice" }).call;
+    const issue = desk.fileIssue(cleoCall.id, "Move Ezra's 3 PM to 4");
     desk.assign(issue.id, "ops", "Move it", []);
-    expect(desk.askOwner(issue.id, "move Evan's 3 PM to 4 PM").ok).toBe(true);
+    expect(desk.askOwner(issue.id, "move Ezra's 3 PM to 4 PM").ok).toBe(true);
     const draft = desk.repo.issue(issue.id)!.confirmation!.id;
     const turns: TalkerTurn[] = [];
     const sent: string[] = [];
     const text = new TextDesk({
       desk,
-      callers: (p) => (p === EVAN ? { allowed: true, tier: "owner" } : { allowed: false }),
+      callers: (p) => (p === EZRA ? { allowed: true, tier: "owner" } : { allowed: false }),
       emailPerson: () => undefined,
       talker: async (t) => (turns.push(t), "Done, I'll move it."),
       send: { imessage: async (_to, body) => (sent.push(body), true) },
@@ -194,7 +194,7 @@ describe("Evan answers an ask by text", () => {
     await settle(120);
     expect(turns).toHaveLength(1);
     expect(turns[0]!.pending!.join("\n")).toContain(`draft ${draft}`);
-    expect(turns[0]!.event ?? "").toContain("Cara asked me to");
+    expect(turns[0]!.event ?? "").toContain("Cleo asked me to");
     expect(sent).toEqual(["Done, I'll move it."]);
   });
 });
@@ -207,8 +207,8 @@ describe("a forwarded message is never a yes", () => {
     const results: string[] = [];
     const text = new TextDesk({
       desk,
-      callers: (p) => (p === EVAN ? { allowed: true, tier: "owner" } : { allowed: false }),
-      emailPerson: () => EVAN,
+      callers: (p) => (p === EZRA ? { allowed: true, tier: "owner" } : { allowed: false }),
+      emailPerson: () => EZRA,
       talker: async (t) => (results.push(t.tools.confirm(1, "abcd1234")), "ok"),
       send: { email: async () => true },
       timezone: "America/Los_Angeles",
@@ -225,7 +225,7 @@ describe("nothing is lost or done twice", () => {
     const desk = new Desk({ root: join(dir, "repo"), host: new Host(), planner });
     return new TextDesk({
       desk,
-      callers: (p) => (p === EVAN ? { allowed: true, tier: "owner" } : { allowed: false }),
+      callers: (p) => (p === EZRA ? { allowed: true, tier: "owner" } : { allowed: false }),
       emailPerson: () => undefined,
       talker,
       send: { imessage: async (_to, body) => (sent.push(body), true) },
@@ -256,12 +256,12 @@ describe("shutting down", () => {
   it("open text conversations end properly (memory update queued), not cut off", async () => {
     const { Memory } = await import("@kloru/desk");
     const root = mkdtempSync(join(tmpdir(), "textdesk-"));
-    const memory = new Memory(join(root, "memory"), { owner: { name: "Evan Marshall", phones: [EVAN] } });
+    const memory = new Memory(join(root, "memory"), { owner: { name: "Ezra Vega", phones: [EZRA] } });
     memory.init();
     const desk = new Desk({ root: join(root, "repo"), host: new Host(), planner: { handle: async () => {} }, memory });
     const text = new TextDesk({ desk, callers: () => ({ allowed: true, tier: "owner" }), emailPerson: () => undefined, talker: async () => "On it.", send: { imessage: async () => true }, timezone: "America/Los_Angeles", log: () => {} });
     await text.receive(imsg("m1", "What's on tomorrow?"));
-    const call = desk.repo.liveCallFor(EVAN)!;
+    const call = desk.repo.liveCallFor(EZRA)!;
     text.close();
     expect(desk.repo.call(call.id)!.endedAt).toBeDefined();
     expect(desk.repo.issues((i) => i.purpose === "memory" && i.filedBy.call === call.id)).toHaveLength(1);
@@ -272,16 +272,16 @@ describe("photos and files sent by text or email", () => {
   it("each one is kept and noted in the conversation, so workers can look at it", async () => {
     const got: Array<{ url: string; phone: string }> = [];
     const { desk, text } = setup({ ingest: async (a, phone) => (got.push({ url: a.url, phone }), { id: "m_0123456789abcdef.jpg", mime: "image/jpeg", name: "IMG_1.jpg", size: 10, at: "", phone }) });
-    await text.receive({ channel: "imessage", id: "m1", from: EVAN, thread: `imessage:${EVAN}`, text: "What's on this receipt?", attachments: [{ url: "https://media.inkbox.ai/x.jpg", mime: "image/jpeg", name: "IMG_1.jpg" }] });
-    expect(got).toEqual([{ url: "https://media.inkbox.ai/x.jpg", phone: EVAN }]);
-    const call = desk.repo.callsFor(EVAN)[0]!;
+    await text.receive({ channel: "imessage", id: "m1", from: EZRA, thread: `imessage:${EZRA}`, text: "What's on this receipt?", attachments: [{ url: "https://media.inkbox.ai/x.jpg", mime: "image/jpeg", name: "IMG_1.jpg" }] });
+    expect(got).toEqual([{ url: "https://media.inkbox.ai/x.jpg", phone: EZRA }]);
+    const call = desk.repo.callsFor(EZRA)[0]!;
     expect(desk.repo.turns(call.id, 0)[0]!.text).toBe("What's on this receipt?\n[photo m_0123456789abcdef.jpg]");
   });
 
   it("a photo with no words still starts a conversation", async () => {
     const { desk, text } = setup({ ingest: async (_a, phone) => ({ id: "m_0123456789abcdef.png", mime: "image/png", name: "a.png", size: 1, at: "", phone }) });
-    await text.receive({ channel: "imessage", id: "m2", from: EVAN, thread: `imessage:${EVAN}`, text: "", attachments: [{ url: "https://media.inkbox.ai/a.png" }] });
-    expect(desk.repo.turns(desk.repo.callsFor(EVAN)[0]!.id, 0)[0]!.text).toBe("[photo m_0123456789abcdef.png]");
+    await text.receive({ channel: "imessage", id: "m2", from: EZRA, thread: `imessage:${EZRA}`, text: "", attachments: [{ url: "https://media.inkbox.ai/a.png" }] });
+    expect(desk.repo.turns(desk.repo.callsFor(EZRA)[0]!.id, 0)[0]!.text).toBe("[photo m_0123456789abcdef.png]");
   });
 
   it("nothing is downloaded from someone who isn't family", async () => {
@@ -293,8 +293,8 @@ describe("photos and files sent by text or email", () => {
 
   it("one that can't be kept is said so, and the rest go on", async () => {
     const { desk, text } = setup({ ingest: async () => { throw new Error("files of type application/x-msdownload aren't kept"); } });
-    await text.receive({ channel: "imessage", id: "m4", from: EVAN, thread: `imessage:${EVAN}`, text: "see attached", attachments: [{ url: "https://media.inkbox.ai/x.exe", name: "x.exe" }] });
-    expect(desk.repo.turns(desk.repo.callsFor(EVAN)[0]!.id, 0)[0]!.text).toMatch(/see attached\n\[x\.exe couldn't be kept: files of type/);
+    await text.receive({ channel: "imessage", id: "m4", from: EZRA, thread: `imessage:${EZRA}`, text: "see attached", attachments: [{ url: "https://media.inkbox.ai/x.exe", name: "x.exe" }] });
+    expect(desk.repo.turns(desk.repo.callsFor(EZRA)[0]!.id, 0)[0]!.text).toMatch(/see attached\n\[x\.exe couldn't be kept: files of type/);
   });
 });
 
@@ -303,18 +303,18 @@ describe("one outbox: every message in a thread passes the check (#37)", () => {
     const checks: MessageCheck[] = [];
     const { desk, text, sent } = setup({ decide: async (c) => (checks.push(c), { action: "send", p: 0.9 }) });
     await text.receive(imsg("m1", "What's the link to the parking at SFO?"));
-    expect(sent).toEqual([`imessage ${EVAN}: On it.`]);
+    expect(sent).toEqual([`imessage ${EZRA}: On it.`]);
     expect(checks[0]).toMatchObject({ from: "talker", replyingTo: "What's the link to the parking at SFO?" });
-    expect(desk.recentMessages(EVAN).at(-1)).toMatch(/sent \(imessage to \+14155550190\): On it\./);
+    expect(desk.recentMessages(EZRA).at(-1)).toMatch(/sent \(imessage to \+14155550190\): On it\./);
   });
 
   it("a dropped result isn't sent but counts as told", async () => {
     const { desk, text, sent } = setup({ decide: async (c) => ({ action: c.replyingTo ? "send" : "drop", p: 0.95 }) });
     await text.receive(imsg("m1", "What's on tomorrow?"));
-    const call = desk.repo.liveCallFor(EVAN)!;
+    const call = desk.repo.liveCallFor(EZRA)!;
     desk.resolve(desk.openIssues()[0]!.id, "Dentist at 3.");
     await settle(80);
-    expect(sent).toEqual([`imessage ${EVAN}: On it.`]);
+    expect(sent).toEqual([`imessage ${EZRA}: On it.`]);
     expect(desk.repo.call(call.id)!.deliveredSeq).toBe(1);
   });
 
@@ -322,7 +322,7 @@ describe("one outbox: every message in a thread passes the check (#37)", () => {
     let hold = true;
     const { desk, text, sent, turns } = setup({ decide: async (c) => ({ action: c.replyingTo || !hold ? "send" : "hold", p: 0.95 }) });
     await text.receive(imsg("m1", "Find SFO parking and a mailbox plan"));
-    const call = desk.repo.liveCallFor(EVAN)!;
+    const call = desk.repo.liveCallFor(EZRA)!;
     const [a] = desk.openIssues();
     desk.resolve(a!.id, "SFO long-term is $27 a day.");
     await settle(80);
@@ -347,7 +347,7 @@ describe("held results are part of the next reply (review fix)", () => {
     let hold = true;
     const { desk, text, sent, turns } = setup({ decide: async (c) => ({ action: c.replyingTo || !hold ? "send" : "hold", p: 0.95 }) });
     await text.receive(imsg("m1", "Find SFO parking"));
-    const call = desk.repo.liveCallFor(EVAN)!;
+    const call = desk.repo.liveCallFor(EZRA)!;
     desk.resolve(desk.openIssues()[0]!.id, "SFO long-term is $27 a day.");
     await settle(80);
     expect(sent).toHaveLength(1);
@@ -370,7 +370,7 @@ describe("a text that starts work gets a reaction, not a message", () => {
     const { desk, text, sent } = setup({ reply: onIt, react: async (c, m, r) => (reacted.push(`${c} ${m} ${r}`), true) });
     await text.receive({ ...imsg("m1", "Delete sales spam every morning"), reactTo });
     await settle();
-    const call = desk.repo.liveCallFor(EVAN)!;
+    const call = desk.repo.liveCallFor(EZRA)!;
     expect(reacted).toEqual(["imessage:conv1 msg1 eyes"]);
     expect(sent).toEqual([]);
     expect(desk.repo.ledger().filter((e) => e.call === call.id).map((e) => `${e.tool} ${e.ok}`)).toEqual(["react true"]);
@@ -383,14 +383,14 @@ describe("a text that starts work gets a reaction, not a message", () => {
     const issue = desk.openIssues()[0]!;
     desk.merge(issue.id, "events", "I saved the daily 7 AM sales-spam cleanup.");
     await settle(200);
-    expect(sent).toEqual([`imessage ${EVAN}: Done: spam is cleared every morning at 7.`]);
+    expect(sent).toEqual([`imessage ${EZRA}: Done: spam is cleared every morning at 7.`]);
   });
 
   it("a reaction that fails becomes a short text", async () => {
     const { text, sent } = setup({ reply: onIt, react: async () => { throw new Error("Inkbox down"); } });
     await text.receive({ ...imsg("m1", "Delete sales spam every morning"), reactTo });
     await settle();
-    expect(sent).toEqual([`imessage ${EVAN}: On it.`]);
+    expect(sent).toEqual([`imessage ${EZRA}: On it.`]);
   });
 
   // Nov 9: 👀 on "every time I get an email…" and nothing filed, so nothing ran.
@@ -401,7 +401,7 @@ describe("a text that starts work gets a reaction, not a message", () => {
     const reacted: string[] = [];
     const text = new TextDesk({
       desk,
-      callers: () => ({ allowed: true, name: "Evan", tier: "owner" }),
+      callers: () => ({ allowed: true, name: "Ezra", tier: "owner" }),
       emailPerson: () => undefined,
       talker: async (t) => {
         turns.push(t);
@@ -448,10 +448,10 @@ describe("Nov 2: a held result still reaches them", () => {
     const issue = desk.openIssues()[0]!;
     desk.merge(issue.id, "info", "I updated the page with four options up to $100.");
     await settle(40);
-    expect(sent).toEqual([`imessage ${EVAN}: On it.`]);
+    expect(sent).toEqual([`imessage ${EZRA}: On it.`]);
     await settle(250);
-    expect(sent).toEqual([`imessage ${EVAN}: On it.`, `imessage ${EVAN}: Here's what I found.`]);
-    const call = desk.repo.liveCallFor(EVAN)!;
+    expect(sent).toEqual([`imessage ${EZRA}: On it.`, `imessage ${EZRA}: Here's what I found.`]);
+    const call = desk.repo.liveCallFor(EZRA)!;
     expect(desk.repo.undelivered(call.id)).toEqual([]);
   });
 });
@@ -460,7 +460,7 @@ describe("a card number sent by text (2026-11-02)", () => {
   it("is removed before the transcript or the talker sees it", async () => {
     const { desk, text, turns } = setup();
     await text.receive(imsg("m1", "use my card 4242 4242 4242 4242 exp 12/29 for the order"));
-    const call = desk.repo.liveCallFor(EVAN)!;
+    const call = desk.repo.liveCallFor(EZRA)!;
     const said = desk.repo.turns(call.id, 0)[0]!.text;
     expect(said).not.toContain("4242 4242");
     expect(said).toContain("[card number removed]");
@@ -526,7 +526,7 @@ describe("each message shaped the way they like it (2026-11-03)", () => {
     desk.learnMessagePreference = (_p, line) => void lessons.push(line);
     await text.receive(imsg("m1", "Find a pediatric dentist"));
     const [issue] = desk.openIssues();
-    desk.merge(issue!.id, "info", "Rockridge Kids Dental has openings; the comparison is at https://kloru.com/a/abcdefghijklmnopqrstuv");
+    desk.merge(issue!.id, "info", "Maplewood Kids Dental has openings; the comparison is at https://kloru.com/a/abcdefghijklmnopqrstuv");
     await settle(120);
     await text.receive(imsg("m2", "Can you send the link?"));
     await settle(40);
@@ -542,7 +542,7 @@ describe("a draft that doesn't fit goes back once (2026-11-03)", () => {
       reply: (t) => (t.redraft ? "On it." : "I'm on it, I'll look that up and let you know shortly."),
     });
     await text.receive(imsg("m1", "What's on tomorrow?"));
-    expect(sent).toEqual([`imessage ${EVAN}: On it.`]);
+    expect(sent).toEqual([`imessage ${EZRA}: On it.`]);
     expect(turns.at(-1)!.redraft).toEqual({ draft: "I'm on it, I'll look that up and let you know shortly.", why: "Too long for them: make it shorter." });
     expect(checked[0]!.thread).toEqual(["Them: What's on tomorrow?"]);
     expect(checked).toHaveLength(1);

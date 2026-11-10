@@ -199,7 +199,7 @@ describe("parseInkboxEvent: message.received (mail)", () => {
   });
 
   it("falls back to the snippet and the Inkbox id when body and Message-ID are absent", () => {
-    const m = parseInkboxEvent(envelope("message.received", { message: { id: "mail_2", from_address: "a@b.co", subject: null, snippet: "short" } }))!;
+    const m = parseInkboxEvent(envelope("message.received", { message: { id: "mail_2", from_address: "a@b.example", subject: null, snippet: "short" } }))!;
     expect(m.text).toBe("Subject: (no subject)\n\nshort");
     expect(m.conversationKey).toBe("email:mail_2");
     expect(m.replyRef.messageId).toBe("mail_2");

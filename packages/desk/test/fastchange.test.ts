@@ -33,12 +33,12 @@ const settle = async (ms = 60) => {
   const end = Date.now() + ms;
   while (Date.now() < end) await new Promise((r) => setTimeout(r, 5));
 };
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 
 const MOVE: FastAnswer = {
-  say: "Done: the Atlanta trip is now November 4 to 5.",
+  say: "Done: the Tucson trip is now November 4 to 5.",
   note: "From the store: calendar as of 20 s ago.",
-  changes: [{ slug: "GOOGLECALENDAR_PATCH_EVENT", args: { calendar_id: "primary", event_id: "atl1", start_time: "2026-11-04", end_time: "2026-11-06", send_updates: "none" }, account: "evan@example.com" }],
+  changes: [{ slug: "GOOGLECALENDAR_PATCH_EVENT", args: { calendar_id: "primary", event_id: "atl1", start_time: "2026-11-04", end_time: "2026-11-06", send_updates: "none" }, account: "ezra@example.com" }],
 };
 
 function setup(o: { got?: FastAnswer; decide?: (c: ActionCheck) => Promise<ActionDecision>; execute?: (slug: string, args: Record<string, unknown>, account?: string) => Promise<{ ok: boolean; data?: unknown; error?: string }> | undefined } = {}) {
@@ -63,17 +63,17 @@ function setup(o: { got?: FastAnswer; decide?: (c: ActionCheck) => Promise<Actio
     ...(o.decide ? { decideAction: o.decide } : {}),
     onWrite: (slug) => writes.push(slug),
   });
-  const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+  const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
   return { desk, pm, host, call, executed, writes };
 }
 
 describe("a simple change, made by the fast path", () => {
   it("runs the exact actions, records them in the ledger, tells the call it's done, and never starts the PM or a worker", async () => {
     const { desk, pm, host, call, executed, writes } = setup();
-    const issue = desk.fileIssue(call.id, "Move my Atlanta trip to the 4th and 5th");
+    const issue = desk.fileIssue(call.id, "Move my Tucson trip to the 4th and 5th");
     await settle();
-    expect(executed).toEqual([{ slug: "GOOGLECALENDAR_PATCH_EVENT", args: MOVE.changes![0]!.args, account: "evan@example.com" }]);
-    expect(desk.repo.inbox(call.id, 0)).toMatchObject([{ kind: "events", text: "Done: the Atlanta trip is now November 4 to 5.", issue: issue.id }]);
+    expect(executed).toEqual([{ slug: "GOOGLECALENDAR_PATCH_EVENT", args: MOVE.changes![0]!.args, account: "ezra@example.com" }]);
+    expect(desk.repo.inbox(call.id, 0)).toMatchObject([{ kind: "events", text: "Done: the Tucson trip is now November 4 to 5.", issue: issue.id }]);
     expect(desk.repo.issue(issue.id)).toMatchObject({ kind: "ops", status: "done" });
     expect(desk.repo.ledger(issue.id)).toMatchObject([{ slug: "GOOGLECALENDAR_PATCH_EVENT", ok: true }]);
     expect(writes).toEqual(["GOOGLECALENDAR_PATCH_EVENT"]);
@@ -83,7 +83,7 @@ describe("a simple change, made by the fast path", () => {
 
   it("every change is weighed first: when it needs a yes, nothing runs and the caller hears the question", async () => {
     const { desk, call, executed } = setup({ decide: async () => ({ decision: "ask", reason: "guests", ask: "Move the trip and tell your guests?" }) });
-    const issue = desk.fileIssue(call.id, "Move my Atlanta trip to the 4th and 5th");
+    const issue = desk.fileIssue(call.id, "Move my Tucson trip to the 4th and 5th");
     await settle();
     expect(executed).toEqual([]);
     expect(desk.repo.issue(issue.id)!.status).toBe("needs_confirmation");
@@ -92,7 +92,7 @@ describe("a simple change, made by the fast path", () => {
 
   it("after the yes, the same exact actions run (no worker re-deriving them)", async () => {
     const { desk, call, executed, host } = setup({ decide: async () => ({ decision: "ask", reason: "guests", ask: "Tell your guests?" }) });
-    const issue = desk.fileIssue(call.id, "Move my Atlanta trip to the 4th and 5th");
+    const issue = desk.fileIssue(call.id, "Move my Tucson trip to the 4th and 5th");
     await settle();
     desk.confirm(issue.id, call.id, desk.repo.issue(issue.id)!.confirmation!.id);
     await settle();
@@ -120,7 +120,7 @@ describe("a simple change, made by the fast path", () => {
   it("without a way to run app actions, a change goes to the PM as before", async () => {
     const pm = new PM();
     const d = new Desk({ root: mkdtempSync(join(tmpdir(), "fastchange-")), host: new Host(), planner: pm, fastPath: async () => MOVE, fastPathMs: 200 });
-    const c = d.startCall({ callSid: "CA2", phone: EVAN, channel: "voice" }).call;
+    const c = d.startCall({ callSid: "CA2", phone: EZRA, channel: "voice" }).call;
     const issue = d.fileIssue(c.id, "Move my trip");
     await settle();
     expect(pm.seen).toEqual([{ kind: "filed", issue: issue.id }]);

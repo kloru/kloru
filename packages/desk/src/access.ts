@@ -119,7 +119,7 @@ const WORDS: Record<Permission, (whose: string) => string> = {
   book_travel: () => "book travel",
 };
 
-/** A need in plain words: "add to or change their calendar", "read Evan's email". */
+/** A need in plain words: "add to or change their calendar", "read Ezra's email". */
 export function describeNeed(n: Need, ownerName: string): string {
   const a = n.account.trim().toLowerCase();
   const whose = a === "theirs" ? "their" : a === "owner" ? `${ownerName}'s` : `${n.account.trim()}'s`;

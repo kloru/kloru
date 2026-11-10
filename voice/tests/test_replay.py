@@ -27,7 +27,7 @@ class Scripted(VoiceLLM):
         elif "<info" in content:
             await self._push_llm_text("Tomorrow you have drop-off at 8.")
         elif "Greet" in content:
-            await self._push_llm_text("Hi Evan, what's on your mind?")
+            await self._push_llm_text("Hi Ezra, what's on your mind?")
         elif "file_issue" in str(context.get_messages()[-2:]) or last.get("role") == "tool":
             await self._push_llm_text("I'm on it.")
         else:

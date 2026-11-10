@@ -120,7 +120,7 @@ async def test_a_reply_that_never_reaches_the_speaker_is_caught_and_does_not_wed
     t, push, _, _ = make()
     await t.offer("<info>a</info>")
     t.reply_started()
-    t.reply_text("Hi Evan.")
+    t.reply_text("Hi Ezra.")
     await t.reply_ended()
     await t.offer("<info>b</info>")
     await settle()
@@ -191,7 +191,7 @@ async def test_the_greeting_is_a_reply_the_machine_asked_for():
     await t.begin([{"role": "developer", "content": "Greet the caller."}])
     assert push.calls == [["Greet the caller."]]
     assert acked == []  # the greeting isn't a result to acknowledge
-    await reply(t, "Hi Evan.")
+    await reply(t, "Hi Ezra.")
     assert t.stats.unexpected_replies == 0
 
 

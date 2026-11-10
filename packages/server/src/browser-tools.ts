@@ -432,7 +432,7 @@ export function browserTools(o: BrowserOptions): { tools: RegisteredTool[]; pool
       description:
         "At checkout, fill a saved card into the payment fields (CSS selectors on the page or its card iframe). Needs the merchant, the order total in USD, and one line on what the buying-safely check found. Then place the order with browser_run.",
       parameters: Type.Object({
-        card: Type.String({ description: "the card's vault name, e.g. evan-credit-card" }),
+        card: Type.String({ description: "the card's vault name, e.g. ezra-credit-card" }),
         merchant: Type.String({ description: "who you're buying from, e.g. Uncommon Goods (uncommongoods.com)" }),
         total_usd: Type.Number({ description: "the order total shown at checkout, in USD" }),
         checked: Type.String({ description: "one line: what the buying-safely check found, e.g. 'Trustpilot 4.6 from 12k reviews; domain since 1999'" }),

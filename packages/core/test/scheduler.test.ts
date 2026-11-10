@@ -191,7 +191,7 @@ describe("Scheduler store", () => {
 });
 
 describe("Scheduler: event automations", () => {
-  const on = { kind: "app" as const, trigger: "GMAIL_NEW_GMAIL_MESSAGE", account: "evan@example.com", instance: "ti_1" };
+  const on = { kind: "app" as const, trigger: "GMAIL_NEW_GMAIL_MESSAGE", account: "ezra@example.com", instance: "ti_1" };
 
   it("saves one with an event and no time; it never comes due and isn't pushed to Maritime", () => {
     const s = new Scheduler(tempState(), { now: () => new Date("2026-11-08T12:00:00Z") });

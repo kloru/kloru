@@ -75,9 +75,9 @@ describe("owner API", () => {
 
   it("upserts contacts with normalized phones and refuses bad tiers", async () => {
     const { call } = setup();
-    const c = (await call("contacts.upsert", { name: "Sam Lee", phones: ["(415) 555-0190"], emails: ["Sam@X.com"], tier: "friend" })).result as { phones: string[]; emails: string[]; tier: string };
+    const c = (await call("contacts.upsert", { name: "Sam Lee", phones: ["(415) 555-0190"], emails: ["Sam@X.example"], tier: "friend" })).result as { phones: string[]; emails: string[]; tier: string };
     expect(c.phones).toEqual(["+14155550190"]);
-    expect(c.emails).toEqual(["sam@x.com"]);
+    expect(c.emails).toEqual(["sam@x.example"]);
     expect(c.tier).toBe("friend");
     expect(((await call("contacts.list")).result as unknown[]).length).toBe(1);
     expect((await call("contacts.upsert", { name: "X", tier: "overlord" })).status).toBe(400);
@@ -126,8 +126,8 @@ describe("owner API", () => {
     const apps: OwnerApiApps = {
       connectedToolkits: vi.fn(async () => [{ slug: "gmail", connected: true }, { slug: "googlecalendar", connected: false }]),
       accounts: vi.fn(async () => [
-        { id: "ca_1", toolkit: "gmail", email: "evan@gmail.com", status: "connected" as const },
-        { id: "ca_2", toolkit: "gmail", email: "evan@work.example.com", status: "connected" as const },
+        { id: "ca_1", toolkit: "gmail", email: "ezra@gmail.example", status: "connected" as const },
+        { id: "ca_2", toolkit: "gmail", email: "ezra@work.example.com", status: "connected" as const },
       ]),
       connectLink: vi.fn(async () => "https://composio/x"),
       disconnect: vi.fn(async () => 1),
@@ -135,13 +135,13 @@ describe("owner API", () => {
     };
     const { call } = setup({ apps });
     expect((await call("apps.list")).result).toEqual([
-      { slug: "gmail", connected: true, accounts: [{ id: "ca_1", email: "evan@gmail.com", status: "connected" }, { id: "ca_2", email: "evan@work.example.com", status: "connected" }] },
+      { slug: "gmail", connected: true, accounts: [{ id: "ca_1", email: "ezra@gmail.example", status: "connected" }, { id: "ca_2", email: "ezra@work.example.com", status: "connected" }] },
       { slug: "googlecalendar", connected: false, accounts: [] },
     ]);
     expect((await call("apps.connect", { toolkit: "gmail", callbackUrl: "https://app/return" })).result).toEqual({ url: "https://composio/x" });
     expect(apps.connectLink).toHaveBeenCalledWith("gmail", "https://app/return");
-    await call("apps.connect", { toolkit: "gmail", callbackUrl: "https://app/connect/t/done", person: "cara" });
-    expect(apps.connectLink).toHaveBeenLastCalledWith("gmail", "https://app/connect/t/done", { person: "cara" });
+    await call("apps.connect", { toolkit: "gmail", callbackUrl: "https://app/connect/t/done", person: "cleo" });
+    expect(apps.connectLink).toHaveBeenLastCalledWith("gmail", "https://app/connect/t/done", { person: "cleo" });
     expect((await call("apps.disconnect", { toolkit: "gmail" })).result).toEqual({ ok: true, removed: 1 });
     expect((await call("apps.disconnect", { toolkit: "gmail", account: "ca_2" })).result).toEqual({ ok: true, removed: 1 });
     expect(apps.disconnectAccount).toHaveBeenCalledWith("ca_2");
@@ -170,10 +170,10 @@ describe("owner API", () => {
 describe("texting.status", () => {
   it("for a phone, or for a family member by contact id", async () => {
     const asked: string[] = [];
-    const { call, contacts } = setup({ texting: (phone) => (asked.push(phone), { number: "+16504849720", texted: phone === "+14155550191" ? "2026-10-31T09:00:00Z" : undefined }) as never });
-    const cara = contacts.upsert({ name: "Cara", phones: ["+14155550191"], tier: "partner" } as never);
-    expect((await call("texting.status", { phone: "+14155550190" })).result).toEqual({ number: "+16504849720" });
-    expect((await call("texting.status", { person: cara.id })).result).toMatchObject({ texted: "2026-10-31T09:00:00Z" });
+    const { call, contacts } = setup({ texting: (phone) => (asked.push(phone), { number: "+16505550142", texted: phone === "+14155550191" ? "2026-10-31T09:00:00Z" : undefined }) as never });
+    const cleo = contacts.upsert({ name: "Cleo", phones: ["+14155550191"], tier: "partner" } as never);
+    expect((await call("texting.status", { phone: "+14155550190" })).result).toEqual({ number: "+16505550142" });
+    expect((await call("texting.status", { person: cleo.id })).result).toMatchObject({ texted: "2026-10-31T09:00:00Z" });
     expect(asked).toEqual(["+14155550190", "+14155550191"]);
     expect((await call("texting.status", { person: "nobody" })).status).toBe(404);
   });
@@ -221,7 +221,7 @@ describe("owner API: automations (recurring jobs)", () => {
         if (i >= 0) list.splice(i, 1);
         return i >= 0;
       },
-      nameOf: (phone: string) => (phone === "+14155550190" ? "Evan" : undefined),
+      nameOf: (phone: string) => (phone === "+14155550190" ? "Ezra" : undefined),
     };
     return { list, ...setup({ automations }) };
   }
@@ -229,7 +229,7 @@ describe("owner API: automations (recurring jobs)", () => {
   it("lists the desk's automations in words, with who each is for; never the agent's own jobs", async () => {
     const { call } = withAutomations();
     expect((await call("automations.list")).result).toEqual([
-      { id: "s_1", name: "Morning debrief", when: "weekdays at 7:00 AM", request: "Text me my day", enabled: true, nextRunAt: "2026-11-02T15:00:00.000Z", for: "Evan" },
+      { id: "s_1", name: "Morning debrief", when: "weekdays at 7:00 AM", request: "Text me my day", enabled: true, nextRunAt: "2026-11-02T15:00:00.000Z", for: "Ezra" },
     ]);
   });
 
@@ -269,8 +269,8 @@ describe("owner API: editing a page from the website", () => {
 
 describe("owner API: who's in the family", () => {
   it("family.lookup says owner, member or nobody, for website sign-in", async () => {
-    const { call } = setup({ family: (phone) => (phone === "+14155550191" ? { role: "owner", name: "Cara" } : phone === "+14155550123" ? { role: "member", name: "Dad", person: "dad" } : undefined) });
-    expect((await call("family.lookup", { phone: "+14155550191" })).result).toEqual({ role: "owner", name: "Cara" });
+    const { call } = setup({ family: (phone) => (phone === "+14155550191" ? { role: "owner", name: "Cleo" } : phone === "+14155550123" ? { role: "member", name: "Dad", person: "dad" } : undefined) });
+    expect((await call("family.lookup", { phone: "+14155550191" })).result).toEqual({ role: "owner", name: "Cleo" });
     expect((await call("family.lookup", { phone: "+14155550123" })).result).toEqual({ role: "member", name: "Dad", person: "dad" });
     expect((await call("family.lookup", { phone: "+14155550199" })).result).toBeNull();
   });

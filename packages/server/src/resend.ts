@@ -67,7 +67,7 @@ export interface ResendClient {
 
 /**
  * The one mailbox an email is from, as DMARC checked it: a bare address, or `Name <address>`. A
- * display name holding an address or a second mailbox ("Evan <evan@work.example.com>" <x@evil.com>) is
+ * display name holding an address or a second mailbox ("Ezra <ezra@work.example.com>" <x@evil.example>) is
  * refused (empty), so a name can never stand in for the address that was authenticated.
  */
 export function senderAddress(raw: string): string {

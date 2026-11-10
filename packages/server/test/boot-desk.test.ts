@@ -24,7 +24,7 @@ describe("boot: desk", () => {
     const models = createModels();
     models.setProvider(faux.provider);
     const streamFn = models.streamSimple.bind(models) as unknown as StreamFn;
-    const env = { INSTINCT_DATA_DIR: dataDir, INSTINCT_OWNER_NAME: "Evan", INSTINCT_OWNER_PHONE: "+14155550190", INSTINCT_AGENT_NAME: "Kloru", INSTINCT_MODEL: "faux/faux-1", INSTINCT_COMPUTER: "none", INSTINCT_SKILLS_DIR: join(dataDir, "no-skills"), ...extra };
+    const env = { INSTINCT_DATA_DIR: dataDir, INSTINCT_OWNER_NAME: "Ezra", INSTINCT_OWNER_PHONE: "+14155550190", INSTINCT_AGENT_NAME: "Kloru", INSTINCT_MODEL: "faux/faux-1", INSTINCT_COMPUTER: "none", INSTINCT_SKILLS_DIR: join(dataDir, "no-skills"), ...extra };
     app = await boot(env, { model: faux.getModel("faux-1"), streamFn, logger: (m) => logs.push(m) });
     return app;
   }

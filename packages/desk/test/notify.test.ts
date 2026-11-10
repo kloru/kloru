@@ -33,7 +33,7 @@ const settle = async (ms = 60) => {
   const end = Date.now() + ms;
   while (Date.now() < end) await new Promise((r) => setTimeout(r, 5));
 };
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 
 function setup(o: { send?: (n: Notice) => Promise<boolean> } = {}) {
   const host = new Host();
@@ -52,11 +52,11 @@ function setup(o: { send?: (n: Notice) => Promise<boolean> } = {}) {
 describe("after hang-up, no note is written in code (the PM writes the rare one; see coms.test.ts)", () => {
   it("calling back before anything goes out: the new call carries the result", async () => {
     const { host, desk, sent } = setup();
-    const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
     const a = desk.fileIssue(call.id, "Check email");
     await settle(20);
     desk.endCall(call.id);
-    const next = desk.startCall({ callSid: "CA2", phone: EVAN, channel: "voice" });
+    const next = desk.startCall({ callSid: "CA2", phone: EZRA, channel: "voice" });
     host.last(a.id).finish("Nothing new.");
     await settle(150);
     expect(sent).toEqual([]);
@@ -65,14 +65,14 @@ describe("after hang-up, no note is written in code (the PM writes the rare one;
 
   it("a result that lands after the call ended isn't sent by code; the next call still carries it", async () => {
     const { host, desk, sent } = setup();
-    const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
     const a = desk.fileIssue(call.id, "Find a dentist");
     await settle(20);
     desk.endCall(call.id);
-    host.last(a.id).finish("Rockridge Kids Dental.");
+    host.last(a.id).finish("Maplewood Kids Dental.");
     await settle(150);
     expect(sent).toEqual([]);
-    expect(desk.startCall({ callSid: "CA2", phone: EVAN, channel: "voice" }).pending).toBe(1);
+    expect(desk.startCall({ callSid: "CA2", phone: EZRA, channel: "voice" }).pending).toBe(1);
   });
 });
 
@@ -80,26 +80,26 @@ describe("texting the caller mid-call", () => {
   it("a worker can send the person who asked a text or email; it's recorded like any notice", async () => {
     const sent: Notice[] = [];
     const { desk, host } = setup({ send: async (n) => (sent.push(n), true) });
-    const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
     const issue = desk.fileIssue(call.id, "Text me the link when you're done");
     await settle(20);
     const r = await desk.messageCaller(issue.id, "Here's the link: https://example.com/gift", "imessage");
     expect(r.ok).toBe(true);
-    expect(sent).toEqual([expect.objectContaining({ phone: EVAN, channel: "imessage", text: "Here's the link: https://example.com/gift" })]);
-    expect(desk.repo.notifications(EVAN)).toMatchObject([{ channel: "imessage", issues: [issue.id] }]);
+    expect(sent).toEqual([expect.objectContaining({ phone: EZRA, channel: "imessage", text: "Here's the link: https://example.com/gift" })]);
+    expect(desk.repo.notifications(EZRA)).toMatchObject([{ channel: "imessage", issues: [issue.id] }]);
     void host;
   });
 
   it("without a way to send, it says so", async () => {
     const d = new Desk({ root: mkdtempSync(join(tmpdir(), "notify-")), host: new Host(), planner: new PM() });
-    const { call } = d.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+    const { call } = d.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
     const issue = d.fileIssue(call.id, "Text me");
     expect((await d.messageCaller(issue.id, "hi")).ok).toBe(false);
   });
 
   it("desk workers don't get the old messaging tools; they use send_to_caller", async () => {
     const { desk, host } = setup();
-    const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
     desk.fileIssue(call.id, "Find a gift");
     await settle(20);
     const role = (host.runs.at(-1) as unknown as { role?: { visible?: (t: { spec: { name: string } }) => boolean } }).role;
@@ -109,7 +109,7 @@ describe("texting the caller mid-call", () => {
 
   it("nor the old approval tools: a yes is asked on the desk (confirm, ownerApproval), never by a side text", async () => {
     const { desk, host } = setup();
-    const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
     desk.fileIssue(call.id, "Email Anthony that I want the $5M coverage");
     await settle(20);
     const role = (host.runs.at(-1) as unknown as { role?: { visible?: (t: { spec: { name: string } }) => boolean } }).role;
@@ -122,14 +122,14 @@ describe("results never wait on another open conversation", () => {
   it("a call's results go into the person's open text conversation instead of waiting for it to end", async () => {
     const sent: Notice[] = [];
     const { desk, host } = setup({ send: async (n) => (sent.push(n), true) });
-    const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
     const issue = desk.fileIssue(call.id, "Find a dentist");
     await settle(20);
     desk.endCall(call.id);
-    const text = desk.startCall({ callSid: "imessage:m1", phone: EVAN, channel: "imessage" }).call;
-    host.last(issue.id).finish("Rockridge has openings.");
+    const text = desk.startCall({ callSid: "imessage:m1", phone: EZRA, channel: "imessage" }).call;
+    host.last(issue.id).finish("Maplewood has openings.");
     await settle(150);
-    expect(desk.repo.inbox(text.id, 0).map((m) => m.text).join(" ")).toContain("Rockridge has openings.");
+    expect(desk.repo.inbox(text.id, 0).map((m) => m.text).join(" ")).toContain("Maplewood has openings.");
     expect(desk.repo.undelivered(call.id)).toEqual([]);
     expect(sent).toEqual([]);
   });

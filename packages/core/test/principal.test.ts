@@ -51,12 +51,12 @@ describe("resolvePrincipal", () => {
 
   it("a co-owner (a contact at tier owner) keeps tier owner by phone, but email still caps at partner", () => {
     const c = contacts();
-    c.upsert({ name: "Cara Black", tier: "owner", phones: ["(415) 555-0191"], emails: ["cara@example.com"] });
+    c.upsert({ name: "Cleo Hale", tier: "owner", phones: ["(415) 555-0191"], emails: ["cleo@example.com"] });
     const p = resolvePrincipal(inbound({ channel: "imessage", from: "+14155550191" }), config, c);
     expect(p.kind).toBe("contact");
     expect(p.tier).toBe("owner");
-    expect(p.displayName).toBe("Cara Black");
-    expect(resolvePrincipal(inbound({ channel: "email", from: "cara@example.com" }), config, c).tier).toBe("partner");
+    expect(p.displayName).toBe("Cleo Hale");
+    expect(resolvePrincipal(inbound({ channel: "email", from: "cleo@example.com" }), config, c).tier).toBe("partner");
   });
 
   it("reduces the owner's own email address to a partner-tier contact, because From can be forged", () => {
@@ -106,8 +106,8 @@ describe("resolvePrincipal", () => {
     const c = contacts();
     const sms = resolvePrincipal(inbound({ channel: "imessage", from: "(212) 555-0000" }), config, c);
     expect(sms).toMatchObject({ kind: "stranger", tier: "stranger", id: "stranger:imessage:+12125550000", phone: "+12125550000" });
-    const mail = resolvePrincipal(inbound({ channel: "email", from: "Nobody@Nowhere.org" }), config, c);
-    expect(mail).toMatchObject({ kind: "stranger", id: "stranger:email:nobody@nowhere.org", email: "nobody@nowhere.org" });
+    const mail = resolvePrincipal(inbound({ channel: "email", from: "Nobody@Nowhere.example" }), config, c);
+    expect(mail).toMatchObject({ kind: "stranger", id: "stranger:email:nobody@nowhere.example", email: "nobody@nowhere.example" });
     const a2a = resolvePrincipal(inbound({ channel: "a2a", from: "unknown-bot" }), config, c);
     expect(a2a).toMatchObject({ kind: "stranger", tier: "stranger", id: "stranger:a2a:unknown-bot", agentHandle: "unknown-bot" });
     expect(a2a.contactId).toBeUndefined();

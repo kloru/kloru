@@ -24,7 +24,7 @@ export function artifactTools(desk: Desk): RegisteredTool[] {
       description:
         "Make the page for this task (markdown: headings, lists, tables, links, images as ![name](/m/<id>)): a comparison, a plan, a report, options. One page per task; follow-ups edit it with artifact_update. Returns the link.",
       parameters: Type.Object({
-        title: Type.String({ description: "short, plain title, e.g. Atlanta flights, Nov 3–5" }),
+        title: Type.String({ description: "short, plain title, e.g. Tucson flights, Nov 3–5" }),
         markdown: Type.String({ description: "the page, in markdown, with a heading per part so parts can be edited later" }),
       }),
       meta: { capabilities: [], group: "files" as const },

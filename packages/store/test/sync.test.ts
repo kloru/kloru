@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { Store } from "../src/store.js";
 import { AccountsSyncer, Syncer, type Execute } from "../src/sync.js";
 
-const ACCOUNT = "evan@example.com";
+const ACCOUNT = "ezra@example.com";
 const NOW = new Date("2026-10-29T08:00:00Z");
 
 const msg = (id: string, at: string, o: Record<string, unknown> = {}) => ({
@@ -13,7 +13,7 @@ const msg = (id: string, at: string, o: Record<string, unknown> = {}) => ({
   threadId: `t-${id}`,
   messageTimestamp: at,
   labelIds: ["INBOX", "UNREAD"],
-  sender: "Cara Marshall <cara@example.com>",
+  sender: "Cleo Vega <cleo@example.com>",
   to: ACCOUNT,
   subject: `Subject ${id}`,
   messageText: `Body of ${id}`,
@@ -22,8 +22,8 @@ const msg = (id: string, at: string, o: Record<string, unknown> = {}) => ({
 });
 const ev = (id: string, start: string, o: Record<string, unknown> = {}) => ({
   source_calendar_id: "primary",
-  source_calendar_summary: "Evan",
-  event: { id, summary: `Event ${id}`, status: "confirmed", start: { dateTime: start }, end: { dateTime: new Date(Date.parse(start) + 3_600_000).toISOString() }, htmlLink: `https://calendar/${id}`, location: "Rockridge", attendees: [{ email: "cara@example.com" }], ...o },
+  source_calendar_summary: "Ezra",
+  event: { id, summary: `Event ${id}`, status: "confirmed", start: { dateTime: start }, end: { dateTime: new Date(Date.parse(start) + 3_600_000).toISOString() }, htmlLink: `https://calendar/${id}`, location: "Maplewood", attendees: [{ email: "cleo@example.com" }], ...o },
 });
 
 /** A fake Composio: records calls, answers from scripted handlers. */
@@ -62,7 +62,7 @@ describe("syncing Gmail", () => {
     expect(store.counts()).toEqual({ email: 4 });
     const hit = store.search({ query: "dinner parents" })[0]!;
     expect(hit).toMatchObject({ externalId: "m1", account: ACCOUNT, title: "Dinner Saturday?", occurredAt: "2026-10-20T10:00:00Z", url: "https://mail.google.com/mail/u/0/#inbox/m1" });
-    expect(hit.people).toEqual(["Cara Marshall <cara@example.com>", ACCOUNT]);
+    expect(hit.people).toEqual(["Cleo Vega <cleo@example.com>", ACCOUNT]);
     expect(hit.data).toMatchObject({ threadId: "t-m1", unread: true });
     expect(await syncer.gmailFill(1)).toBe(0); // done is done
   });
@@ -122,15 +122,15 @@ describe("syncing Calendar", () => {
     const { store, syncer } = setup({
       GOOGLECALENDAR_EVENTS_LIST_ALL_CALENDARS: (a) => {
         args = a;
-        return { events: [ev("e1", "2026-10-30T16:00:00Z"), ev("e2", "2026-10-30T22:00:00Z", { summary: "Maya dentist" })] };
+        return { events: [ev("e1", "2026-10-30T16:00:00Z"), ev("e2", "2026-10-30T22:00:00Z", { summary: "Nora dentist" })] };
       },
     });
     await syncer.calendar({ full: true });
     expect(args).toMatchObject({ single_events: true, show_deleted: true, response_detail: "full" });
     const day = store.calendar("2026-10-30T07:00:00Z", "2026-10-31T07:00:00Z");
-    expect(day.map((e) => e.title)).toEqual(["Event e1", "Maya dentist"]);
-    expect(day[1]).toMatchObject({ externalId: "primary:e2", url: "https://calendar/e2", people: ["cara@example.com"] });
-    expect(day[1]!.body).toContain("Rockridge");
+    expect(day.map((e) => e.title)).toEqual(["Event e1", "Nora dentist"]);
+    expect(day[1]).toMatchObject({ externalId: "primary:e2", url: "https://calendar/e2", people: ["cleo@example.com"] });
+    expect(day[1]!.body).toContain("Maplewood");
   });
 
   it("an event cancelled or gone from the window is marked deleted", async () => {
@@ -145,9 +145,9 @@ describe("syncing Calendar", () => {
   });
 
   it("all-day events are kept as dates", async () => {
-    const { store, syncer } = setup({ GOOGLECALENDAR_EVENTS_LIST_ALL_CALENDARS: () => ({ events: [{ source_calendar_id: "primary", event: { id: "a1", summary: "Atlanta trip", status: "confirmed", start: { date: "2026-11-03" }, end: { date: "2026-11-06" } } }] }) });
+    const { store, syncer } = setup({ GOOGLECALENDAR_EVENTS_LIST_ALL_CALENDARS: () => ({ events: [{ source_calendar_id: "primary", event: { id: "a1", summary: "Tucson trip", status: "confirmed", start: { date: "2026-11-03" }, end: { date: "2026-11-06" } } }] }) });
     await syncer.calendar({ full: true });
-    expect(store.calendar("2026-11-04T00:00:00Z", "2026-11-05T00:00:00Z")[0]).toMatchObject({ title: "Atlanta trip", startsAt: "2026-11-03", endsAt: "2026-11-06" });
+    expect(store.calendar("2026-11-04T00:00:00Z", "2026-11-05T00:00:00Z")[0]).toMatchObject({ title: "Tucson trip", startsAt: "2026-11-03", endsAt: "2026-11-06" });
   });
 });
 
@@ -161,17 +161,17 @@ describe("several accounts", () => {
       return { ok: true, data: { events: [ev(`e-${account}`, "2026-10-29T17:00:00Z")] } };
     };
     const accounts = async () => [
-      { id: "ca_home_mail", toolkit: "gmail", email: "evan@gmail.com", status: "connected" as const },
-      { id: "ca_work_mail", toolkit: "gmail", email: "evan@work.example.com", status: "connected" as const },
+      { id: "ca_home_mail", toolkit: "gmail", email: "ezra@gmail.example", status: "connected" as const },
+      { id: "ca_work_mail", toolkit: "gmail", email: "ezra@work.example.com", status: "connected" as const },
       { id: "ca_old", toolkit: "gmail", status: "expired" as const },
-      { id: "ca_work_cal", toolkit: "googlecalendar", email: "evan@work.example.com", status: "connected" as const },
+      { id: "ca_work_cal", toolkit: "googlecalendar", email: "ezra@work.example.com", status: "connected" as const },
     ];
     const s = new AccountsSyncer({ store, accounts, execute, log: () => {}, now: () => NOW });
     await s.calendar();
     await s.gmailFill(1);
     expect(calls.filter((c) => c.slug.startsWith("GOOGLECALENDAR")).map((c) => c.account)).toEqual(["ca_work_cal"]);
     expect(new Set(calls.filter((c) => c.slug === "GMAIL_FETCH_EMAILS").map((c) => c.account))).toEqual(new Set(["ca_home_mail", "ca_work_mail"]));
-    expect(store.syncStates().map((st) => `${st.source} ${st.account}`).sort()).toEqual(["gmail-fill evan@gmail.com", "gmail-fill evan@work.example.com", "googlecalendar evan@work.example.com"]);
+    expect(store.syncStates().map((st) => `${st.source} ${st.account}`).sort()).toEqual(["gmail-fill ezra@gmail.example", "gmail-fill ezra@work.example.com", "googlecalendar ezra@work.example.com"]);
   });
 
   it("one account failing doesn't stop the others", async () => {
@@ -179,11 +179,11 @@ describe("several accounts", () => {
     const execute = async (_slug: string, _args: Record<string, unknown>, account: string) =>
       account === "ca_a" ? { ok: false, error: "token expired" } : { ok: true, data: { events: [ev("e1", "2026-10-29T17:00:00Z")] } };
     const accounts = async () => [
-      { id: "ca_a", toolkit: "googlecalendar", email: "a@x.com", status: "connected" as const },
-      { id: "ca_b", toolkit: "googlecalendar", email: "b@x.com", status: "connected" as const },
+      { id: "ca_a", toolkit: "googlecalendar", email: "a@x.example", status: "connected" as const },
+      { id: "ca_b", toolkit: "googlecalendar", email: "b@x.example", status: "connected" as const },
     ];
     const s = new AccountsSyncer({ store, accounts, execute, log: () => {}, now: () => NOW });
     expect(await s.calendar()).toBe(1);
-    expect(store.syncState("googlecalendar", "a@x.com")?.lastError).toContain("token expired");
+    expect(store.syncState("googlecalendar", "a@x.example")?.lastError).toContain("token expired");
   });
 });

@@ -6,10 +6,10 @@ import { StateDir, type ScheduleEntry } from "@kloru/core";
 import type { GateInput } from "../src/event-gate.js";
 import { Events, type EventsOptions } from "../src/events.js";
 
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 const TOKEN = "hook_token_0123456789abcdef";
-const entry = (e: Partial<ScheduleEntry> & Pick<ScheduleEntry, "id" | "on">): ScheduleEntry => ({ name: e.id, prompt: "Do the thing.", enabled: true, target: "desk", phone: EVAN, createdAt: "2026-11-08T00:00:00Z", ...e });
-const MAIL = entry({ id: "s_mail", name: "Email replies", prompt: "Draft a reply.", on: { kind: "app", trigger: "GMAIL_NEW_GMAIL_MESSAGE", label: "New Gmail Message", account: "evan@example.com", instance: "ti_mail" }, when: "an email I need to answer" });
+const entry = (e: Partial<ScheduleEntry> & Pick<ScheduleEntry, "id" | "on">): ScheduleEntry => ({ name: e.id, prompt: "Do the thing.", enabled: true, target: "desk", phone: EZRA, createdAt: "2026-11-08T00:00:00Z", ...e });
+const MAIL = entry({ id: "s_mail", name: "Email replies", prompt: "Draft a reply.", on: { kind: "app", trigger: "GMAIL_NEW_GMAIL_MESSAGE", label: "New Gmail Message", account: "ezra@example.com", instance: "ti_mail" }, when: "an email I need to answer" });
 const BELL = entry({ id: "s_bell", name: "Doorbell", on: { kind: "hook", token: TOKEN } });
 
 function setup(o: Partial<EventsOptions> & { list?: ScheduleEntry[] } = {}) {
@@ -41,12 +41,12 @@ const signed = (id: string) => ({ "webhook-id": id, "webhook-signature": "v1,goo
 describe("event automations: app events", () => {
   it("a signed event is kept, checked against the condition with their guidelines, and run when it passes", async () => {
     const { events, runs, gated, records } = setup();
-    expect(await events.fromApp(JSON.stringify({ sender: "cara@example.com", subject: "Dinner Saturday?" }), signed("msg_1"))).toBe(204);
+    expect(await events.fromApp(JSON.stringify({ sender: "cleo@example.com", subject: "Dinner Saturday?" }), signed("msg_1"))).toBe(204);
     await events.drain();
     expect(gated[0]).toMatchObject({ automation: "Email replies", request: "Draft a reply.", condition: "an email I need to answer", guidelines: "Short texts." });
     expect(gated[0]!.event).toContain("Dinner Saturday?");
     expect(runs).toHaveLength(1);
-    expect(runs[0]!.event).toMatch(/^New Gmail Message for evan@example.com, at 2026-11-08T12:00:00.000Z:\n/);
+    expect(runs[0]!.event).toMatch(/^New Gmail Message for ezra@example.com, at 2026-11-08T12:00:00.000Z:\n/);
     expect(records[0]).toMatchObject({ event: "app:msg_1", automation: "s_mail", run: true, p: 0.9 });
   });
 

@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bounded, browserTools, findChromium, sameSite } from "../src/browser-tools.js";
 
 const chrome = findChromium(process.env);
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 const PAGE = `<!doctype html><title>Checkout</title><h1>Checkout: total $42.00</h1>
 <form><label>Email <input name="email"></label><label>Password <input name="password" type="password"></label>
 <label>Card number <input name="cc" autocomplete="cc-number"></label><label>Expiry <input name="exp" autocomplete="cc-exp"></label>
@@ -65,14 +65,14 @@ describe.skipIf(!chrome)("browser tools on a real Chromium", () => {
   it("runs Playwright directly; secrets go in from outside the script, cards within their limits, and nothing shows a value", async () => {
     process.env.KLORU_TEST_SECRET_ENV = "should-not-reach-scripts";
     const root = mkdtempSync(join(tmpdir(), "browser-"));
-    const desk = new Desk({ root, host: new Host(), planner: { handle: async () => {} } as Planner, ownerPhone: EVAN });
+    const desk = new Desk({ root, host: new Host(), planner: { handle: async () => {} } as Planner, ownerPhone: EZRA });
     const vault = new Vault(join(root, "secrets", "vault.json"), Buffer.alloc(32, 3).toString("base64"));
-    vault.put({ name: "evan-shop-login", owner: EVAN, kind: "login", meta: { site: "127.0.0.1", username: "evan@example.com" }, secret: { password: "correct-horse-battery" }, createdBy: EVAN });
-    vault.put({ name: "evan-pge-login", owner: EVAN, kind: "login", meta: { site: "pge.com", username: "evan@example.com" }, secret: { password: "pge-only-secret" }, createdBy: EVAN });
-    vault.put({ name: "evan-visa", owner: EVAN, kind: "card", meta: { brand: "Visa", limits: { perPurchaseUsd: 40, perDayUsd: 100 } }, secret: { number: "4242424242424242", exp: "12/29", cvc: "123", name: "Evan", zip: "94105" }, createdBy: EVAN });
+    vault.put({ name: "ezra-shop-login", owner: EZRA, kind: "login", meta: { site: "127.0.0.1", username: "ezra@example.com" }, secret: { password: "correct-horse-battery" }, createdBy: EZRA });
+    vault.put({ name: "ezra-pge-login", owner: EZRA, kind: "login", meta: { site: "pge.com", username: "ezra@example.com" }, secret: { password: "pge-only-secret" }, createdBy: EZRA });
+    vault.put({ name: "ezra-visa", owner: EZRA, kind: "card", meta: { brand: "Visa", limits: { perPurchaseUsd: 40, perDayUsd: 100 } }, secret: { number: "4242424242424242", exp: "12/29", cvc: "123", name: "Ezra", zip: "94105" }, createdBy: EZRA });
     const { tools, pool } = browserTools({ desk, vault, profilesDir: join(root, "browser"), executablePath: chrome!, log: () => {} });
     const t = Object.fromEntries(tools.map((x) => [x.spec.name, x]));
-    const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
     const issue = desk.fileIssue(call.id, "Buy the thing");
     const ctx = { conversationKey: `desk:issue:${issue.id}:engineer` } as never;
     const text = (r: unknown) => JSON.stringify(r);
@@ -83,12 +83,12 @@ describe.skipIf(!chrome)("browser tools on a real Chromium", () => {
       const picked = text(await run(`await page.selectOption("select[name=entryTime]", { label: "11:30 AM" }); await page.locator("[name=entryDate]").evaluate((e) => { e.value = "11/03/2026"; e.dispatchEvent(new Event("change")); }); return page.title();`));
       expect(picked).toContain("date 11/03/2026");
       // A login goes in from outside the script; reading it back shows only its reference.
-      const typed = text(await run(`await fillSecret("[name=password]", "evan-shop-login.password"); return await page.inputValue("[name=password]");`));
+      const typed = text(await run(`await fillSecret("[name=password]", "ezra-shop-login.password"); return await page.inputValue("[name=password]");`));
       expect(typed).not.toContain("correct-horse-battery");
-      expect(typed).toContain("{{vault:evan-shop-login.password}}");
+      expect(typed).toContain("{{vault:ezra-shop-login.password}}");
       // Another site's password stays with that site; a card never goes in through a script.
-      expect(text(await run(`return await fillSecret("[name=password]", "evan-pge-login.password");`))).toMatch(/login for pge.com/);
-      expect(text(await run(`return await fillSecret("[name=cc]", "evan-visa.number");`))).toMatch(/browser_pay/);
+      expect(text(await run(`return await fillSecret("[name=password]", "ezra-pge-login.password");`))).toMatch(/login for pge.com/);
+      expect(text(await run(`return await fillSecret("[name=cc]", "ezra-visa.number");`))).toMatch(/browser_pay/);
       // The invisible reCAPTCHA badge asks nothing; a checkbox challenge is the person's to do.
       const badge = `<div class="grecaptcha-badge"><iframe title="reCAPTCHA" src="about:blank" width="256" height="60"></iframe></div>`;
       expect(text(await run(`await page.setContent(${JSON.stringify(badge)}); return "ok"`))).not.toMatch(/CAPTCHA or human check/);
@@ -103,22 +103,22 @@ describe.skipIf(!chrome)("browser tools on a real Chromium", () => {
       await new Promise((r) => setTimeout(r, 300));
       const link = /\/b\/([A-Za-z0-9_-]+)/.exec(told[0] ?? "")?.[1] ?? "";
       expect(await pool.takeoverFrame(link, "+15555550000")).toBeUndefined();
-      const frame = await pool.takeoverFrame(link, EVAN);
+      const frame = await pool.takeoverFrame(link, EZRA);
       expect(frame).toMatchObject({ width: 430, reason: "Tick the box" });
-      expect(await pool.takeoverInput(link, EVAN, { kind: "click", x: 100, y: 50 })).toBe(true);
-      expect(pool.finishTakeover(link, EVAN)).toBe(true);
+      expect(await pool.takeoverInput(link, EZRA, { kind: "click", x: 100, y: 50 })).toBe(true);
+      expect(pool.finishTakeover(link, EZRA)).toBe(true);
       expect(text(await waiting)).toMatch(/They tapped Done.*tapped/s);
       await run(`await page.goto(${JSON.stringify(base)})`);
       // The script has none of Kloru's environment.
       expect(text(await run(`return process.env.KLORU_TEST_SECRET_ENV ?? "none"`))).toContain("none");
-      const pay = (total: number) => t.browser_pay!.spec.execute({ card: "evan-visa", merchant: "Test Shop (127.0.0.1)", total_usd: total, checked: "local test page", number: "[name=cc]", exp: "[name=exp]", cvc: "[name=cvc]" }, ctx);
+      const pay = (total: number) => t.browser_pay!.spec.execute({ card: "ezra-visa", merchant: "Test Shop (127.0.0.1)", total_usd: total, checked: "local test page", number: "[name=cc]", exp: "[name=exp]", cvc: "[name=cvc]" }, ctx);
       // A card field inside its own iframe, named the way card forms do it.
       await run(`await page.setContent('<iframe name="card-number" srcdoc="<input id=secure-payment-field>"></iframe>'); await page.waitForTimeout(200);`);
-      expect(text(await t.browser_pay!.spec.execute({ card: "evan-visa", merchant: "Test Shop (127.0.0.1)", total_usd: 5, checked: "local test page", number: 'iframe[name="card-number"] >> #secure-payment-field' }, ctx))).toMatch(/Filled evan-visa/);
-      expect(text(await run(`return await page.frame({ name: "card-number" }).inputValue("#secure-payment-field")`))).toContain("{{vault:evan-visa.number}}");
+      expect(text(await t.browser_pay!.spec.execute({ card: "ezra-visa", merchant: "Test Shop (127.0.0.1)", total_usd: 5, checked: "local test page", number: 'iframe[name="card-number"] >> #secure-payment-field' }, ctx))).toMatch(/Filled ezra-visa/);
+      expect(text(await run(`return await page.frame({ name: "card-number" }).inputValue("#secure-payment-field")`))).toContain("{{vault:ezra-visa.number}}");
       await run(`await page.goto(${JSON.stringify(base)})`);
       expect(text(await pay(42))).toMatch(/limit of \$40 a purchase/);
-      expect(text(await pay(35))).toMatch(/Filled evan-visa/);
+      expect(text(await pay(35))).toMatch(/Filled ezra-visa/);
       expect(text(await run(`return await page.inputValue("[name=cc]")`))).not.toMatch(/4242424242424242|4242 4242/);
       const purchase = desk.repo.ledger().find((e) => e.slug === "PURCHASE" && e.ok);
       expect(desk.repo.ledger().filter((e) => e.slug === "PURCHASE" && e.ok).map((e) => (e.args as { totalUsd: number }).totalUsd)).toEqual([5, 35]);
@@ -131,10 +131,10 @@ describe.skipIf(!chrome)("browser tools on a real Chromium", () => {
 
   it("a run that never returns ends when the worker is stopped, not minutes later", async () => {
     const root = mkdtempSync(join(tmpdir(), "browser-"));
-    const desk = new Desk({ root, host: new Host(), planner: { handle: async () => {} } as Planner, ownerPhone: EVAN });
+    const desk = new Desk({ root, host: new Host(), planner: { handle: async () => {} } as Planner, ownerPhone: EZRA });
     const { tools, pool } = browserTools({ desk, profilesDir: join(root, "browser"), executablePath: chrome!, log: () => {} });
     const run = tools.find((x) => x.spec.name === "browser_run")!;
-    const { call } = desk.startCall({ callSid: "CA2", phone: EVAN, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA2", phone: EZRA, channel: "voice" });
     const issue = desk.fileIssue(call.id, "Read a page");
     const ctx = { conversationKey: `desk:issue:${issue.id}:engineer` } as never;
     try {

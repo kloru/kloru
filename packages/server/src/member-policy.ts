@@ -1,5 +1,5 @@
 /**
- * The owner says who's in the family and what they may do ("Add my wife Cara, she should be able
+ * The owner says who's in the family and what they may do ("Add my wife Cleo, she should be able
  * to do and see everything"); a structured decision model (decision-models skill; Flash until a Jev
  * key) maps the words to a tier and grants. Code keeps out what no member may hold and writes the read-back (what they
  * are now, what they'd become, what they'd lose), and the owner's yes saves it with the words, which every later decision reads.
@@ -128,7 +128,7 @@ export function clampMember(raw: Raw, words: string, now?: Standing): MemberPlan
   const capabilities = asked.filter((c): c is Capability => (DELEGABLE as string[]).includes(c));
   const leftOut = asked.filter((c) => !(DELEGABLE as string[]).includes(c)) as Capability[];
   const not = leftOut.map((c) => OWNER_ONLY_PLAIN[c] ?? c);
-  // Every word Evan hears comes from what will be saved, never from the model's sentence.
+  // Every word Ezra hears comes from what will be saved, never from the model's sentence.
   const said = readBack(name, phone, tier, capabilities, now) + (not.length ? ` (Not ${not.join(", ")}: only you can.)` : "") + " Okay?";
   return { who: "person", name, phone, ...(raw.email.trim() ? { email: raw.email.trim().toLowerCase() } : {}), tier, capabilities, leftOut, readBack: said, words };
 }

@@ -20,8 +20,8 @@ Engineers find the answer and do whatever the request needs (read, research, wri
 exact change. Both can use every tool.
 
 Every assign uses the issue template:
-- goal: the final state the caller would notice ("Evan has the Docker summary in his inbox").
-- done_when: what must be true to call it done ("an email is sent to evan@work.example.com"). "Email me X" means sent, not drafted.
+- goal: the final state the caller would notice ("Ezra has the Docker summary in his inbox").
+- done_when: what must be true to call it done ("an email is sent to ezra@work.example.com"). "Email me X" means sent, not drafted.
 - deliverable: answer, email, message, page, event, change or automation.
 - spec: the details, with exact dates, names and ids from earlier results. A change says where the item is now
   (its id, or its current date) and where it goes.
@@ -73,8 +73,8 @@ const num = (description: string) => Type.Number({ description });
 /** The issue template (see PM_RULES): what done looks like, filled in on every assign. */
 const DELIVERABLES = ["answer", "email", "message", "page", "event", "change", "automation"] as const;
 const TEMPLATE = {
-  goal: str("the final state the caller would notice, e.g. \"Evan has the Docker summary in his inbox\""),
-  done_when: str("what must be true to call it done, e.g. \"an email is sent to evan@work.example.com\""),
+  goal: str("the final state the caller would notice, e.g. \"Ezra has the Docker summary in his inbox\""),
+  done_when: str("what must be true to call it done, e.g. \"an email is sent to ezra@work.example.com\""),
   deliverable: Type.Union(DELIVERABLES.map((d) => Type.Literal(d))),
 };
 const targetOf = (a: { goal: string; done_when: string; deliverable: Deliverable }): IssueTarget => ({ goal: a.goal, doneWhen: a.done_when, deliverable: a.deliverable });
@@ -218,7 +218,7 @@ export function pmTools(desk: Desk, done?: () => void): AgentTool<any>[] {
     t("close", "Close an issue: duplicate (link = the open issue), wont_do (cancelled), superseded (link = the replacement), not_planned.", Type.Object({ issue: num("issue number"), status: Type.Union([Type.Literal("duplicate"), Type.Literal("wont_do"), Type.Literal("superseded"), Type.Literal("not_planned"), Type.Literal("resolved")]), link: Type.Optional(num("related issue")), note: Type.Optional(str("why")) }), (a) => desk.close(a.issue, a.status as CloseStatus, { ...(a.link !== undefined ? { link: a.link } : {}), ...(a.note ? { note: a.note } : {}) })),
     t("ask_caller", "Ask the caller a question the work needs answered.", Type.Object({ issue: num("issue number"), question: str("one short question") }), (a) => desk.askCaller(a.issue, a.question)),
     t("merge", 'Merge into a call: kind "info" (what Kloru learned, or a question needing a yes) or "events" (what Kloru did). Defaults to the filer\'s call; pass call to tell someone else (conflicts).', Type.Object({ issue: num("issue number"), kind: Type.Union([Type.Literal("info"), Type.Literal("events")]), text: str("one or two short spoken sentences"), call: Type.Optional(str("call id")) }), (a) => desk.merge(a.issue, a.kind, a.text, a.call)),
-    t("set_policy", "Someone says who may or may not reach their own things ('don't let Cara read my work email'): adds a line to their own policy, read back for their yes.", Type.Object({ issue: num("issue number"), words: str("the line in their words, e.g. 'Cara can't read my work email'") }), (a) => desk.setPolicy(a.issue, a.words)),
+    t("set_policy", "Someone says who may or may not reach their own things ('don't let Cleo read my work email'): adds a line to their own policy, read back for their yes.", Type.Object({ issue: num("issue number"), words: str("the line in their words, e.g. 'Cleo can't read my work email'") }), (a) => desk.setPolicy(a.issue, a.words)),
     t("send_back", "The PR no longer fits: the same engineer continues with your note.", Type.Object({ issue: num("issue number"), note: str("what changed") }), (a) => desk.sendBack(a.issue, a.note)),
     {
       name: "tell_caller",

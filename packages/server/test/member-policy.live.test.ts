@@ -8,7 +8,7 @@ import { memberPolicy } from "../src/member-policy.js";
 const key = process.env.OPENROUTER_API_KEY;
 
 const CASES: Array<[string, { tier?: string; phone: string; has?: string[]; lacks?: string[] }]> = [
-  ["Add my wife Cara to the account, 415 555 0191. She should be able to do and see everything", { tier: "partner", phone: "+14155550191", has: ["email.read", "email.send", "calendar.write", "purchase", "travel.book"] }],
+  ["Add my wife Cleo to the account, 415 555 0191. She should be able to do and see everything", { tier: "partner", phone: "+14155550191", has: ["email.read", "email.send", "calendar.write", "purchase", "travel.book"] }],
   ["Add my mom Linda at 415 555 0100. She can see my calendar but nothing else", { tier: "family", phone: "+14155550100", has: ["calendar.read"], lacks: ["email.read", "calendar.write", "purchase"] }],
   ["My sister Kate, 510 555 0199, can add things to my calendar and order groceries", { phone: "+15105550199", has: ["calendar.write", "purchase"], lacks: ["email.read", "email.send"] }],
 ];

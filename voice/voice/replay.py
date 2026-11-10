@@ -269,7 +269,7 @@ async def replay(script: Script, cfg: Config, llm, speed: float = 1.0, max_s: fl
 
 # Scripts ------------------------------------------------------------------------------------
 
-BRIEF = "Caller: Evan. Lives in Oakland\nPeople: Maya: Evan's daughter, 3, at day care | Cara: Evan's wife\nKnown names: Maya, Cara"
+BRIEF = "Caller: Ezra. Lives in Portland\nPeople: Nora: Ezra's daughter, 3, at day care | Cleo: Ezra's wife\nKnown names: Nora, Cleo"
 
 SCRIPTS = [
     # Call CA393c42…: one lookup, a question while it runs, the result arriving mid-wait.
@@ -282,15 +282,15 @@ SCRIPTS = [
     # Two requests in one breath, results landing while the caller is still talking.
     Script(
         "two_asks_barge",
-        caller=[Say("Check my email for anything from Cara, and add pickup at 4:30 tomorrow to my calendar."), Say("Oh and Maya has a dentist thing Friday, I think.", pause_s=2.5, barge=True), Say("Thanks, that's all.", pause_s=2.0)],
-        results=[Result("One email from Cara this morning: dinner at her parents' Saturday at 6.", after_s=4.0, match="email"), Result("Added: Maya pickup, tomorrow 4:30 PM.", after_s=5.0, kind="events", match="calendar")],
+        caller=[Say("Check my email for anything from Cleo, and add pickup at 4:30 tomorrow to my calendar."), Say("Oh and Nora has a dentist thing Friday, I think.", pause_s=2.5, barge=True), Say("Thanks, that's all.", pause_s=2.0)],
+        results=[Result("One email from Cleo this morning: dinner at her parents' Saturday at 6.", after_s=4.0, match="email"), Result("Added: Nora pickup, tomorrow 4:30 PM.", after_s=5.0, kind="events", match="calendar")],
         brief=BRIEF,
     ),
     # A long wait with nothing to say: nudges must not turn into restated plans or repeats.
     Script(
         "long_wait",
-        caller=[Say("Research the best pediatric dentists near Rockridge for Maya."), Say("Great, thanks.", pause_s=26.0)],
-        results=[Result("Top pick: Rockridge Kids Dental, 4.9 stars, takes new patients, 0.6 miles away.", after_s=28.0)],
+        caller=[Say("Research the best pediatric dentists near Maplewood for Nora."), Say("Great, thanks.", pause_s=26.0)],
+        results=[Result("Top pick: Maplewood Kids Dental, 4.9 stars, takes new patients, 0.6 miles away.", after_s=28.0)],
         brief=BRIEF,
     ),
 ]

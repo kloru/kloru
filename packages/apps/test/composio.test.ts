@@ -564,7 +564,7 @@ describe("several accounts per app", () => {
     { id: "ca_half", status: "INITIATED", toolkit: { slug: "gmail" }, createdAt: "2026-10-29T11:00:00Z" },
     { id: "ca_home_cal", status: "ACTIVE", toolkit: { slug: "googlecalendar" }, createdAt: "2026-10-27T10:00:00Z" },
   ];
-  const who: Record<string, string> = { ca_home_mail: "evan@gmail.com", ca_work_mail: "evan@work.example.com", ca_home_cal: "evan@gmail.com", ca_work_cal: "evan@work.example.com" };
+  const who: Record<string, string> = { ca_home_mail: "ezra@gmail.example", ca_work_mail: "ezra@work.example.com", ca_home_cal: "ezra@gmail.example", ca_work_cal: "ezra@work.example.com" };
 
   function setup(o: { state?: ReturnType<typeof fakeState> } = {}) {
     const composio = fakeComposio();
@@ -584,7 +584,7 @@ describe("several accounts per app", () => {
         },
       },
     };
-    const state = o.state ?? fakeState({ [ACCOUNTS_FILE]: { ca_old_mail: "evan@gmail.com" } });
+    const state = o.state ?? fakeState({ [ACCOUNTS_FILE]: { ca_old_mail: "ezra@gmail.example" } });
     const apps = new ComposioApps({ ...base, mode: "router", state, adapters: { createComposio: () => client as never, connectMcp: fakeMcp().connectMcp } });
     return { apps, executed, deleted, list, state, composio };
   }
@@ -600,13 +600,13 @@ describe("several accounts per app", () => {
   it("lists every account by its email, oldest first; an expired one shows unless the same address is connected again; half-finished sign-ins don't show", async () => {
     const { apps, state } = setup();
     expect(await apps.accounts()).toEqual([
-      { id: "ca_home_mail", toolkit: "gmail", email: "evan@gmail.com", status: "connected" },
-      { id: "ca_work_mail", toolkit: "gmail", email: "evan@work.example.com", status: "connected" },
+      { id: "ca_home_mail", toolkit: "gmail", email: "ezra@gmail.example", status: "connected" },
+      { id: "ca_work_mail", toolkit: "gmail", email: "ezra@work.example.com", status: "connected" },
       { id: "ca_gone_mail", toolkit: "gmail", status: "expired" },
-      { id: "ca_home_cal", toolkit: "googlecalendar", email: "evan@gmail.com", status: "connected" },
-      { id: "ca_work_cal", toolkit: "googlecalendar", email: "evan@work.example.com", status: "connected" },
+      { id: "ca_home_cal", toolkit: "googlecalendar", email: "ezra@gmail.example", status: "connected" },
+      { id: "ca_work_cal", toolkit: "googlecalendar", email: "ezra@work.example.com", status: "connected" },
     ]);
-    expect(state.files[ACCOUNTS_FILE]).toMatchObject({ ca_home_mail: "evan@gmail.com", ca_work_cal: "evan@work.example.com" });
+    expect(state.files[ACCOUNTS_FILE]).toMatchObject({ ca_home_mail: "ezra@gmail.example", ca_work_cal: "ezra@work.example.com" });
   });
 
   it("an account connected from a member's link is hers; the rest are the owner's", async () => {
@@ -614,11 +614,11 @@ describe("several accounts per app", () => {
     const { apps, state, composio } = setup();
     (apps as unknown as { session: unknown }).session = { authorize };
     (apps as unknown as { connect: () => Promise<void> }).connect = async () => {};
-    expect(await apps.connectLink("gmail", undefined, { person: "cara" })).toBe("https://connect.example/gmail");
+    expect(await apps.connectLink("gmail", undefined, { person: "cleo" })).toBe("https://connect.example/gmail");
     const accounts = await apps.accounts();
-    expect(accounts.find((a) => a.id === "ca_work_mail")).toMatchObject({ email: "evan@work.example.com", person: "cara" });
+    expect(accounts.find((a) => a.id === "ca_work_mail")).toMatchObject({ email: "ezra@work.example.com", person: "cleo" });
     expect(accounts.find((a) => a.id === "ca_home_mail")!.person).toBeUndefined();
-    expect(state.files["app-account-people.json"]).toEqual({ ca_work_mail: "cara" });
+    expect(state.files["app-account-people.json"]).toEqual({ ca_work_mail: "cleo" });
     expect(apps.connected().map((a) => a.id)).toContain("ca_work_mail");
   });
 
@@ -650,10 +650,10 @@ describe("several accounts per app", () => {
     const { apps, executed } = setup();
     await apps.accounts();
     executed.length = 0;
-    await apps.execute("GMAIL_MOVE_TO_TRASH", { message_id: "m1" }, { account: "Evan@work.example.com" });
-    await apps.execute("GOOGLECALENDAR_PATCH_EVENT", { event_id: "e1" }, { account: "evan@gmail.com" });
+    await apps.execute("GMAIL_MOVE_TO_TRASH", { message_id: "m1" }, { account: "Ezra@work.example.com" });
+    await apps.execute("GOOGLECALENDAR_PATCH_EVENT", { event_id: "e1" }, { account: "ezra@gmail.example" });
     expect(executed.map((e) => e.body.connectedAccountId)).toEqual(["ca_work_mail", "ca_home_cal"]);
-    expect(await apps.execute("GMAIL_MOVE_TO_TRASH", { message_id: "m1" }, { account: "stranger@x.com" })).toEqual({ ok: false, error: "no connected Gmail account for stranger@x.com" });
+    expect(await apps.execute("GMAIL_MOVE_TO_TRASH", { message_id: "m1" }, { account: "stranger@x.example" })).toEqual({ ok: false, error: "no connected Gmail account for stranger@x.example" });
   });
 
   it("an add link starts a new sign-in alongside the existing ones", async () => {
@@ -670,8 +670,8 @@ describe("several accounts per app", () => {
     expect(apps.accountsLine()).toBe("");
     await apps.accounts();
     const line = apps.accountsLine();
-    expect(line).toContain("Gmail: evan@gmail.com (account ca_home_mail), evan@work.example.com (account ca_work_mail)");
-    expect(line).toContain("Calendar: evan@gmail.com (account ca_home_cal), evan@work.example.com (account ca_work_cal)");
+    expect(line).toContain("Gmail: ezra@gmail.example (account ca_home_mail), ezra@work.example.com (account ca_work_mail)");
+    expect(line).toContain("Calendar: ezra@gmail.example (account ca_home_cal), ezra@work.example.com (account ca_work_cal)");
     expect(line).toMatch(/account/);
   });
 
@@ -698,7 +698,7 @@ describe("apps beyond Google", () => {
       tools: {
         execute: async (slug: string, body: Record<string, unknown>) => {
           executed.push({ slug, body });
-          if (slug === "OUTLOOK_OUTLOOK_GET_PROFILE") return { successful: true, data: { response_data: { mail: "Evan@Outlook.com" } } };
+          if (slug === "OUTLOOK_OUTLOOK_GET_PROFILE") return { successful: true, data: { response_data: { mail: "Ezra@Outlook.example" } } };
           return { successful: true, data: {} };
         },
       },
@@ -709,7 +709,7 @@ describe("apps beyond Google", () => {
 
   it("an Outlook account is named by its address", async () => {
     const { apps } = setup();
-    expect((await apps.accounts()).find((a) => a.id === "ca_outlook")).toMatchObject({ toolkit: "outlook", email: "evan@outlook.com" });
+    expect((await apps.accounts()).find((a) => a.id === "ca_outlook")).toMatchObject({ toolkit: "outlook", email: "ezra@outlook.example" });
   });
 
   it("an action that names no account runs as that app's account", async () => {

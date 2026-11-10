@@ -42,7 +42,7 @@ export const TOOLKIT_NAMES: Record<string, string> = { ...Object.fromEntries(APP
 
 export const toolkitName = (slug: string): string => TOOLKIT_NAMES[slug] ?? slug.charAt(0).toUpperCase() + slug.slice(1).replace(/_/g, " ");
 
-/** "+16504849720" as "(650) 484-9720"; other numbers as given. */
+/** "+16505550142" as "(650) 555-0142"; other numbers as given. */
 export const formatPhone = (phone: string): string => {
   const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(phone);
   return m ? `(${m[1]}) ${m[2]}-${m[3]}` : phone;
@@ -532,7 +532,7 @@ export function vaultPage(entries: VaultView[], csrf: string): string {
     ? `<form method="post" action="/vault/export" class="inline"><input type="hidden" name="csrf" value="${esc(csrf)}"><button class="link">Export my vault</button></form> <small>A CSV with every value, including logins Kloru made, for Chrome, 1Password or Bitwarden. Keep the file safe and delete it after importing.</small>`
     : "";
   const field = (name: string, label: string, extra = "") => `<label><span>${label}</span><input name="${name}" ${extra}></label>`;
-  const form = (kind: string, title: string, fields: string) => `<details><summary>${title}</summary><form method="post" action="/vault/add" class="signin"><input type="hidden" name="csrf" value="${esc(csrf)}"><input type="hidden" name="kind" value="${kind}">${field("name", "Name Kloru uses", 'required pattern="[a-z0-9][a-z0-9-]{1,62}" placeholder="e.g. evan-credit-card"')}${fields}<button class="go">Save</button></form></details>`;
+  const form = (kind: string, title: string, fields: string) => `<details><summary>${title}</summary><form method="post" action="/vault/add" class="signin"><input type="hidden" name="csrf" value="${esc(csrf)}"><input type="hidden" name="kind" value="${kind}">${field("name", "Name Kloru uses", 'required pattern="[a-z0-9][a-z0-9-]{1,62}" placeholder="e.g. ezra-credit-card"')}${fields}<button class="go">Save</button></form></details>`;
   return `<section class="prose"><p class="lead">Your vault</p><p>Cards, logins and API keys Kloru uses for you by name. Kloru's models never see the values: they're filled in at the last moment and removed from anything Kloru reads back. Use a card with limits you control at your bank; Kloru also keeps to the limits you set here. Never send these by text.</p></section>` +
     rows +
     exporter +
@@ -554,9 +554,9 @@ export function takeoverPage(token: string, csrf: string): string {
 
 /** Your own policy.md: what others in the family may and may not do with your things. Only you change it. */
 export function policyPage(text: string, csrf: string): string {
-  return `<section class="prose"><p class="lead">Your policy</p><p>What others in your family may and may not do with your connected accounts (email, calendar) through Kloru. Anything it doesn't mention is open to the family. What Kloru keeps in your private folder is only ever yours. Only you can change this; you can also just tell Kloru ("don't let Cara read my work email").</p></section>` +
+  return `<section class="prose"><p class="lead">Your policy</p><p>What others in your family may and may not do with your connected accounts (email, calendar) through Kloru. Anything it doesn't mention is open to the family. What Kloru keeps in your private folder is only ever yours. Only you can change this; you can also just tell Kloru ("don't let Cleo read my work email").</p></section>` +
     `<form method="post" action="/policy" class="signin"><input type="hidden" name="csrf" value="${esc(csrf)}">` +
-    `<label><span>One line each</span><textarea name="text" rows="10" maxlength="20000" placeholder="- Cara can see and do everything, except my work email.">${esc(text)}</textarea></label>` +
+    `<label><span>One line each</span><textarea name="text" rows="10" maxlength="20000" placeholder="- Cleo can see and do everything, except my work email.">${esc(text)}</textarea></label>` +
     `<button class="go">Save my policy</button></form>`;
 }
 

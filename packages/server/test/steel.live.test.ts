@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { browserTools } from "../src/browser-tools.js";
 
 const key = process.env.STEEL_API_KEY;
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 
 class Host implements WorkerHost {
   run(): Promise<string> {
@@ -26,10 +26,10 @@ class Host implements WorkerHost {
 describe.skipIf(!key)("browser tools on Steel", () => {
   it("drives a Steel browser with Playwright, keeps the key from scripts, and keeps sign-ins in the profile", async () => {
     const root = mkdtempSync(join(tmpdir(), "steel-"));
-    const desk = new Desk({ root, host: new Host(), planner: { handle: async () => {} } as Planner, ownerPhone: EVAN });
+    const desk = new Desk({ root, host: new Host(), planner: { handle: async () => {} } as Planner, ownerPhone: EZRA });
     const logs: string[] = [];
     const opts = { desk, profilesDir: join(root, "browser"), executablePath: "", steelApiKey: key!, log: (m: string) => logs.push(m) };
-    const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+    const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
     const issue = desk.fileIssue(call.id, "Check a page");
     const ctx = { conversationKey: `desk:issue:${issue.id}:engineer` } as never;
     const text = (r: unknown) => JSON.stringify(r);

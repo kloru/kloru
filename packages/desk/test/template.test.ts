@@ -23,7 +23,7 @@ class PM implements Planner {
   async handle(_: Trigger[]): Promise<void> {}
 }
 
-const target = { goal: "Evan has the Acme summary in his inbox", doneWhen: "An email is sent to evan@work.example.com", deliverable: "email" as const };
+const target = { goal: "Ezra has the Acme summary in his inbox", doneWhen: "An email is sent to ezra@work.example.com", deliverable: "email" as const };
 
 function setup() {
   const host = new Host();
@@ -39,8 +39,8 @@ describe("the issue template", () => {
     expect(desk.assign(issue.id, "work", "Cover the trust layer and the pitch", [], target).ok).toBe(true);
     expect(desk.repo.issue(issue.id)!.target).toEqual(target);
     const prompt = host.runs.at(-1)!.prompt;
-    expect(prompt).toContain("Goal: Evan has the Acme summary in his inbox");
-    expect(prompt).toContain("Done when: An email is sent to evan@work.example.com");
+    expect(prompt).toContain("Goal: Ezra has the Acme summary in his inbox");
+    expect(prompt).toContain("Done when: An email is sent to ezra@work.example.com");
     expect(prompt.indexOf("Goal:")).toBeLessThan(prompt.indexOf("Spec:"));
   });
 
@@ -48,7 +48,7 @@ describe("the issue template", () => {
     const { desk, call } = setup();
     const issue = desk.fileIssue(call.id, "Email me a summary");
     desk.assign(issue.id, "work", "Summarize", [], target);
-    expect(snapshot(desk, [{ kind: "pr", issue: issue.id }])).toContain("done when: An email is sent to evan@work.example.com");
+    expect(snapshot(desk, [{ kind: "pr", issue: issue.id }])).toContain("done when: An email is sent to ezra@work.example.com");
   });
 
   it("the PM's assign and file_ops tools require the template", () => {
@@ -61,17 +61,17 @@ describe("the issue template", () => {
 
   it("file_ops carries the template to the ops worker", () => {
     const { host, desk, call } = setup();
-    const parent = desk.fileIssue(call.id, "Invite Cara");
-    const r = desk.fileOps({ spec: "Add Cara to both events", resources: [], parent: parent.id, target: { goal: "Cara is invited", doneWhen: "Both events list Cara as a guest", deliverable: "change" } });
+    const parent = desk.fileIssue(call.id, "Invite Cleo");
+    const r = desk.fileOps({ spec: "Add Cleo to both events", resources: [], parent: parent.id, target: { goal: "Cleo is invited", doneWhen: "Both events list Cleo as a guest", deliverable: "change" } });
     expect(r.ok).toBe(true);
-    expect(host.runs.at(-1)!.prompt).toContain("Done when: Both events list Cara as a guest");
+    expect(host.runs.at(-1)!.prompt).toContain("Done when: Both events list Cleo as a guest");
   });
 });
 
 describe("several accounts", () => {
   it("a worker that can write hears which accounts there are and how to pick one", () => {
     const host = new Host();
-    const line = "Connected accounts. Gmail: evan@gmail.com (account ca_1), evan@work.example.com (account ca_2).";
+    const line = "Connected accounts. Gmail: ezra@gmail.example (account ca_1), ezra@work.example.com (account ca_2).";
     const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "accounts-")), host, planner: new PM(), accounts: () => line });
     const { call } = desk.startCall({ callSid: "CA1", phone: "+14155550190", channel: "voice" });
     const issue = desk.fileIssue(call.id, "Email Acme from my work account");

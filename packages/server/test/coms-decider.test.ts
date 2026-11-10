@@ -13,7 +13,7 @@ const check: MessageCheck = {
   guidelines: "Text me short updates.",
   onCall: false,
   running: [],
-  recent: ["17:35 UTC sent (GMAIL_SEND_EMAIL to evan@personal.example.com): Bulky pickup: Instructions…"],
+  recent: ["17:35 UTC sent (GMAIL_SEND_EMAIL to ezra@personal.example.com): Bulky pickup: Instructions…"],
   conversation: "imessage",
   defaultChannel: "imessage",
 };
@@ -76,7 +76,7 @@ describe("the message check on Jev", () => {
   it("asks about the channel only when there's a choice, and about the owner only for someone who isn't him", async () => {
     const seen: Array<{ url: string; body: Record<string, any> }> = [];
     const decide = comsDecider({ apiKey: "k", fetchImpl: fake({ action: { type: "choice", choice: "send", probabilities: { send: 0.8 } } }, seen) });
-    expect(await decide({ ...check, channels: [], toCaller: false, to: "boss@work.example.com", ownerGuidelines: "Cara may email anyone." })).toEqual({ action: "send", p: 0.8 });
+    expect(await decide({ ...check, channels: [], toCaller: false, to: "boss@work.example.com", ownerGuidelines: "Cleo may email anyone." })).toEqual({ action: "send", p: 0.8 });
     expect(seen[0]!.body.questions.channel).toBeUndefined();
     expect(Object.keys(seen[0]!.body.questions.action.criteria)).toContain("ask_owner");
   });

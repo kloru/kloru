@@ -326,8 +326,8 @@ async def test_desk_remember_is_a_note_on_the_call_not_a_background_task():
 
     board = TaskBoard("CA1", lambda r, c: asyncio.sleep(0, "ok"), lambda t: asyncio.sleep(0))
     board.start = lambda *a, **k: started.append(a)
-    await make_desk_handlers(desk, board)["remember"](SimpleNamespace(arguments={"fact": "Maya is allergic to peanuts"}, result_callback=cb))
-    assert desk.notes == ["Maya is allergic to peanuts"]
+    await make_desk_handlers(desk, board)["remember"](SimpleNamespace(arguments={"fact": "Nora is allergic to peanuts"}, result_callback=cb))
+    assert desk.notes == ["Nora is allergic to peanuts"]
     assert started == []
     assert results[-1][1].run_llm is False
 
@@ -335,8 +335,8 @@ async def test_desk_remember_is_a_note_on_the_call_not_a_background_task():
 def test_opening_context_puts_the_brief_before_the_greeting():
     from voice.bot import GREETING, opening_messages
 
-    msgs = opening_messages("Caller: Evan\nPeople: Maya: daughter, 3", GREETING)
-    assert "Maya" in msgs[0]["content"] and msgs[-1]["content"] == GREETING
+    msgs = opening_messages("Caller: Ezra\nPeople: Nora: daughter, 3", GREETING)
+    assert "Nora" in msgs[0]["content"] and msgs[-1]["content"] == GREETING
     assert opening_messages("", GREETING) == [{"role": "developer", "content": GREETING}]
 
 

@@ -64,16 +64,16 @@ describe("RuntimeWorkerHost", () => {
     expect(conv.steered).toEqual(["actually skip the second one"]);
   });
 
-  it("runs each worker as the person who filed: Cara as her contact, no phone as the owner", async () => {
+  it("runs each worker as the person who filed: Cleo as her contact, no phone as the owner", async () => {
     const { runtime } = fakeRuntime();
-    const CARA = { kind: "contact", id: "contact:cara", tier: "partner" };
-    const host = new RuntimeWorkerHost(runtime, (phone) => (phone === "+14155550191" ? (CARA as never) : undefined));
+    const CLEO = { kind: "contact", id: "contact:cleo", tier: "partner" };
+    const host = new RuntimeWorkerHost(runtime, (phone) => (phone === "+14155550191" ? (CLEO as never) : undefined));
     void host.run(1, role, "a", "+14155550191");
     void host.run(2, role, "b");
     await tick();
-    expect(runtime.principals).toEqual([CARA, undefined]);
+    expect(runtime.principals).toEqual([CLEO, undefined]);
     host.steer(1, "x");
-    expect(runtime.principals.at(-1)).toEqual(CARA);
+    expect(runtime.principals.at(-1)).toEqual(CLEO);
   });
 
   it("runs one prompt at a time per issue, in order, with the issue's role", async () => {

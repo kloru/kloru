@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createHttpServer, type HttpApp } from "../src/http.js";
 import { familyCallers } from "../src/boot.js";
 
-const config = { version: 1, owner: { name: "Evan", phones: [], emails: [], timezone: "UTC" }, agent: { name: "Kloru" }, model: { primary: "faux/x" }, computer: { mode: "none" }, apps: { enabled: false, toolkits: [] }, features: {} } as unknown as InstinctConfig;
+const config = { version: 1, owner: { name: "Ezra", phones: [], emails: [], timezone: "UTC" }, agent: { name: "Kloru" }, model: { primary: "faux/x" }, computer: { mode: "none" }, apps: { enabled: false, toolkits: [] }, features: {} } as unknown as InstinctConfig;
 const TOKEN = "tok";
 
 class Host implements WorkerHost {
@@ -44,9 +44,9 @@ async function start(react: (t: Trigger, d: Desk) => void = () => {}, o: { token
 
 describe("desk routes", () => {
   it("say who may call: the owner, and members; nobody else, and nobody when unset", async () => {
-    const callers = (p: string) => (p === "+14155550190" ? { allowed: true, name: "Evan", tier: "owner" as const } : p === "+14155550191" ? { allowed: true, name: "Cara", tier: "partner" as const } : { allowed: false });
+    const callers = (p: string) => (p === "+14155550190" ? { allowed: true, name: "Ezra", tier: "owner" as const } : p === "+14155550191" ? { allowed: true, name: "Cleo", tier: "partner" as const } : { allowed: false });
     const { call } = await start(undefined, { callers });
-    expect(await call("GET", "/desk/callers/%2B14155550191")).toEqual({ status: 200, json: { allowed: true, name: "Cara", tier: "partner" } });
+    expect(await call("GET", "/desk/callers/%2B14155550191")).toEqual({ status: 200, json: { allowed: true, name: "Cleo", tier: "partner" } });
     expect((await call("GET", "/desk/callers/%2B14155550123")).json).toEqual({ allowed: false });
   });
 
@@ -123,7 +123,7 @@ describe("desk routes", () => {
     const opened = await call("POST", "/desk/calls", { callSid: "CA7", phone: "+14155550190" });
     expect(opened.json).toMatchObject({ brief: expect.any(String) });
     const id = opened.json.call.id;
-    expect((await call("POST", `/desk/calls/${id}/notes`, { text: "Maya is allergic to peanuts" })).status).toBe(200);
+    expect((await call("POST", `/desk/calls/${id}/notes`, { text: "Nora is allergic to peanuts" })).status).toBe(200);
     expect((await call("POST", `/desk/calls/${id}/notes`, {})).status).toBe(400);
     expect((await call("POST", "/desk/memory/backfill", {})).json).toEqual({ filed: 0 });
   });
@@ -139,11 +139,11 @@ describe("desk routes", () => {
 });
 
 describe("family callers", () => {
-  const contacts = { findByPhone: (p: string) => ({ "+14155550191": { name: "Cara", tier: "partner" }, "+14155550100": { name: "Sam", tier: "friend" } } as Record<string, any>)[p] };
-  const callers = familyCallers({ name: "Evan", phones: ["+14155550190"] }, contacts as never);
+  const contacts = { findByPhone: (p: string) => ({ "+14155550191": { name: "Cleo", tier: "partner" }, "+14155550100": { name: "Sam", tier: "friend" } } as Record<string, any>)[p] };
+  const callers = familyCallers({ name: "Ezra", phones: ["+14155550190"] }, contacts as never);
   it("the owner by any spelling of his number, members at partner or family, never a friend or stranger", () => {
-    expect(callers("(415) 555-0190")).toEqual({ allowed: true, name: "Evan", tier: "owner" });
-    expect(callers("+14155550191")).toEqual({ allowed: true, name: "Cara", tier: "partner" });
+    expect(callers("(415) 555-0190")).toEqual({ allowed: true, name: "Ezra", tier: "owner" });
+    expect(callers("+14155550191")).toEqual({ allowed: true, name: "Cleo", tier: "partner" });
     expect(callers("+14155550100")).toEqual({ allowed: false });
     expect(callers("+19995550000")).toEqual({ allowed: false });
     expect(callers("")).toEqual({ allowed: false });

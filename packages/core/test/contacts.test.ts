@@ -51,11 +51,11 @@ describe("ContactStore", () => {
   it("keeps the owner's own words about what a person may do, through a reload", () => {
     const state = tempState();
     const store = new ContactStore(state);
-    const cara = store.upsert({ name: "Cara", phones: ["415 555 0191"], tier: "partner", policy: "She should be able to do and see everything" });
-    expect(cara.policy).toBe("She should be able to do and see everything");
+    const cleo = store.upsert({ name: "Cleo", phones: ["415 555 0191"], tier: "partner", policy: "She should be able to do and see everything" });
+    expect(cleo.policy).toBe("She should be able to do and see everything");
     const reloaded = new ContactStore(state);
     expect(reloaded.findByPhone("+14155550191")?.policy).toBe("She should be able to do and see everything");
-    expect(store.upsert({ name: "Cara", phones: ["+14155550191"], policy: "Not my email" }).policy).toBe("Not my email");
+    expect(store.upsert({ name: "Cleo", phones: ["+14155550191"], policy: "Not my email" }).policy).toBe("Not my email");
   });
 
   it("merges by name when adding an address, and separates same-name people by explicit id", () => {
@@ -88,10 +88,10 @@ describe("ContactStore", () => {
   it("searches names, notes, emails and phone digits", () => {
     const store = new ContactStore(tempState());
     store.upsert({ name: "Sam Lee", phones: ["+14155550199"], notes: "dentist" });
-    store.upsert({ name: "Alex Kim", emails: ["alex@mit.edu"] });
+    store.upsert({ name: "Alex Kim", emails: ["alex@mit.example"] });
     expect(store.search("sam").map((c) => c.id)).toEqual(["sam-lee"]);
     expect(store.search("DENTIST").map((c) => c.id)).toEqual(["sam-lee"]);
-    expect(store.search("mit.edu").map((c) => c.id)).toEqual(["alex-kim"]);
+    expect(store.search("mit.example").map((c) => c.id)).toEqual(["alex-kim"]);
     expect(store.search("555-0199").map((c) => c.id)).toEqual(["sam-lee"]);
     expect(store.search("")).toHaveLength(2);
     expect(store.search("zzz")).toHaveLength(0);

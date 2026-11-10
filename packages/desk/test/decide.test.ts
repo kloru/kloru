@@ -25,7 +25,7 @@ class PM implements Planner {
   async handle(_: Trigger[]): Promise<void> {}
 }
 
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 const send = { recipient_email: "boss@work.example.com", subject: "Update", body: "Also, I'm interviewing at Acme." };
 
 function setup(decide: (c: ActionCheck) => Promise<ActionDecision>) {
@@ -38,7 +38,7 @@ function setup(decide: (c: ActionCheck) => Promise<ActionDecision>) {
     guidelines: () => "Emails to me need no yes.",
     decideAction: (c) => (checks.push(c), decide(c)),
   });
-  const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+  const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
   desk.addTurn(call.id, { role: "caller", text: "Send my boss the weekly update" });
   const issue = desk.fileIssue(call.id, "Send my boss the weekly update");
   desk.assign(issue.id, "work", "Email the update", [], { goal: "The boss has the update", doneWhen: "Email sent", deliverable: "email" });

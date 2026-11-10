@@ -47,7 +47,7 @@ describe("TechnicalPM", () => {
     faux.setResponses([
       (context) => {
         promptSeen = JSON.stringify(context);
-        return toolTurn("assign", { issue: 1, kind: "work", goal: "Evan hears his Wednesday", done_when: "every event on Wed Oct 28 is listed", deliverable: "answer", spec: "List every event Wed Oct 28 across all calendars.", resources: ["calendar:2026-10-28"] });
+        return toolTurn("assign", { issue: 1, kind: "work", goal: "Ezra hears his Wednesday", done_when: "every event on Wed Oct 28 is listed", deliverable: "answer", spec: "List every event Wed Oct 28 across all calendars.", resources: ["calendar:2026-10-28"] });
       },
       fauxAssistantMessage("Assigned."),
     ]);
@@ -93,9 +93,9 @@ describe("TechnicalPM", () => {
   });
 
   it("the snapshot says when a caller isn't the owner, and what the owner said they may see and do", () => {
-    const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "pm-")), host: new Host(), planner: { handle: async () => {} }, ownerPhone: "+14155550190", nameOf: (p) => (p === "+14155550190" ? "Evan" : undefined), ownerWords: () => "About anyone who calls: they can schedule a meeting with me" });
+    const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "pm-")), host: new Host(), planner: { handle: async () => {} }, ownerPhone: "+14155550190", nameOf: (p) => (p === "+14155550190" ? "Ezra" : undefined), ownerWords: () => "About anyone who calls: they can schedule a meeting with me" });
     const stranger = desk.startCall({ callSid: "CA2", phone: "+14155550123", channel: "voice" }).call;
-    desk.fileIssue(stranger.id, "What's Evan doing Friday?");
+    desk.fileIssue(stranger.id, "What's Ezra doing Friday?");
     const text = snapshot(desk, [{ kind: "filed", issue: 1 }]);
     expect(text).toContain("+14155550123 is not the family owner");
     expect(text).toContain("they can schedule a meeting with me");
@@ -106,15 +106,15 @@ describe("TechnicalPM", () => {
 
   it("a batch for a caller who isn't the owner shows the PM only that caller's issues and calls", () => {
     const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "pm-")), host: new Host(), planner: { handle: async () => {} }, ownerPhone: "+14155550190" });
-    const evan = desk.startCall({ callSid: "CA1", phone: "+14155550190", channel: "voice" }).call;
-    desk.addTurn(evan.id, { role: "caller", text: "Email Dan about the Acme offer" });
-    desk.fileIssue(evan.id, "Email Dan about the Acme offer");
+    const ezra = desk.startCall({ callSid: "CA1", phone: "+14155550190", channel: "voice" }).call;
+    desk.addTurn(ezra.id, { role: "caller", text: "Email Dan about the Acme offer" });
+    desk.fileIssue(ezra.id, "Email Dan about the Acme offer");
     const pat = desk.startCall({ callSid: "CA9", phone: "+14155550123", channel: "voice" }).call;
-    desk.fileIssue(pat.id, "Book 30 minutes with Evan");
+    desk.fileIssue(pat.id, "Book 30 minutes with Ezra");
     const groups = audiences(desk, [{ kind: "filed", issue: 1 }, { kind: "filed", issue: 2 }]);
     expect(groups.map((g) => g.only)).toEqual([undefined, "+14155550123"]);
     const forPat = snapshot(desk, groups[1]!.triggers, new Date(), { only: "+14155550123" });
-    expect(forPat).toContain("Book 30 minutes with Evan");
+    expect(forPat).toContain("Book 30 minutes with Ezra");
     expect(forPat).not.toContain("Acme");
   });
 
@@ -160,16 +160,16 @@ describe("snapshot: memory", () => {
   it("shows what memory knows about the callers involved, and leaves memory runs out", async () => {
     const { Memory } = await import("../src/memory.js");
     const root = mkdtempSync(join(tmpdir(), "pm-"));
-    const memory = new Memory(join(root, "memory"), { owner: { name: "Evan Marshall", phones: ["+14155550190"] } });
+    const memory = new Memory(join(root, "memory"), { owner: { name: "Ezra Vega", phones: ["+14155550190"] } });
     memory.init();
-    memory.save("household/people/cara.md", "---\nid: cara\ntype: person\naliases: [my wife]\n---\n- Evan's wife\n");
+    memory.save("household/people/cleo.md", "---\nid: cleo\ntype: person\naliases: [my wife]\n---\n- Ezra's wife\n");
     memory.commit("x");
     const desk = new Desk({ root, host: new Host(), planner: { handle: async () => {} }, memory });
     const { call } = desk.startCall({ callSid: "CA1", phone: "+14155550190", channel: "voice" });
     desk.addTurn(call.id, { role: "caller", text: "Check my wife's calendar" });
     desk.fileIssue(call.id, "Check my wife's calendar for Friday");
     const text = snapshot(desk, [{ kind: "filed", issue: 1 }]);
-    expect(text).toContain("Cara (my wife)");
+    expect(text).toContain("Cleo (my wife)");
     desk.endCall(call.id);
     expect(snapshot(desk, [{ kind: "filed", issue: 1 }])).not.toContain("Update memory from call");
   });

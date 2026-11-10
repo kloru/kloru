@@ -161,7 +161,7 @@ export function createConsole(o: ConsoleOptions): http.Server {
     const hit = families.get(phone);
     return hit && Date.now() - hit.at < FAMILY_TTL ? hit.who : undefined;
   };
-  // An owner (Evan, a co-owner) is an admin.
+  // An owner (Ezra, a co-owner) is an admin.
   const isAdmin = (u: ConsoleUser | undefined) => !!u && (admins.has(u.phone) || familyNow(u.phone)?.role === "owner");
   const memberOf = (u: ConsoleUser | undefined) => (u && !isAdmin(u) && familyNow(u.phone)?.role === "member" ? familyNow(u.phone) : undefined);
   const allowed = async (phone: string) => admins.has(phone) || !!(await familyOf(phone)).who || (await o.store.isInvited(phone));

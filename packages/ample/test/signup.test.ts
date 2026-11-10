@@ -39,7 +39,7 @@ function fakeAmple(opts: { signupStatus?: number; deletedClients?: Set<string>; 
         account_expires_at: "2026-10-10T00:00:00Z",
       });
     }
-    if (url.endsWith("/v1/auth/claim")) return Response.json({ email: "maya@example.com", email_sent: true });
+    if (url.endsWith("/v1/auth/claim")) return Response.json({ email: "nora@example.com", email_sent: true });
     if (url.endsWith("/oauth/token")) {
       const clientId = new URLSearchParams(body).get("client_id")!;
       if (opts.deletedClients?.has(clientId)) {
@@ -55,7 +55,7 @@ function fakeAmple(opts: { signupStatus?: number; deletedClients?: Set<string>; 
   return { fetchImpl, calls, count: (suffix: string) => calls.filter((c) => c.url.endsWith(suffix)).length };
 }
 
-function setup(api: ReturnType<typeof fakeAmple>, run?: RunCli, ownerEmail = "maya@example.com", saved?: string) {
+function setup(api: ReturnType<typeof fakeAmple>, run?: RunCli, ownerEmail = "nora@example.com", saved?: string) {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ample-signup-")));
   const workspace = path.join(root, "workspace");
   mkdirSync(path.join(workspace, "apps", "party"), { recursive: true });
@@ -68,7 +68,7 @@ function setup(api: ReturnType<typeof fakeAmple>, run?: RunCli, ownerEmail = "ma
       return { ...result, stdout: JSON.stringify({ status: "live", url: "https://party-acc-1.apps.ample.computer" }) };
     });
   const tools = ampleTools({
-    signup: { file, name: "kloru-maya", ...(ownerEmail ? { ownerEmail } : {}) },
+    signup: { file, name: "kloru-nora", ...(ownerEmail ? { ownerEmail } : {}) },
     workspaceDir: workspace,
     resolvePath: (p) => path.resolve(workspace, p),
     fetchImpl: api.fetchImpl as unknown as typeof fetch,
@@ -89,19 +89,19 @@ describe("an Ample account of the agent's own", () => {
     expect(out).toMatch(/^Deployed\. Live at https:\/\/party-acc-1\.apps\.ample\.computer/);
     expect(out).toContain("Created an Ample account");
     expect(out).toContain("https://ample.computer/claim?token=ample_claim_1");
-    expect(out).toContain("emailed a claim link to maya@example.com");
+    expect(out).toContain("emailed a claim link to nora@example.com");
 
     const signup = api.calls.find((c) => c.url.endsWith("/v1/auth/signup"))!;
     const body = JSON.parse(signup.body);
-    expect(body.name).toBe("kloru-maya");
+    expect(body.name).toBe("kloru-nora");
     expect(body.request_key).toMatch(/^[0-9a-f-]{36}$/);
     const claim = api.calls.find((c) => c.url.endsWith("/v1/auth/claim"))!;
     expect(claim.auth).toBe("Bearer signup-token-1");
-    expect(JSON.parse(claim.body)).toEqual({ email: "maya@example.com" });
+    expect(JSON.parse(claim.body)).toEqual({ email: "nora@example.com" });
 
     // The account is kept privately; the CLI only ever sees a short-lived token.
     const stored = JSON.parse(readFileSync(file, "utf8"));
-    expect(stored.account).toMatchObject({ accountId: "acc_1", clientId: "agent_1", clientSecret: "ample_agent_secret_1", claimEmailedTo: "maya@example.com" });
+    expect(stored.account).toMatchObject({ accountId: "acc_1", clientId: "agent_1", clientSecret: "ample_agent_secret_1", claimEmailedTo: "nora@example.com" });
     expect(stored.pending).toBeUndefined();
     expect(statSync(file).mode & 0o777).toBe(0o600);
     for (const [args, opts] of vi.mocked(run).mock.calls) {
@@ -172,7 +172,7 @@ describe("an Ample account of the agent's own", () => {
     expect(cached).toContain("account_suspended");
 
     // After a restart there is no cached token, so the agent asks Ample for one.
-    const restarted = setup(api, run, "maya@example.com", file);
+    const restarted = setup(api, run, "nora@example.com", file);
     const out = text(await restarted.deploy.spec.execute({ path: "apps/party" }, ctx));
 
     expect(out).toContain("suspended");

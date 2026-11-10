@@ -34,16 +34,16 @@ const settle = async (ms = 60) => {
   const end = Date.now() + ms;
   while (Date.now() < end) await new Promise((r) => setTimeout(r, 5));
 };
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 const multi = (slug: string, args: Record<string, unknown>) => ["app_composio_multi_execute_tool", { tools: [{ tool_slug: slug, arguments: args }] }] as const;
 
 function setup() {
   const host = new Host();
   const pm = new PM();
   const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "ledger-")), host, planner: pm, announceMs: 20 });
-  const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
-  desk.addTurn(call.id, { role: "caller", text: "Move my Atlanta trip and clean out the promos" });
-  const issue = desk.fileIssue(call.id, "Move the Atlanta trip to Nov 4-5");
+  const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
+  desk.addTurn(call.id, { role: "caller", text: "Move my Tucson trip and clean out the promos" });
+  const issue = desk.fileIssue(call.id, "Move the Tucson trip to Nov 4-5");
   desk.assign(issue.id, "ops", "Patch the trip", []);
   const role = host.runs.at(-1)!.role;
   return { desk, host, pm, call, issue, role };
@@ -54,11 +54,11 @@ describe("the ledger, told as it happens", () => {
     const { desk, call, issue, role } = setup();
     const [tool, args] = multi("GOOGLECALENDAR_PATCH_EVENT", { calendar_id: "primary", event_id: "atl1", start_time: "2026-11-04", end_time: "2026-11-06" });
     await role.guard!(tool, args);
-    role.afterTool!(tool, args, false, JSON.stringify({ successful: true, data: { summary: "Atlanta trip", start: { date: "2026-11-04" }, end: { date: "2026-11-06" } } }));
+    role.afterTool!(tool, args, false, JSON.stringify({ successful: true, data: { summary: "Tucson trip", start: { date: "2026-11-04" }, end: { date: "2026-11-06" } } }));
     await settle();
     const m = desk.repo.inbox(call.id, 0);
     expect(m).toMatchObject([{ kind: "events", issue: issue.id, progress: true }]);
-    expect(m[0]!.text).toContain("Atlanta trip");
+    expect(m[0]!.text).toContain("Tucson trip");
     expect(m[0]!.text).toContain("Nov 4");
     expect(desk.repo.issue(issue.id)!.status).toBe("executing");
   });
@@ -89,20 +89,20 @@ describe("the ledger, told as it happens", () => {
     const { desk, host, call, role, issue } = setup();
     const [tool, args] = multi("GOOGLECALENDAR_PATCH_EVENT", { calendar_id: "primary", event_id: "atl1", start_time: "2026-11-04", end_time: "2026-11-06" });
     await role.guard!(tool, args);
-    role.afterTool!(tool, args, false, JSON.stringify({ data: { summary: "Atlanta trip" } }));
-    const next = desk.fileIssue(call.id, "Is the Atlanta trip updated?");
+    role.afterTool!(tool, args, false, JSON.stringify({ data: { summary: "Tucson trip" } }));
+    const next = desk.fileIssue(call.id, "Is the Tucson trip updated?");
     desk.assign(next.id, "work", "Check the trip", []);
     expect(host.runs.at(-1)!.prompt).toContain("Already changed");
-    expect(host.runs.at(-1)!.prompt).toContain("Atlanta trip");
+    expect(host.runs.at(-1)!.prompt).toContain("Tucson trip");
     expect(snapshot(desk, [{ kind: "filed", issue: next.id }])).toContain(`#${issue.id}`);
-    expect(snapshot(desk, [{ kind: "filed", issue: next.id }])).toContain("Atlanta trip");
+    expect(snapshot(desk, [{ kind: "filed", issue: next.id }])).toContain("Tucson trip");
   });
 });
 
 describe("describing a change in plain words", () => {
   it("names what changed", () => {
-    expect(describeWrite("GOOGLECALENDAR_PATCH_EVENT", { start_time: "2026-11-04", end_time: "2026-11-06" }, JSON.stringify({ data: { summary: "Atlanta trip" } }))).toBe('updated "Atlanta trip" (Nov 4 to Nov 5)');
+    expect(describeWrite("GOOGLECALENDAR_PATCH_EVENT", { start_time: "2026-11-04", end_time: "2026-11-06" }, JSON.stringify({ data: { summary: "Tucson trip" } }))).toBe('updated "Tucson trip" (Nov 4 to Nov 5)');
     expect(describeWrite("GOOGLECALENDAR_CREATE_EVENT", { summary: "Coffee with Sam" }, "{}")).toBe('added "Coffee with Sam"');
-    expect(describeWrite("GMAIL_SEND_EMAIL", { recipient_email: "cara@x.com", subject: "Daycare" }, "{}")).toBe('sent "Daycare" to cara@x.com');
+    expect(describeWrite("GMAIL_SEND_EMAIL", { recipient_email: "cleo@x.example", subject: "Daycare" }, "{}")).toBe('sent "Daycare" to cleo@x.example');
   });
 });

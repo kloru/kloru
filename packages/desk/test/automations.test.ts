@@ -36,7 +36,7 @@ const settle = async (ms = 60) => {
   const end = Date.now() + ms;
   while (Date.now() < end) await new Promise((r) => setTimeout(r, 5));
 };
-const EVAN = "+14155550190";
+const EZRA = "+14155550190";
 const ctx = (issue: number, role = "ops") => ({ conversationKey: `desk:issue:${issue}:${role}` }) as never;
 const text = (r: unknown) => (r as { content: Array<{ text: string }> }).content[0]!.text;
 
@@ -47,25 +47,25 @@ function setup() {
   const scheduler = new Scheduler(new StateDir(join(root, "state")));
   const desk = new Desk({ root: join(root, "repo"), host, planner: new PM(), scheduler, timezone: "America/Los_Angeles", notify: async (n) => (sent.push(n), true), notifyDelayMs: 20, notifyWaitMs: 300 });
   const tools = Object.fromEntries(automationTools(desk).map((t) => [t.spec.name, t]));
-  const { call } = desk.startCall({ callSid: "CA1", phone: EVAN, channel: "voice" });
+  const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
   const issue = desk.fileIssue(call.id, "Every weekday at 7, email me a debrief of my day");
   desk.assign(issue.id, "ops", "Create the automation", []);
   return { host, desk, scheduler, tools, call, issue, sent };
 }
 
-const DEBRIEF = { name: "Morning debrief", request: "Debrief Evan on today: his calendar, important unread email, and anything due.", cron: "0 7 * * 1-5" };
+const DEBRIEF = { name: "Morning debrief", request: "Debrief Ezra on today: his calendar, important unread email, and anything due.", cron: "0 7 * * 1-5" };
 
 describe("automations: set up on a call, run on their own", () => {
   it("when it fires, the desk does the work and the result arrives by email, under its name", async () => {
     const { host, desk, scheduler, sent, call } = setup();
     desk.endCall(call.id); // nobody's on the phone at 7 AM
-    const entry = scheduler.create({ name: "Morning debrief", prompt: DEBRIEF.request, cron: DEBRIEF.cron, tz: "America/Los_Angeles", enabled: true, target: "desk", phone: EVAN });
+    const entry = scheduler.create({ name: "Morning debrief", prompt: DEBRIEF.request, cron: DEBRIEF.cron, tz: "America/Los_Angeles", enabled: true, target: "desk", phone: EZRA });
     desk.runAutomation(entry);
     await settle(30);
     const run = desk.repo.issues().find((i) => i.request.startsWith("Morning debrief"))!;
-    expect(desk.repo.call(run.filedBy.call)).toMatchObject({ channel: "schedule", phone: EVAN });
+    expect(desk.repo.call(run.filedBy.call)).toMatchObject({ channel: "schedule", phone: EZRA });
     expect(desk.repo.call(run.filedBy.call)!.endedAt).toBeTruthy();
-    host.last(run.id).finish("Today: dentist at 3, two emails from Cara, rent due Friday.");
+    host.last(run.id).finish("Today: dentist at 3, two emails from Cleo, rent due Friday.");
     await settle(150);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.subject).toMatch(/Morning debrief/);
@@ -74,7 +74,7 @@ describe("automations: set up on a call, run on their own", () => {
 
   it("deleting one stops it, and is recorded too", async () => {
     const { desk, scheduler, tools, issue } = setup();
-    const entry = scheduler.create({ name: "Morning debrief", prompt: "x", cron: "0 7 * * *", tz: "UTC", enabled: true, target: "desk", phone: EVAN });
+    const entry = scheduler.create({ name: "Morning debrief", prompt: "x", cron: "0 7 * * *", tz: "UTC", enabled: true, target: "desk", phone: EZRA });
     expect(text(await tools.automation_list!.spec.execute({}, ctx(issue.id)))).toContain(entry.id);
     expect(text(await tools.automation_delete!.spec.execute({ id: entry.id }, ctx(issue.id)))).toMatch(/Deleted/);
     expect(scheduler.list()).toEqual([]);
@@ -103,7 +103,7 @@ describe("event automations: run when something happens", () => {
     const events: AutomationEvents = {
       types: async (app) => (app === "gmail" ? "GMAIL_NEW_GMAIL_MESSAGE: New Gmail Message. A new email arrives." : ""),
       watch: async (o) => {
-        if (o.account.toLowerCase() !== "evan@example.com") throw new Error(`${o.account} isn't the caller's account`);
+        if (o.account.toLowerCase() !== "ezra@example.com") throw new Error(`${o.account} isn't the caller's account`);
         watched.push(o.trigger);
         return { instance: "ti_mail", label: "New Gmail Message" };
       },
@@ -113,24 +113,24 @@ describe("event automations: run when something happens", () => {
     const tools = Object.fromEntries(automationTools(s.desk, events).map((t) => [t.spec.name, t]));
     return { ...s, tools, watched, unwatched };
   }
-  const REPLY = { name: "Email replies", request: "Draft a reply in the thread and text me a one-line summary.", on_event: { trigger: "gmail_new_gmail_message", account: "Evan@example.com" }, when: "an email I need to answer" };
+  const REPLY = { name: "Email replies", request: "Draft a reply in the thread and text me a one-line summary.", on_event: { trigger: "gmail_new_gmail_message", account: "Ezra@example.com" }, when: "an email I need to answer" };
 
   it("an app event is watched for the caller's own account, saved with its condition, and read back in words", async () => {
     const { tools, scheduler, issue, watched, desk } = withEvents();
     const r = text(await tools.automation_create!.spec.execute(REPLY, ctx(issue.id)));
     expect(watched).toEqual(["GMAIL_NEW_GMAIL_MESSAGE"]);
     const [e] = scheduler.list();
-    expect(e).toMatchObject({ on: { kind: "app", trigger: "GMAIL_NEW_GMAIL_MESSAGE", label: "New Gmail Message", account: "evan@example.com", instance: "ti_mail" }, when: "an email I need to answer", target: "desk", phone: EVAN });
+    expect(e).toMatchObject({ on: { kind: "app", trigger: "GMAIL_NEW_GMAIL_MESSAGE", label: "New Gmail Message", account: "ezra@example.com", instance: "ti_mail" }, when: "an email I need to answer", target: "desk", phone: EZRA });
     expect(e!.cron).toBeUndefined();
     expect(e!.nextRunAt).toBeUndefined();
-    expect(r).toContain("on each New Gmail Message for evan@example.com, if an email I need to answer");
+    expect(r).toContain("on each New Gmail Message for ezra@example.com, if an email I need to answer");
     expect(text(await tools.automation_list!.spec.execute({}, ctx(issue.id)))).toContain("New Gmail Message");
     expect(desk.repo.ledger(issue.id).find((l) => l.slug === "AUTOMATION_CREATE")?.ok).toBe(true);
   });
 
   it("someone else's account isn't watched, and nothing is saved", async () => {
     const { tools, scheduler, issue } = withEvents();
-    const r = await tools.automation_create!.spec.execute({ ...REPLY, on_event: { trigger: "GMAIL_NEW_GMAIL_MESSAGE", account: "cara@example.com" } }, ctx(issue.id));
+    const r = await tools.automation_create!.spec.execute({ ...REPLY, on_event: { trigger: "GMAIL_NEW_GMAIL_MESSAGE", account: "cleo@example.com" } }, ctx(issue.id));
     expect((r as { isError?: boolean }).isError).toBe(true);
     expect(scheduler.list()).toEqual([]);
   });
@@ -177,15 +177,15 @@ describe("event automations: run when something happens", () => {
   it("when one fires, the event reaches the worker, marked as outside content, and the PM sees a short part", async () => {
     const { host, desk, scheduler, call } = setup();
     desk.endCall(call.id);
-    const entry = scheduler.create({ name: "Email replies", prompt: REPLY.request, on: { kind: "app", trigger: "GMAIL_NEW_GMAIL_MESSAGE", account: "evan@example.com", instance: "ti_mail" }, tz: "UTC", enabled: true, target: "desk", phone: EVAN });
-    const email = `New Gmail Message for evan@example.com:\n{"subject": "Dinner Saturday?", "sender": "cara@example.com", "body": "${"x".repeat(9000)}"}`;
+    const entry = scheduler.create({ name: "Email replies", prompt: REPLY.request, on: { kind: "app", trigger: "GMAIL_NEW_GMAIL_MESSAGE", account: "ezra@example.com", instance: "ti_mail" }, tz: "UTC", enabled: true, target: "desk", phone: EZRA });
+    const email = `New Gmail Message for ezra@example.com:\n{"subject": "Dinner Saturday?", "sender": "cleo@example.com", "body": "${"x".repeat(9000)}"}`;
     const run = desk.runAutomation(entry, email)!;
     await settle(30);
     expect(run.event!.length).toBeLessThanOrEqual(Desk.EVENT_MAX + 1);
-    expect(run.thread.find((t) => t.by === "system")?.text).toContain("on each GMAIL_NEW_GMAIL_MESSAGE for evan@example.com");
+    expect(run.thread.find((t) => t.by === "system")?.text).toContain("on each GMAIL_NEW_GMAIL_MESSAGE for ezra@example.com");
     expect(host.last(run.id)).toBeTruthy();
     const prompt = (desk as unknown as { workerPrompt(i: unknown): string }).workerPrompt(desk.repo.issue(run.id));
-    expect(prompt).toContain(`${EVENT_HEADING}\nNew Gmail Message for evan@example.com`);
+    expect(prompt).toContain(`${EVENT_HEADING}\nNew Gmail Message for ezra@example.com`);
     expect(prompt).toContain("Dinner Saturday?");
   });
 });

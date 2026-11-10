@@ -27,13 +27,13 @@ describe("read and write calls", () => {
   });
 
   it("only changes that reach another person need a yes", () => {
-    expect(callNotifiesSomeone("app_composio_multi_execute_tool", bulk(["GMAIL_SEND_EMAIL", { to: "sam@x.com" }]))).toBe(true);
+    expect(callNotifiesSomeone("app_composio_multi_execute_tool", bulk(["GMAIL_SEND_EMAIL", { to: "sam@x.example" }]))).toBe(true);
     expect(callNotifiesSomeone("app_gmail_reply_to_thread", {})).toBe(true);
     expect(callNotifiesSomeone("app_gmail_forward_message", {})).toBe(true);
     expect(callNotifiesSomeone("app_gmail_create_email_draft", {})).toBe(false);
     expect(callNotifiesSomeone("app_gmail_move_to_trash", {})).toBe(false);
     expect(callNotifiesSomeone("app_googlecalendar_create_event", { summary: "Coffee" })).toBe(false);
-    expect(callNotifiesSomeone("app_googlecalendar_create_event", { summary: "Coffee", attendees: ["sam@x.com"] })).toBe(true);
+    expect(callNotifiesSomeone("app_googlecalendar_create_event", { summary: "Coffee", attendees: ["sam@x.example"] })).toBe(true);
     expect(callNotifiesSomeone("app_googlecalendar_update_event", { attendees: [], send_updates: "none" })).toBe(false);
     expect(callNotifiesSomeone("app_slack_send_message", {})).toBe(true);
     expect(callNotifiesSomeone("app_stripe_create_refund", {})).toBe(true);

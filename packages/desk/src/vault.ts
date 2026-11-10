@@ -134,7 +134,7 @@ export class Vault {
 
   /** Add or replace an entry (a person on kloru.com, or Kloru after a sign-up). */
   put(o: { name: string; owner: string; kind: VaultKind; meta: VaultMeta; secret: Record<string, string>; createdBy: string }): Result<VaultEntry> {
-    if (!NAME.test(o.name)) return err("a vault name is lowercase letters, digits and dashes, e.g. evan-credit-card");
+    if (!NAME.test(o.name)) return err("a vault name is lowercase letters, digits and dashes, e.g. ezra-credit-card");
     if (!VAULT_KINDS.includes(o.kind)) return err(`kind is one of ${VAULT_KINDS.join(", ")}`);
     const allowed = new Set(SECRET_FIELDS[o.kind]);
     const secret = Object.fromEntries(Object.entries(o.secret).filter(([k, v]) => allowed.has(k) && typeof v === "string" && v.length > 0));

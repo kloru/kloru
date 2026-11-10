@@ -104,8 +104,8 @@ describe("AtomicMailBackend", () => {
     const { backend, server } = await backendWith(handler([]));
     const tools = await backend.tools();
     const send = tools.find((t) => t.spec.name === "atomicmail_send_email");
-    await send?.spec.execute({ to: "a@x.io" }, { principal: { kind: "owner", id: "o", tier: "owner", displayName: "M" }, conversationKey: "c", channel: "chat", now: () => new Date() });
-    expect(server.calls).toEqual([{ name: "send_email", args: { to: "a@x.io" } }]);
+    await send?.spec.execute({ to: "a@x.example" }, { principal: { kind: "owner", id: "o", tier: "owner", displayName: "M" }, conversationKey: "c", channel: "chat", now: () => new Date() });
+    expect(server.calls).toEqual([{ name: "send_email", args: { to: "a@x.example" } }]);
     await backend.close();
   });
 

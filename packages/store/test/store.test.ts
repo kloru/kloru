@@ -9,23 +9,23 @@ const fresh = () => new Store(join(mkdtempSync(join(tmpdir(), "store-")), "store
 
 const email = (id: string, o: Partial<ItemInput> = {}): ItemInput => ({
   source: "gmail",
-  account: "evan@example.com",
+  account: "ezra@example.com",
   kind: "email",
   externalId: id,
   title: "Dinner Saturday?",
-  body: "Want to do dinner at my parents' on Saturday at 6? Love, Cara",
-  people: ["Cara Marshall <cara@example.com>"],
+  body: "Want to do dinner at my parents' on Saturday at 6? Love, Cleo",
+  people: ["Cleo Vega <cleo@example.com>"],
   occurredAt: "2026-10-28T15:00:00Z",
   data: { threadId: "t1", labelIds: ["INBOX", "UNREAD"] },
   ...o,
 });
 const event = (id: string, starts: string, o: Partial<ItemInput> = {}): ItemInput => ({
   source: "googlecalendar",
-  account: "evan@example.com",
+  account: "ezra@example.com",
   kind: "event",
   externalId: id,
-  title: "Maya dentist",
-  body: "Rockridge Kids Dental",
+  title: "Nora dentist",
+  body: "Maplewood Kids Dental",
   people: [],
   startsAt: starts,
   endsAt: new Date(Date.parse(starts) + 3_600_000).toISOString(),
@@ -37,25 +37,25 @@ const event = (id: string, starts: string, o: Partial<ItemInput> = {}): ItemInpu
 describe("the store", () => {
   it("email can be limited to the accounts a caller may read; events are shared", () => {
     const s = fresh();
-    s.upsert([email("e1"), email("c1", { account: "cara@example.com" }), event("ev1", "2026-10-30T17:00:00Z", { title: "Dinner at Maya's" })]);
-    expect(s.search({ query: "dinner", mailAccounts: ["cara@example.com"] }).map((i) => i.externalId).sort()).toEqual(["c1", "ev1"]);
+    s.upsert([email("e1"), email("c1", { account: "cleo@example.com" }), event("ev1", "2026-10-30T17:00:00Z", { title: "Dinner at Nora's" })]);
+    expect(s.search({ query: "dinner", mailAccounts: ["cleo@example.com"] }).map((i) => i.externalId).sort()).toEqual(["c1", "ev1"]);
     expect(s.search({ query: "dinner", mailAccounts: [] }).map((i) => i.externalId)).toEqual(["ev1"]);
     expect(s.search({ query: "dinner" })).toHaveLength(3);
   });
 
   it("finds things by any word, in milliseconds, with the source id to act on", () => {
     const s = fresh();
-    s.upsert([email("m1"), email("m2", { title: "Your Amazon order shipped", body: "Package arrives Thursday", people: ["Amazon <ship@amazon.com>"] })]);
-    const hits = s.search({ query: "dinner cara" });
+    s.upsert([email("m1"), email("m2", { title: "Your Amazon order shipped", body: "Package arrives Thursday", people: ["Amazon <ship@amazon.example>"] })]);
+    const hits = s.search({ query: "dinner cleo" });
     expect(hits.map((h) => h.externalId)).toEqual(["m1"]);
-    expect(hits[0]!.id).toBe("gmail:evan@example.com:m1");
+    expect(hits[0]!.id).toBe("gmail:ezra@example.com:m1");
     expect(s.search({ query: "amazon" })[0]!.externalId).toBe("m2");
   });
 
   it("searching with odd characters never breaks the query", () => {
     const s = fresh();
     s.upsert([email("m1")]);
-    for (const q of ['"', "dinner AND", "OR", "*", "parents'", "NEAR(", "-cara"]) expect(() => s.search({ query: q })).not.toThrow();
+    for (const q of ['"', "dinner AND", "OR", "*", "parents'", "NEAR(", "-cleo"]) expect(() => s.search({ query: q })).not.toThrow();
   });
 
   it("an update replaces the item and its search text", () => {
@@ -70,7 +70,7 @@ describe("the store", () => {
   it("something deleted at the source is kept forever but hidden from agents by default", () => {
     const s = fresh();
     s.upsert([email("m1")]);
-    s.markDeleted("gmail", "evan@example.com", ["m1"], "2026-10-29T00:00:00Z");
+    s.markDeleted("gmail", "ezra@example.com", ["m1"], "2026-10-29T00:00:00Z");
     expect(s.search({ query: "dinner" })).toEqual([]);
     expect(s.search({ query: "dinner", includeDeleted: true })[0]!.deletedAt).toBe("2026-10-29T00:00:00Z");
     s.upsert([email("m1")]); // it came back (moved out of the trash)
@@ -81,7 +81,7 @@ describe("the store", () => {
     const s = fresh();
     s.upsert([event("e2", "2026-10-30T22:00:00Z"), event("e1", "2026-10-30T16:00:00Z", { title: "Daycare drop-off" }), event("e0", "2026-10-28T16:00:00Z")]);
     const day = s.calendar("2026-10-30T07:00:00Z", "2026-10-31T07:00:00Z");
-    expect(day.map((e) => e.title)).toEqual(["Daycare drop-off", "Maya dentist"]);
+    expect(day.map((e) => e.title)).toEqual(["Daycare drop-off", "Nora dentist"]);
   });
 
   it("filters by kind and time, newest first without a query", () => {
@@ -93,10 +93,10 @@ describe("the store", () => {
 
   it("remembers each source's sync cursor and when it last worked", () => {
     const s = fresh();
-    expect(s.syncState("gmail", "evan@example.com")).toBeUndefined();
-    s.setSyncState("gmail", "evan@example.com", { cursor: "1761600000", lastOkAt: "2026-10-29T06:00:00Z" });
-    s.setSyncState("gmail", "evan@example.com", { lastError: "rate limited" });
-    expect(s.syncState("gmail", "evan@example.com")).toMatchObject({ cursor: "1761600000", lastOkAt: "2026-10-29T06:00:00Z", lastError: "rate limited" });
+    expect(s.syncState("gmail", "ezra@example.com")).toBeUndefined();
+    s.setSyncState("gmail", "ezra@example.com", { cursor: "1761600000", lastOkAt: "2026-10-29T06:00:00Z" });
+    s.setSyncState("gmail", "ezra@example.com", { lastError: "rate limited" });
+    expect(s.syncState("gmail", "ezra@example.com")).toMatchObject({ cursor: "1761600000", lastOkAt: "2026-10-29T06:00:00Z", lastError: "rate limited" });
     expect(s.syncStates()).toHaveLength(1);
   });
 
@@ -137,7 +137,7 @@ describe("keeping the store small", () => {
     expect(s.search({ query: "needle" })).toEqual([]); // it was past the first 4 KB
     expect(s.search({ kind: "email" }).map((i) => i.externalId).sort()).toEqual(["big", "m1"]);
     expect(s.search({ kind: "email" }).find((i) => i.externalId === "big")!.body.length).toBe(4000);
-    expect(s.search({ query: "maya" }).map((i) => i.externalId)).toEqual(["e1"]); // old events stay: a year each way
+    expect(s.search({ query: "nora" }).map((i) => i.externalId)).toEqual(["e1"]); // old events stay: a year each way
     expect(s.ftsSchema()).toContain("content=''");
   });
 });

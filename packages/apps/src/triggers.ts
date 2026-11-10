@@ -1,6 +1,6 @@
 /**
  * App events through Composio triggers: an automation watches one event of one connected account
- * (a new Gmail message on Evan's personal address), and Composio posts each one to the project's
+ * (a new Gmail message on Ezra's personal address), and Composio posts each one to the project's
  * single webhook, signed with the project's secret.
  */
 import type { StateDir } from "@kloru/core";
