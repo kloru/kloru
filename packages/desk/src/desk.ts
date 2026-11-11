@@ -26,6 +26,7 @@ import { clip, type Memory } from "./memory.js";
 import { PersonOutbox, localTime, whenIn, type FirstPassCheck, type FirstPassChoice, type Organizer, type OutboxPerson } from "./outbox.js";
 import type { OutboxItem, OutboxThread, OutboxWhy } from "./outbox-store.js";
 import { Repo } from "./repo.js";
+import { REVIEW_ROUNDS, openReview, passReview, reviewOf, sendBackReview, waiveReview } from "./reviews.js";
 import { err, ok, type Result } from "./result.js";
 import { describeEntry, type Vault } from "./vault.js";
 import { isClosed, type AppVisitors, type Artifact, type Author, type CallRecord, type Issue, type IssueStatus, type IssueTarget, type LedgerEntry, type Merge, type MemberPlan, type MergeKind, type Suggestion, type Turn } from "./types.js";
@@ -1526,7 +1527,8 @@ export class Desk {
       return;
     }
     if (issue.kind === "work") {
-      if (this.startQa(issue, text, since)) return;
+      const app = this.appForQa(issue, since);
+      if (app) return this.startQa(issue, app, text);
       this.openPr(issue, text);
       return;
     }
@@ -1549,15 +1551,17 @@ export class Desk {
     this.trigger({ kind: "ops_finished", issue: issueId });
   }
 
-  /** The engineer's result goes to the PM for review. */
+  /** The engineer's result goes to the PM for review. A review still waiting on a version that never came is waived. */
   private openPr(issue: Issue, body: string): void {
-    issue.prs.push({ at: new Date().toISOString(), body, baseTurn: this.repo.lastTurn(issue.filedBy.call), status: "open" });
+    const at = new Date().toISOString();
+    for (const r of issue.reviews ?? []) if (r.state === "open" || r.state === "changes") waiveReview(r, "the engineer made no new version", at);
+    issue.prs.push({ at, body, baseTurn: this.repo.lastTurn(issue.filedBy.call), status: "open" });
     this.move(issue, "in_review");
     this.trigger({ kind: "pr", issue: issue.id });
   }
 
   /** How many times QA sends one issue's app back before the PM hears what's still wrong. */
-  static readonly QA_ROUNDS = 3;
+  static readonly QA_ROUNDS = REVIEW_ROUNDS.result;
 
   /**
    * The app this issue's engineer made or changed in the run that began at `since`, when QA hasn't
@@ -1567,18 +1571,19 @@ export class Desk {
     if (!this.qa || issue.status !== "in_progress") return undefined;
     const id = issue.artifact ?? (issue.links.continues !== undefined ? this.repo.issue(issue.links.continues)?.artifact : undefined);
     const app = id ? this.repo.artifact(id) : undefined;
-    if (!app || app.kind !== "app" || issue.qa?.version === (app.version ?? 1)) return undefined;
+    const tried = reviewOf(issue, "result");
+    if (!app || app.kind !== "app" || tried?.version === (app.version ?? 1)) return undefined;
     const changed = since !== undefined && Date.parse(app.updatedAt ?? app.createdAt) >= since.getTime();
-    return changed || issue.qa ? app : undefined;
+    return changed || tried ? app : undefined;
   }
 
-  /** An engineer finished an app: QA uses it before the PM reviews the result. True when QA started. */
-  private startQa(issue: Issue, result: string, since?: Date): boolean {
-    const app = this.appForQa(issue, since);
-    if (!app) return false;
-    issue.qa = { rounds: issue.qa?.rounds ?? 0, version: app.version ?? 1 };
+  /** An engineer finished an app: QA uses it before the PM reviews the result. */
+  private startQa(issue: Issue, app: Artifact, result: string): void {
+    const opened = openReview(issue, { kind: "result", how: "tried", askedBy: "gate", version: app.version ?? 1 }, new Date().toISOString());
+    if (!opened.ok) throw new Error(opened.error);
+    const rounds = opened.value.rounds;
     this.repo.saveIssue(issue);
-    this.qaRunning.set(issue.id, []);
+    if (!this.qaRunning.has(issue.id)) this.qaRunning.set(issue.id, []);
     this.runWorker(
       issue,
       [
@@ -1586,18 +1591,18 @@ export class Desk {
         `Request: ${issue.request}`,
         issue.target ? `Goal: ${issue.target.goal}\nDone when: ${issue.target.doneWhen}` : `Spec: ${issue.spec ?? issue.request}`,
         `The engineer's result:\n${result}`,
-        issue.qa.rounds ? `You sent it back ${issue.qa.rounds === 1 ? "once" : `${issue.qa.rounds} times`} already; check those fixes first.` : "",
+        rounds ? `You sent it back ${rounds === 1 ? "once" : `${rounds} times`} already; check those fixes first.` : "",
       ].filter(Boolean).join("\n\n"),
       true,
     );
-    return true;
   }
 
   /** QA's verdict on the app, from its app_verdict call. */
   qaVerdict(issueId: number, usable: boolean, bugs: string): Result<true> {
     const issue = this.repo.issue(issueId);
-    if (!issue?.qa || !this.qaRunning.has(issueId)) return err("no app is waiting on QA for this issue");
-    issue.qa.verdict = { usable, bugs: bugs.trim() };
+    const review = issue ? reviewOf(issue, "result") : undefined;
+    if (!issue || review?.state !== "open" || !this.qaRunning.has(issueId)) return err("no app is waiting on QA for this issue");
+    review.verdict = { approve: usable, notes: bugs.trim() };
     this.repo.saveIssue(issue);
     return ok(true);
   }
@@ -1610,26 +1615,30 @@ export class Desk {
     this.inflight.delete(issueId);
     if (isClosed(issue.status) || issue.status !== "in_progress") return;
     const result = issue.thread.filter((e) => e.by === "engineer").at(-1)?.text ?? "";
-    const verdict = issue.qa?.verdict;
+    const review = reviewOf(issue, "result");
+    const verdict = review?.state === "open" ? review.verdict : undefined;
     const news = held.length ? `\nMeanwhile: ${held.join("\n")}` : "";
-    if (error !== undefined || !verdict) {
+    const at = new Date().toISOString();
+    if (error !== undefined || !review || !verdict) {
+      if (review?.state === "open") waiveReview(review, error !== undefined ? `couldn't try it: ${error}` : "no verdict", at);
       this.note(issue, "system", error !== undefined ? `QA couldn't try the app: ${error}` : `QA gave no verdict: ${clip(text, 400)}`);
       if (held.length) return this.runWorker(issue, news.trim());
       return this.openPr(issue, result);
     }
-    const rounds = issue.qa?.rounds ?? 0;
-    if (verdict.usable || !verdict.bugs) {
-      this.note(issue, "qa", `Tried the app: usable.${verdict.bugs ? ` Minor: ${verdict.bugs}` : ""}`);
+    if (verdict.approve || !verdict.notes) {
+      passReview(review, verdict.notes, at);
+      this.note(issue, "qa", `Tried the app: usable.${verdict.notes ? ` Minor: ${verdict.notes}` : ""}`);
       if (held.length) return this.runWorker(issue, news.trim());
       return this.openPr(issue, result);
     }
-    if (rounds >= Desk.QA_ROUNDS) {
-      this.note(issue, "qa", `Still wrong after ${rounds} rounds: ${verdict.bugs}`);
-      return this.openPr(issue, `${result}\n\nQA still finds, after ${rounds} rounds of fixes: ${verdict.bugs}`);
+    const back = sendBackReview(review, verdict.notes, at);
+    if (!back.ok) throw new Error(back.error);
+    if (review.state === "waived") {
+      this.note(issue, "qa", `Still wrong after ${review.rounds} rounds: ${verdict.notes}`);
+      return this.openPr(issue, `${result}\n\nQA still finds, after ${review.rounds} rounds of fixes: ${verdict.notes}`);
     }
-    issue.qa = { ...issue.qa!, rounds: rounds + 1 };
-    this.note(issue, "qa", `Sent back (${rounds + 1}/${Desk.QA_ROUNDS}): ${verdict.bugs}`);
-    this.runWorker(issue, `QA used the app on a phone and found problems that stop people using it:\n${verdict.bugs}\nSee each one happen yourself first (app_test), fix it, then check the same steps again.${news}`);
+    this.note(issue, "qa", `Sent back (${review.rounds}/${Desk.QA_ROUNDS}): ${verdict.notes}`);
+    this.runWorker(issue, `QA used the app on a phone and found problems that stop people using it:\n${verdict.notes}\nSee each one happen yourself first (app_test), fix it, then check the same steps again.${news}`);
   }
 
   private workerFailed(issueId: number, error: string): void {

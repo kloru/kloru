@@ -166,7 +166,8 @@ describe("QA uses an app before the PM reviews it", () => {
     expect(seen.sort()).toEqual(["app_data", "app_read", "app_verdict"]);
     expect(text(await s.as(issue, "qa")("app_verdict", { usable: true }))).toMatch(/Noted: usable/);
     await s.finish("Added, ticked and removed an item.");
-    expect(s.now(issue)).toMatchObject({ status: "in_review", qa: { rounds: 0, version: 1, verdict: { usable: true } } });
+    expect(s.now(issue)).toMatchObject({ status: "in_review", reviews: [{ kind: "result", how: "tried", askedBy: "gate", state: "passed", rounds: 0, version: 1 }] });
+    expect(s.now(issue).qa).toBeUndefined();
     expect(s.now(issue).prs.at(-1)!.body).toBe("Made the list: https://example.com/a/x");
     expect(s.now(issue).thread.at(-1)).toMatchObject({ by: "qa", text: "Tried the app: usable." });
     expect(s.pm.seen.at(-1)).toMatchObject({ kind: "pr", issue });
@@ -179,7 +180,7 @@ describe("QA uses an app before the PM reviews it", () => {
     await s.finish("Made the list.");
     await s.as(issue, "qa")("app_verdict", { usable: false, bugs: "Removed Milk, reloaded: Milk is back." });
     await s.finish("One bug.");
-    expect(s.now(issue)).toMatchObject({ status: "in_progress", qa: { rounds: 1 } });
+    expect(s.now(issue)).toMatchObject({ status: "in_progress", reviews: [{ state: "changes", rounds: 1, notes: "Removed Milk, reloaded: Milk is back." }] });
     expect(s.now(issue).thread.at(-1)).toMatchObject({ by: "qa", text: "Sent back (1/3): Removed Milk, reloaded: Milk is back." });
     expect(s.last().role.name).toBe("engineer");
     expect(s.last().prompt).toContain("Removed Milk, reloaded: Milk is back.");
@@ -212,6 +213,7 @@ describe("QA uses an app before the PM reviews it", () => {
     expect(s.now(issue).status).toBe("in_review");
     expect(s.now(issue).prs.at(-1)!.body).toBe("Fixed (3).\n\nQA still finds, after 3 rounds of fixes: Add does nothing.");
     expect(s.host.runs.filter((r) => r.role.name === "qa")).toHaveLength(4);
+    expect(s.now(issue).reviews).toMatchObject([{ state: "waived", rounds: 3, notes: "Add does nothing." }]);
   });
 
   it("an engineer sent back who changes nothing isn't tried again: the PM gets its answer", async () => {
@@ -224,6 +226,7 @@ describe("QA uses an app before the PM reviews it", () => {
     await s.finish("Add works for me; nothing to change.");
     expect(s.now(issue).status).toBe("in_review");
     expect(s.host.runs.filter((r) => r.role.name === "qa")).toHaveLength(1);
+    expect(s.now(issue).reviews).toMatchObject([{ state: "waived", rounds: 1, notes: "the engineer made no new version" }]);
   });
 
   it("QA that fails or gives no verdict doesn't hold the result up", async () => {
@@ -235,6 +238,7 @@ describe("QA uses an app before the PM reviews it", () => {
     await tick();
     expect(s.now(one).status).toBe("in_review");
     expect(s.now(one).thread.at(-1)).toMatchObject({ by: "system", text: "QA couldn't try the app: browser didn't start" });
+    expect(s.now(one).reviews).toMatchObject([{ state: "waived", notes: "couldn't try it: browser didn't start" }]);
 
     const two = s.assigned("Make us a chore chart");
     await made(s, two);
@@ -242,6 +246,7 @@ describe("QA uses an app before the PM reviews it", () => {
     await s.finish("Looks fine to me.");
     expect(s.now(two).status).toBe("in_review");
     expect(s.now(two).prs.at(-1)!.body).toBe("Made the chart.");
+    expect(s.now(two).reviews).toMatchObject([{ state: "waived", notes: "no verdict" }]);
   });
 
   it("only QA gives a verdict, a no needs its bugs, and QA changes only scratch data", async () => {
