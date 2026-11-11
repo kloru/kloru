@@ -29,7 +29,7 @@ import { Repo } from "./repo.js";
 import { REVIEW_ROUNDS, openReview, passReview, reviewOf, sendBackReview, waiveReview } from "./reviews.js";
 import { err, ok, type Result } from "./result.js";
 import { describeEntry, type Vault } from "./vault.js";
-import { isClosed, type AppVisitors, type Artifact, type Author, type CallRecord, type Issue, type IssueStatus, type IssueTarget, type LedgerEntry, type Merge, type MemberPlan, type MergeKind, type Suggestion, type Turn } from "./types.js";
+import { isClosed, type AppVisitors, type Artifact, type Author, type CallRecord, type HeldMessage, type Issue, type IssueStatus, type IssueTarget, type LedgerEntry, type Merge, type MemberPlan, type MergeKind, type Suggestion, type Turn } from "./types.js";
 
 /** Runs worker conversations. Production: AgentRuntime.worker; tests: a fake. */
 /** What the decision model weighs before a change. */
@@ -1584,6 +1584,10 @@ export class Desk {
   private openPr(issue: Issue, body: string): void {
     const at = new Date().toISOString();
     for (const r of issue.reviews ?? []) if (r.state === "open" || r.state === "changes") waiveReview(r, "the engineer made no new version", at);
+    // A check that ended with known problems: the worker's "it's ready" doesn't go as written.
+    const result = reviewOf(issue, "result");
+    if (result?.state === "waived" && result.verdict?.approve === false) this.dropHeld(issue, "the check found problems");
+    else this.releaseHeld(issue);
     issue.prs.push({ at, body, baseTurn: this.repo.lastTurn(issue.filedBy.call), status: "open" });
     this.move(issue, "in_review");
     this.trigger({ kind: "pr", issue: issue.id });
@@ -1746,6 +1750,7 @@ export class Desk {
       this.workerDone(issueId, `Stopped with an error after making the change (${error}). The ledger shows: ${what}`);
       return;
     }
+    this.dropHeld(issue, "the work failed");
     this.note(issue, "system", `Worker failed: ${error}`);
     this.move(issue, "failed");
     this.trigger({ kind: "worker_failed", issue: issueId, error });
@@ -1842,6 +1847,7 @@ export class Desk {
   /**
    * "Text me the link", "email me when you're done": a worker's message to the person who asked.
    * It goes into their outbox, which sends it now, keeps it for a better time, or drops it.
+   * About an app nobody has checked yet, it waits on the issue until the check is settled.
    */
   async messageCaller(issueId: number, text: string, channel?: NoticeChannel, subject?: string, media: string[] = []): Promise<Result<string>> {
     const issue = this.repo.issue(issueId);
@@ -1851,37 +1857,90 @@ export class Desk {
     if (!body) return err("nothing to send");
     const items = this.attachable(issue, media);
     if (!items.ok) return items;
-    // In a live text or email thread, one writer: the thread's own model passes it on, in the shape they like.
-    const call = this.repo.call(issue.filedBy.call);
-    if (call && !call.endedAt && (call.channel === "imessage" || call.channel === "email") && !items.value.length && (!channel || channel === (call.channel === "email" ? "email" : "imessage"))) {
-      this.deliver(call.id, { kind: "info", text: body, issue: issueId });
-      return ok("Passed on in their conversation.");
-    }
-    const phone = issue.filedBy.phone;
-    // The draft, weighed against how they like messages: a clear miss goes back to its writer once.
-    const once = `${issue.id}:worker`;
-    if (this.checkDraft && !this.redrafted.has(once)) {
-      const why = await this.draftMiss(phone, issue.filedBy.call, issue.request, body, channel, "result");
-      if (why) {
-        this.redrafted.add(once);
-        this.log(`desk: #${issue.id} worker draft → redraft: ${why}`);
-        return err(`Not sent yet: redraft it. ${why} Then send the new version the same way.`);
+    if (!this.liveThread(issue, channel, items.value.length > 0)) {
+      // The draft, weighed against how they like messages: a clear miss goes back to its writer once.
+      const once = `${issue.id}:worker`;
+      if (this.checkDraft && !this.redrafted.has(once)) {
+        const why = await this.draftMiss(issue.filedBy.phone, issue.filedBy.call, issue.request, body, channel, "result");
+        if (why) {
+          this.redrafted.add(once);
+          this.log(`desk: #${issue.id} worker draft → redraft: ${why}`);
+          return err(`Not sent yet: redraft it. ${why} Then send the new version the same way.`);
+        }
       }
+      this.redrafted.delete(once);
     }
-    this.redrafted.delete(once);
+    if (this.awaitsCheck(issue)) {
+      const kept: HeldMessage = { text: body, ...(channel ? { channel } : {}), ...(subject?.trim() ? { subject: subject.trim() } : {}), ...(media.length ? { media: [...new Set(media)] } : {}), at: new Date().toISOString() };
+      (issue.heldMessages ??= []).push(kept);
+      this.note(issue, "system", `Kept until the app has been checked: ${clip(body, 300)}`);
+      return ok("Kept: it goes to them once the app has been checked. Don't send it another way; carry on.");
+    }
+    return ok(await this.passOn(issue, body, channel, subject, items.value));
+  }
+
+  /** The app this issue changed hasn't been checked yet: its messages wait, so a link never arrives before the app works. */
+  private awaitsCheck(issue: Issue): boolean {
+    if (!this.qa || issue.kind !== "work" || issue.status !== "in_progress") return false;
+    const review = reviewOf(issue, "result");
+    if (review && (review.state === "open" || review.state === "changes")) return true;
+    return this.appForQa(issue, this.since.get(issue.id)) !== undefined;
+  }
+
+  /** Their live text or email thread, when this message can go into it as it is. */
+  private liveThread(issue: Issue, channel: NoticeChannel | undefined, hasMedia: boolean): CallRecord | undefined {
+    const call = this.repo.call(issue.filedBy.call);
+    return call && !call.endedAt && (call.channel === "imessage" || call.channel === "email") && !hasMedia && (!channel || channel === (call.channel === "email" ? "email" : "imessage")) ? call : undefined;
+  }
+
+  /** Hand a worker's message on: into their live thread, or to their outbox. Says what became of it. */
+  private async passOn(issue: Issue, body: string, channel: NoticeChannel | undefined, subject: string | undefined, items: Array<{ item: MediaItem; path: string }>): Promise<string> {
+    // In a live text or email thread, one writer: the thread's own model passes it on, in the shape they like.
+    const live = this.liveThread(issue, channel, items.length > 0);
+    if (live) {
+      this.deliver(live.id, { kind: "info", text: body, issue: issue.id });
+      return "Passed on in their conversation.";
+    }
     const item = await this.outbox.submit({
-      phone,
+      phone: issue.filedBy.phone,
       text: body,
       why: this.whyOf(issue),
       from: { agent: "worker", issue: issue.id, call: issue.filedBy.call },
       drafted: true,
       subject: subject?.trim() || `Kloru: ${clip(issue.request, 70)}`,
       ...(channel ? { channel } : {}),
-      ...(items.value.length ? { media: items.value.map((x) => x.item.id) } : {}),
+      ...(items.length ? { media: items.map((x) => x.item.id) } : {}),
     });
-    if (item.state === "sent") return ok(`Sent${item.sentOn && item.sentOn !== "default" ? ` by ${item.sentOn}` : ""}.`);
-    if (item.state === "dropped") return ok("Not sent: they already have this or don't need it. Don't send it another way.");
-    return ok("It's in their outbox and will reach them at a good time for them. Don't send it another way; carry on.");
+    if (item.state === "sent") return `Sent${item.sentOn && item.sentOn !== "default" ? ` by ${item.sentOn}` : ""}.`;
+    if (item.state === "dropped") return "Not sent: they already have this or don't need it. Don't send it another way.";
+    return "It's in their outbox and will reach them at a good time for them. Don't send it another way; carry on.";
+  }
+
+  /** The check is settled and found nothing that matters: what the worker wrote meanwhile goes now. */
+  private releaseHeld(issue: Issue): void {
+    const held = issue.heldMessages;
+    if (!held?.length) return;
+    delete issue.heldMessages;
+    this.repo.saveIssue(issue);
+    void (async () => {
+      for (const m of held) {
+        try {
+          const items = this.attachable(issue, m.media ?? []);
+          const said = await this.passOn(issue, m.text, m.channel, m.subject, items.ok ? items.value : []);
+          this.log(`desk: #${issue.id} kept message released: ${said}`);
+        } catch (error) {
+          this.log(`desk: #${issue.id} kept message not sent: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    })();
+  }
+
+  /** What the worker wrote won't go as written: the thread keeps it, and the PM decides what they hear. */
+  private dropHeld(issue: Issue, why: string): void {
+    const held = issue.heldMessages;
+    if (!held?.length) return;
+    delete issue.heldMessages;
+    for (const m of held) this.note(issue, "system", `Not sent (${why}): ${clip(m.text, 300)}`);
   }
 
   /** The photos and files a message to this issue's caller may carry: kept, and theirs to see. */

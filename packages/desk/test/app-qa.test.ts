@@ -430,3 +430,120 @@ describe("the result gate says whether a changed app needs trying", () => {
     expect(s.now(issue).thread.at(-1)).toMatchObject({ text: "Result check: none" });
   });
 });
+
+describe("a worker's message about an app waits until the app has been checked", () => {
+  const LINK = "Your list is ready: https://example.com/a/x";
+  const inbox = (s: ReturnType<typeof setup>, issue: number) => s.desk.repo.inbox(s.now(issue).filedBy.call, 0).map((m) => m.text);
+  const said = async (s: ReturnType<typeof setup>, issue: number, text: string) => {
+    const r = await s.desk.messageCaller(issue, text);
+    if (!r.ok) throw new Error(r.error);
+    return r.value;
+  };
+
+  it("goes at once before there is an app; is kept once the app exists; goes when QA passes it", async () => {
+    const s = setup({ notify: true });
+    const issue = s.assigned("Make us a shared grocery list");
+    expect(await said(s, issue, "Starting on it.")).toBe("Passed on in their conversation.");
+    await made(s, issue);
+    expect(await said(s, issue, LINK)).toMatch(/^Kept: it goes to them once the app has been checked/);
+    expect(inbox(s, issue)).toContain("Starting on it.");
+    expect(inbox(s, issue)).not.toContain(LINK);
+    expect(s.now(issue).heldMessages).toMatchObject([{ text: LINK }]);
+    expect(s.now(issue).thread.at(-1)).toMatchObject({ by: "system", text: `Kept until the app has been checked: ${LINK}` });
+    await s.finish("Made the list.");
+    expect(inbox(s, issue)).not.toContain(LINK);
+    await s.as(issue, "qa")("app_verdict", { usable: true });
+    await s.finish("Works.");
+    await tick();
+    expect(inbox(s, issue)).toContain(LINK);
+    expect(s.now(issue).heldMessages).toBeUndefined();
+    expect(s.now(issue).status).toBe("in_review");
+  });
+
+  it("goes as soon as the engineer finishes when the gate says no check is needed", async () => {
+    const s = setup({ notify: true, gate: async () => ({ check: "none", p: 0.9 }) });
+    const issue = s.assigned("Make us a shared grocery list");
+    await made(s, issue);
+    expect(await said(s, issue, LINK)).toMatch(/^Kept/);
+    await s.finish("Made the list.");
+    await tick();
+    expect(inbox(s, issue)).toContain(LINK);
+  });
+
+  it("is kept through a send-back and goes when the fixed version passes", async () => {
+    const s = setup({ notify: true });
+    const issue = s.assigned("Make us a shared grocery list");
+    const id = await made(s, issue);
+    await s.finish("Made the list.");
+    await s.as(issue, "qa")("app_verdict", { usable: false, bugs: "Add does nothing." });
+    await s.finish("One bug.");
+    expect(await said(s, issue, LINK)).toMatch(/^Kept/); // the engineer, fixing, before it has changed anything
+    await s.as(issue)("app_update", { id, replace: { old: "items.length", new: "items.length + 0" } });
+    await s.finish("Fixed.");
+    expect(inbox(s, issue)).not.toContain(LINK);
+    await s.as(issue, "qa")("app_verdict", { usable: true });
+    await s.finish("Works.");
+    await tick();
+    expect(inbox(s, issue)).toContain(LINK);
+  });
+
+  it("is not sent when QA still finds bugs: the PM sees it on the thread", async () => {
+    const s = setup({ notify: true });
+    const issue = s.assigned("Make us a shared grocery list");
+    await made(s, issue);
+    expect(await said(s, issue, LINK)).toMatch(/^Kept/);
+    await s.finish("Made the list.");
+    await s.as(issue, "qa")("app_verdict", { usable: false, bugs: "Add does nothing." });
+    await s.finish("One bug.");
+    await s.finish("Add works for me; nothing to change."); // no new version: the review is waived with its bug
+    await tick();
+    expect(s.now(issue).status).toBe("in_review");
+    expect(inbox(s, issue)).not.toContain(LINK);
+    expect(s.now(issue).heldMessages).toBeUndefined();
+    expect(s.now(issue).thread.map((e) => e.text)).toContain(`Not sent (the check found problems): ${LINK}`);
+  });
+
+  it("is not sent when the work fails", async () => {
+    const s = setup({ notify: true });
+    const issue = s.assigned("Make us a shared grocery list");
+    await made(s, issue);
+    expect(await said(s, issue, LINK)).toMatch(/^Kept/);
+    s.last().fail("model error");
+    await tick();
+    expect(s.now(issue).status).toBe("failed");
+    expect(inbox(s, issue)).not.toContain(LINK);
+    expect(s.now(issue).thread.map((e) => e.text)).toContain(`Not sent (the work failed): ${LINK}`);
+  });
+
+  it("QA that couldn't run doesn't keep the message back", async () => {
+    const s = setup({ notify: true });
+    const issue = s.assigned("Make us a shared grocery list");
+    await made(s, issue);
+    expect(await said(s, issue, LINK)).toMatch(/^Kept/);
+    await s.finish("Made the list.");
+    s.last().fail("browser didn't start");
+    await tick();
+    await tick();
+    expect(inbox(s, issue)).toContain(LINK);
+  });
+
+  it("nothing is kept with QA off, for work that isn't an app, or for an app this run didn't change", async () => {
+    const off = setup({ notify: true, qa: false });
+    const a = off.assigned("Make us a shared grocery list");
+    await made(off, a);
+    expect(await said(off, a, LINK)).toBe("Passed on in their conversation.");
+
+    const s = setup({ notify: true });
+    const answer = s.assigned("When is the dentist?", "answer");
+    expect(await said(s, answer, "Monday at 9.")).toBe("Passed on in their conversation.");
+    await s.finish("Monday at 9.");
+
+    const first = s.assigned("Make us a shared grocery list");
+    await made(s, first);
+    await s.finish("Made the list.");
+    await s.as(first, "qa")("app_verdict", { usable: true });
+    await s.finish("Works.");
+    const ask = s.assigned("What does the grocery list app do?", "answer", first);
+    expect(await said(s, ask, "It keeps a shared list.")).toBe("Passed on in their conversation.");
+  });
+});
