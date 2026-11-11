@@ -37,6 +37,37 @@ export interface IssueTarget {
   deliverable: Deliverable;
 }
 
+export type ReviewKind = "spec" | "plan" | "result";
+/** How it's checked: a peer reads it; QA tries it; its sources are opened again; the change is read back. */
+export type ReviewHow = "reader" | "tried" | "reopened" | "read_back";
+export type ReviewState = "open" | "passed" | "changes" | "waived";
+
+/** One review an issue owes before its result is delivered (reviews.ts holds the moves). */
+export interface Review {
+  kind: ReviewKind;
+  how: ReviewHow;
+  askedBy: "gate" | "pm" | "engineer";
+  state: ReviewState;
+  /** Times the maker was sent back. */
+  rounds: number;
+  /** The reviewer's list, or why it was waived. */
+  notes?: string;
+  /** For "tried": the app version last tried. */
+  version?: number;
+  /** What the reviewer said, until the desk acts on it. */
+  verdict?: { approve: boolean; notes: string };
+  at: string;
+}
+
+/** A worker's message to the caller, kept until the result check is settled. */
+export interface HeldMessage {
+  text: string;
+  channel?: "imessage" | "email";
+  subject?: string;
+  media?: string[];
+  at: string;
+}
+
 export interface Issue {
   id: number;
   /** What the PM said the work needs (a member's request): a permission on someone's account. */
@@ -73,7 +104,11 @@ export interface Issue {
   fast?: { changes: Array<{ slug: string; args: Record<string, unknown>; account?: string }>; say: string };
   /** The artifact (page) this issue made or edited. */
   artifact?: string;
-  /** QA on the app this issue made or changed: how many times it sent the engineer back, the version it last tried, and what it found there. */
+  /** The reviews this issue owes; its result is delivered once none is open or awaiting changes. */
+  reviews?: Review[];
+  /** Messages a worker wrote to the caller before the result check settled. */
+  heldMessages?: HeldMessage[];
+  /** Before reviews: QA's state. Read once when the issue loads (fromLegacyQa), never written. */
   qa?: { rounds: number; version?: number; verdict?: { usable: boolean; bugs: string } };
   /** A family member the owner described, waiting on the owner's yes to the read-back. */
   member?: MemberPlan;

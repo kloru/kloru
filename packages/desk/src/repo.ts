@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok, type Result } from "./result.js";
+import { fromLegacyQa } from "./reviews.js";
 import type { Artifact, ArtifactVersion, CallRecord, Issue, LedgerEntry, Merge, MergeKind, SentNotification, Suggestion, Turn } from "./types.js";
 
 /** 128 random bits, base64url: the only shape an artifact id can have. */
@@ -124,7 +125,7 @@ export class Repo {
     for (const f of list(join(dir, "issues"))) {
       if (!/^\d+\.json$/.test(f)) continue;
       const issue = readJson<Issue | undefined>(join(dir, "issues", f), undefined);
-      if (issue) this.issueMap.set(issue.id, issue);
+      if (issue) this.issueMap.set(issue.id, fromLegacyQa(issue));
     }
     this.ledgerCache = readLines<LedgerEntry>(join(dir, "ops", "ledger.jsonl"));
     const counted = readJson<{ nextIssue?: number }>(join(dir, "counters.json"), {}).nextIssue ?? 1;
