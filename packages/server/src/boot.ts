@@ -7,6 +7,7 @@
 import { AccountsSyncer, Store, SyncRunner, dayView, storeTools, type StoreScope } from "@kloru/store";
 import { storeFastPath } from "./fast-path.js";
 import { comsDecider } from "./coms-decider.js";
+import { resultGate } from "./result-gate.js";
 import { outboxDecider } from "./outbox-decider.js";
 import { eventGate } from "./event-gate.js";
 import { Events } from "./events.js";
@@ -943,6 +944,8 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       ...(appEngineerModel ? { appEngineerModel } : {}),
       ...(qaModel ? { qaModel } : {}),
       qa: qaOn,
+      // The result gate (Jev): a small change to an app goes on without a QA run; unsure or broken means it's tried.
+      ...(fastKey && qaOn && env.KLORU_RESULT_GATE?.trim().toLowerCase() !== "off" ? { decideResult: resultGate({ apiKey: fastKey }) } : {}),
       ...(householdMemory ? { memory: householdMemory, legacyMemory: () => memory.readDurable() } : {}),
       ...(artifactBase(env) ? { artifactBaseUrl: artifactBase(env)! } : {}),
       scheduler,
@@ -1073,7 +1076,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       if (resend && env.RESEND_WEBHOOK_SECRET?.trim()) resendIn = { webhookSecret: env.RESEND_WEBHOOK_SECRET.trim(), received: (id) => resend.received(id), attachmentUrl: (e, a) => resend.attachmentUrl(e, a) };
       log(`text: texts${resendIn ? " and emails" : ""} start desk conversations`);
     }
-    log(`desk: ready, PM model ${pmModel.provider}/${pmModel.id}${engineerModel ? `, engineers on ${engineerModel.provider}/${engineerModel.id}` : ""}${appEngineerModel ? `, apps on ${appEngineerModel.provider}/${appEngineerModel.id}` : ""}${qaOn ? `, QA tries apps${qaModel ? ` on ${qaModel.provider}/${qaModel.id}` : ""}` : ""}${householdMemory ? `, memory for ${householdMemory.operators().join(", ")}` : ""}${langfuse ? ", tracing to Langfuse" : ""}`);
+    log(`desk: ready, PM model ${pmModel.provider}/${pmModel.id}${engineerModel ? `, engineers on ${engineerModel.provider}/${engineerModel.id}` : ""}${appEngineerModel ? `, apps on ${appEngineerModel.provider}/${appEngineerModel.id}` : ""}${qaOn ? `, QA tries apps${fastKey && env.KLORU_RESULT_GATE?.trim().toLowerCase() !== "off" ? " the result gate picks" : ""}${qaModel ? ` on ${qaModel.provider}/${qaModel.id}` : ""}` : ""}${householdMemory ? `, memory for ${householdMemory.operators().join(", ")}` : ""}${langfuse ? ", tracing to Langfuse" : ""}`);
   }
 
   return {

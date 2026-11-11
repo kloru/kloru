@@ -37,6 +37,12 @@ runs on that machine.
 4. **The worker does it** with the tools above, and comments on the request as it goes. An
    owner's own request is the approval for what it needs; every approval, and who gave it, goes
    on the request and in the ledger.
+
+   **Reviews scale with the task.** An issue carries the reviews it owes (`reviews.ts`): each is
+   open, passed, awaiting changes or waived. App QA is a `tried` review. When an engineer finishes
+   with a changed app, the result gate (`result-gate.ts`, Jev) says whether it needs trying;
+   unsure, slow or broken means it is tried. A worker's message about the app waits on the issue
+   until that check is settled.
 5. **The result goes into the person's outbox.** Every message Kloru sends someone (a reply, a
    result, a report, a question, a reminder) is one item in that person's outbox, whoever wrote it.
    In a text thread the texting model writes it, shaped first (a reaction, one line, or the whole
