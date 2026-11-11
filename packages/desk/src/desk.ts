@@ -123,6 +123,26 @@ export interface MessageDecision {
   p?: number;
 }
 
+/** What the result gate weighs when an engineer finishes work that changed an app. */
+export interface ResultCheck {
+  request: string;
+  goal?: string;
+  doneWhen?: string;
+  deliverable?: string;
+  /** The engineer's own report. */
+  result: string;
+  /** What changed, in a line: 'app "Groceries": new, 120 lines' or 'app "Groceries": version 4 → 5, 3 of 120 lines changed'. */
+  changed: string;
+  /** Real-world changes this issue made, from the ledger. */
+  ledger: string[];
+}
+
+/** Whether the result needs an independent check before the PM reviews it, and which. */
+export interface ResultDecision {
+  check: "none" | "tried";
+  p?: number;
+}
+
 export interface WorkerHost {
   /**
    * Run (or continue) the worker for an issue as the person at `phone` (unset: the owner); resolves
@@ -192,6 +212,8 @@ export interface DeskOptions {
   qa?: boolean;
   /** QA's model; default: the app engineer's. */
   qaModel?: Model<any>;
+  /** The result gate: whether a changed app needs trying before the PM reviews the result. Without it, or when it fails, every changed app is tried. */
+  decideResult?: (c: ResultCheck) => Promise<ResultDecision>;
   /** Whether this phone allows its words in traces. Default: no. */
   contentAllowed?: (phone: string) => boolean;
   /** Household memory: briefs at call start, and a memory ops issue after every call. */
@@ -469,6 +491,9 @@ export class Desk {
   private readonly qaModel: Model<any> | undefined;
   /** Issues whose app QA is trying now, with what arrived for the engineer meanwhile. */
   private readonly qaRunning = new Map<number, string[]>();
+  private readonly decideResult: ((c: ResultCheck) => Promise<ResultDecision>) | undefined;
+  /** When each issue's current run began, by the desk's clock: what "changed in this run" is measured from. */
+  private readonly since = new Map<number, Date>();
   private readonly memory: Memory | undefined;
   private readonly legacyMemory: (() => string) | undefined;
   private readonly notify: ((n: Notice) => Promise<boolean | NoticeChannel>) | undefined;
@@ -533,6 +558,7 @@ export class Desk {
     this.appEngineerModel = o.appEngineerModel ?? o.engineerModel;
     this.qa = o.qa ?? false;
     this.qaModel = o.qaModel ?? this.appEngineerModel;
+    this.decideResult = o.decideResult;
     this.memory = o.memory;
     this.legacyMemory = o.legacyMemory;
     this.notify = o.notify;
@@ -1471,6 +1497,7 @@ export class Desk {
     };
     const start = new Date();
     const since = this.now();
+    this.since.set(issue.id, since);
     const report = (outcome: string, output?: string) => {
       const now = this.mustIssue(issue.id);
       this.emit(issue, {
@@ -1528,8 +1555,10 @@ export class Desk {
     }
     if (issue.kind === "work") {
       const app = this.appForQa(issue, since);
-      if (app) return this.startQa(issue, app, text);
-      this.openPr(issue, text);
+      if (!app) return this.openPr(issue, text);
+      // Once a version has been tried, each new one is. Before that, the gate says whether this change needs trying.
+      if (!this.decideResult || reviewOf(issue, "result")) return this.startQa(issue, app, text);
+      void this.gateResult(issue.id, app, text, since);
       return;
     }
     if (issue.cancelRequested) {
@@ -1558,6 +1587,60 @@ export class Desk {
     issue.prs.push({ at, body, baseTurn: this.repo.lastTurn(issue.filedBy.call), status: "open" });
     this.move(issue, "in_review");
     this.trigger({ kind: "pr", issue: issue.id });
+  }
+
+  /**
+   * The result gate: does this change to an app need trying before the PM reviews it? While it
+   * decides, the issue is held like one QA has. Unsure, slow or broken means it's tried, as without a gate.
+   */
+  private async gateResult(issueId: number, app: Artifact, result: string, since?: Date): Promise<void> {
+    const issue = this.mustIssue(issueId);
+    const waiting: string[] = [];
+    const run = this.runs.get(issueId);
+    this.qaRunning.set(issueId, waiting);
+    // The sweeper treats in_progress with no worker as stuck: the decision is this issue's worker for now.
+    this.started.set(issueId, Date.now());
+    let d: ResultDecision;
+    try {
+      d = await this.decideResult!({
+        request: issue.request,
+        ...(issue.target ? { goal: issue.target.goal, doneWhen: issue.target.doneWhen, deliverable: issue.target.deliverable } : {}),
+        result: clip(result, 2000),
+        changed: this.appChange(app, since),
+        ledger: this.repo.ledger(issueId).filter((e) => e.ok).map((e) => `${e.slug.toLowerCase().replace(/_/g, " ")} → ${clip(e.result, 200)}`),
+      });
+    } catch (error) {
+      this.log(`desk: #${issueId} result gate failed, trying the app: ${error instanceof Error ? error.message : String(error)}`);
+      d = { check: "tried" };
+    }
+    try {
+      if (this.qaRunning.get(issueId) !== waiting || this.runs.get(issueId) !== run) return; // something else took the issue over
+      this.started.delete(issueId);
+      const now = this.mustIssue(issueId);
+      if (now.status !== "in_progress") {
+        this.qaRunning.delete(issueId);
+        return;
+      }
+      this.log(`desk: #${issueId} result gate → ${d.check}${d.p !== undefined ? ` ${d.p.toFixed(2)}` : ""}`);
+      this.note(now, "system", `Result check: ${d.check === "tried" ? "try the app" : "none"}${d.p !== undefined ? ` (${d.p.toFixed(2)})` : ""}`);
+      if (d.check === "tried") return this.startQa(now, app, result);
+      this.qaRunning.delete(issueId);
+      if (waiting.length) return this.runWorker(now, `Meanwhile: ${waiting.join("\n")}`);
+      this.openPr(now, result);
+    } catch (error) {
+      this.log(`desk: result gate on #${issueId} ignored: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** What an engineer's run changed in an app, in a line the result gate can weigh. */
+  private appChange(app: Artifact, since?: Date): string {
+    const lines = (html?: string) => (html ?? "").split("\n");
+    const now = lines(app.html);
+    const before = since ? this.repo.artifactVersions(app.id).filter((v) => Date.parse(v.at) < since.getTime()).at(-1) : undefined;
+    if (!before) return `app "${app.title}": new, ${now.length} lines`;
+    const old = lines(before.html);
+    const changed = now.filter((l) => !old.includes(l)).length + old.filter((l) => !now.includes(l)).length;
+    return `app "${before.title}": version ${before.version} → ${app.version ?? 1}, ${changed} of ${now.length} lines changed`;
   }
 
   /** How many times QA sends one issue's app back before the PM hears what's still wrong. */

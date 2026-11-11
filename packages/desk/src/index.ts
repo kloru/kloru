@@ -3,7 +3,7 @@ export { GENESIS, Repo, canonical, sha256, type ChainBreak, type MerkleNode, typ
 export { canTransition, transition } from "./machine.js";
 export { REVIEW_ROUNDS, canReview, openReview, passReview, reviewOf, sendBackReview, settled, waiveReview } from "./reviews.js";
 export { andThen, err, map, ok, type Result } from "./result.js";
-export { Desk, DeskConflict, describeWhen, describeEvent, EVENT_HEADING, type DeskSpan, type DeskTelemetry, type CloseStatus, type Notice, type NoticeChannel, type NoticeMedia, type ConversationSend, type DraftCheck, type MessageCheck, type MessageDecision, type FastAnswer, type FastChange, type ExecuteApp, type DeskOptions, type ActionCheck, type ActionDecision, type Planner, type Trigger, type WorkerHost } from "./desk.js";
+export { Desk, DeskConflict, describeWhen, describeEvent, EVENT_HEADING, type DeskSpan, type DeskTelemetry, type CloseStatus, type Notice, type NoticeChannel, type NoticeMedia, type ConversationSend, type DraftCheck, type MessageCheck, type MessageDecision, type ResultCheck, type ResultDecision, type FastAnswer, type FastChange, type ExecuteApp, type DeskOptions, type ActionCheck, type ActionDecision, type Planner, type Trigger, type WorkerHost } from "./desk.js";
 export { PM_RULES, TechnicalPM, pmTools, snapshot, type TechnicalPMOptions } from "./pm.js";
 export { Memory, parseFile, type MemoryFile, type MemoryOwner } from "./memory.js";
 export { MEMORY_READ_TOOLS, MEMORY_WRITE_TOOLS, memoryTools } from "./memory-tools.js";

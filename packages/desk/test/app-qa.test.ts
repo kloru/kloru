@@ -9,7 +9,7 @@ import { resolveModel, type WorkerRole } from "@kloru/core";
 import { describe, expect, it } from "vitest";
 import { AppStore } from "../src/app-store.js";
 import { appTools } from "../src/apps.js";
-import { Desk, type Planner, type Trigger, type WorkerHost } from "../src/desk.js";
+import { Desk, type Planner, type ResultCheck, type ResultDecision, type Trigger, type WorkerHost } from "../src/desk.js";
 
 const EZRA = "+14155550190";
 const CLEO = "+14155550191";
@@ -48,7 +48,7 @@ class PM implements Planner {
   }
 }
 
-function setup(o: { qa?: boolean; store?: boolean } = {}) {
+function setup(o: { qa?: boolean; store?: boolean; gate?: (c: ResultCheck) => Promise<ResultDecision>; notify?: boolean } = {}) {
   const host = new Host();
   const pm = new PM();
   const store = new AppStore(":memory:");
@@ -64,6 +64,8 @@ function setup(o: { qa?: boolean; store?: boolean } = {}) {
     appEngineerModel: terra,
     qa: o.qa ?? true,
     ...(o.store === false ? {} : { appStore: () => store }),
+    ...(o.gate ? { decideResult: o.gate } : {}),
+    ...(o.notify ? { notify: async () => true } : {}),
   });
   const tools = Object.fromEntries(appTools(desk).map((t) => [t.spec.name, t]));
   const as = (issue: number, role = "engineer") => (name: string, args: Record<string, unknown>) => tools[name]!.spec.execute(args as never, { conversationKey: `desk:issue:${issue}:${role}` } as never);
@@ -316,5 +318,115 @@ describe("QA uses an app before the PM reviews it", () => {
     await made(off, issue);
     await off.finish("Made the list.");
     expect(off.now(issue).status).toBe("in_review");
+  });
+});
+
+describe("the result gate says whether a changed app needs trying", () => {
+  it("none: the result goes straight to the PM, and the decision is on the thread", async () => {
+    const seen: ResultCheck[] = [];
+    const s = setup({ gate: async (c) => (seen.push(c), { check: "none", p: 0.9 }) });
+    const issue = s.assigned("Make us a shared grocery list");
+    await made(s, issue);
+    await s.finish("Made the list.");
+    expect(s.now(issue).status).toBe("in_review");
+    expect(s.host.runs.filter((r) => r.role.name === "qa")).toHaveLength(0);
+    expect(s.now(issue).reviews).toBeUndefined();
+    expect(s.now(issue).thread.at(-1)).toMatchObject({ by: "system", text: "Result check: none (0.90)" });
+    expect(s.now(issue).prs.at(-1)!.body).toBe("Made the list.");
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ request: "Make us a shared grocery list", goal: "Make us a shared grocery list", doneWhen: "it works on a phone", deliverable: "app", result: "Made the list.", changed: 'app "Groceries": new, 7 lines', ledger: [] });
+  });
+
+  it("tried: QA uses the app, as without a gate", async () => {
+    const s = setup({ gate: async () => ({ check: "tried", p: 0.95 }) });
+    const issue = s.assigned("Make us a shared grocery list");
+    await made(s, issue);
+    await s.finish("Made the list.");
+    expect(s.last().role.name).toBe("qa");
+    expect(s.now(issue).thread.at(-1)).toMatchObject({ by: "system", text: "Result check: try the app (0.95)" });
+    expect(s.now(issue).reviews).toMatchObject([{ kind: "result", how: "tried", askedBy: "gate", state: "open" }]);
+    await s.as(issue, "qa")("app_verdict", { usable: true });
+    await s.finish("Works.");
+    expect(s.now(issue).status).toBe("in_review");
+  });
+
+  it("a gate that fails means the app is tried", async () => {
+    const s = setup({ gate: async () => { throw new Error("decision model 503"); } });
+    const issue = s.assigned("Make us a shared grocery list");
+    await made(s, issue);
+    await s.finish("Made the list.");
+    expect(s.last().role.name).toBe("qa");
+    expect(s.now(issue).thread.at(-1)).toMatchObject({ by: "system", text: "Result check: try the app" });
+  });
+
+  it("is asked once: after a version has been tried, each new one is", async () => {
+    let asked = 0;
+    const s = setup({ gate: async () => (asked++, { check: "tried" }) });
+    const issue = s.assigned("Make us a shared grocery list");
+    const id = await made(s, issue);
+    await s.finish("Made the list.");
+    await s.as(issue, "qa")("app_verdict", { usable: false, bugs: "Add does nothing." });
+    await s.finish("One bug.");
+    await s.as(issue)("app_update", { id, replace: { old: "items.length", new: "items.length + 0" } });
+    await s.finish("Fixed.");
+    expect(s.last().role.name).toBe("qa");
+    expect(asked).toBe(1);
+  });
+
+  it("a small change to an app nobody has tried on this issue is asked about, with how much changed", async () => {
+    const seen: ResultCheck[] = [];
+    const s = setup({ gate: async (c) => (seen.push(c), { check: "none", p: 0.8 }) });
+    const first = s.assigned("Make us a shared grocery list");
+    const id = await made(s, first);
+    await s.finish("Made the list.");
+    const follow = s.assigned("Call the list Shopping", "app", first);
+    await s.as(first)("app_update", { id, replace: { old: "<title>Groceries</title>", new: "<title>Shopping</title>" } });
+    await s.finish("Renamed.");
+    expect(s.now(follow).status).toBe("in_review");
+    expect(seen.at(-1)!.changed).toBe('app "Groceries": version 1 → 2, 2 of 7 lines changed');
+  });
+
+  it("what the caller says while the gate decides reaches the engineer", async () => {
+    let release!: (d: ResultDecision) => void;
+    const s = setup({ gate: () => new Promise((r) => (release = r)) });
+    const issue = s.assigned("Make us a shared grocery list");
+    await made(s, issue);
+    await s.finish("Made the list.");
+    s.desk.comment(issue, s.now(issue).filedBy.call, "Also add a quantity field");
+    expect(s.host.steered).toEqual([]);
+    release({ check: "none", p: 0.9 });
+    await tick();
+    expect(s.now(issue).status).toBe("in_progress");
+    expect(s.last().role.name).toBe("engineer");
+    expect(s.last().prompt).toContain("Also add a quantity field");
+  });
+
+  it("an issue closed while the gate decides starts nothing", async () => {
+    let release!: (d: ResultDecision) => void;
+    const s = setup({ gate: () => new Promise((r) => (release = r)) });
+    const issue = s.assigned("Make us a shared grocery list");
+    await made(s, issue);
+    await s.finish("Made the list.");
+    const runs = s.host.runs.length;
+    expect(s.desk.close(issue, "wont_do").ok).toBe(true);
+    release({ check: "tried" });
+    await tick();
+    expect(s.host.runs).toHaveLength(runs);
+    expect(s.now(issue).status).toBe("wont_do");
+    expect(s.now(issue).prs).toHaveLength(0);
+  });
+
+  it("the sweeper doesn't call an issue stuck while the gate decides", async () => {
+    let release!: (d: ResultDecision) => void;
+    const s = setup({ gate: () => new Promise((r) => (release = r)) });
+    const issue = s.assigned("Make us a shared grocery list");
+    await made(s, issue);
+    await s.finish("Made the list.");
+    s.desk.sweep();
+    expect(s.now(issue).status).toBe("in_progress");
+    release({ check: "none" });
+    await tick();
+    expect(s.now(issue).status).toBe("in_review");
+    expect(s.now(issue).thread.at(-1)).toMatchObject({ text: "Result check: none" });
   });
 });
