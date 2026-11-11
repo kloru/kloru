@@ -214,6 +214,8 @@ export interface DeskOptions {
   qaModel?: Model<any>;
   /** The result gate: whether a changed app needs trying before the PM reviews the result. Without it, or when it fails, every changed app is tried. */
   decideResult?: (c: ResultCheck) => Promise<ResultDecision>;
+  /** How long the desk waits for `decideResult` before it has the app tried. Default 10 s. */
+  resultGateMs?: number;
   /** Whether this phone allows its words in traces. Default: no. */
   contentAllowed?: (phone: string) => boolean;
   /** Household memory: briefs at call start, and a memory ops issue after every call. */
@@ -492,6 +494,7 @@ export class Desk {
   /** Issues whose app QA is trying now, with what arrived for the engineer meanwhile. */
   private readonly qaRunning = new Map<number, string[]>();
   private readonly decideResult: ((c: ResultCheck) => Promise<ResultDecision>) | undefined;
+  private readonly resultGateMs: number;
   /** When each issue's current run began, by the desk's clock: what "changed in this run" is measured from. */
   private readonly since = new Map<number, Date>();
   private readonly memory: Memory | undefined;
@@ -559,6 +562,7 @@ export class Desk {
     this.qa = o.qa ?? false;
     this.qaModel = o.qaModel ?? this.appEngineerModel;
     this.decideResult = o.decideResult;
+    this.resultGateMs = o.resultGateMs ?? 10_000;
     this.memory = o.memory;
     this.legacyMemory = o.legacyMemory;
     this.notify = o.notify;
@@ -1558,7 +1562,7 @@ export class Desk {
       if (!app) return this.openPr(issue, text);
       // Once a version has been tried, each new one is. Before that, the gate says whether this change needs trying.
       if (!this.decideResult || reviewOf(issue, "result")) return this.startQa(issue, app, text);
-      void this.gateResult(issue.id, app, text, since);
+      void this.gateResult(issue.id, app, text);
       return;
     }
     if (issue.cancelRequested) {
@@ -1597,7 +1601,7 @@ export class Desk {
    * The result gate: does this change to an app need trying before the PM reviews it? While it
    * decides, the issue is held like one QA has. Unsure, slow or broken means it's tried, as without a gate.
    */
-  private async gateResult(issueId: number, app: Artifact, result: string, since?: Date): Promise<void> {
+  private async gateResult(issueId: number, app: Artifact, result: string): Promise<void> {
     const issue = this.mustIssue(issueId);
     const waiting: string[] = [];
     const run = this.runs.get(issueId);
@@ -1605,17 +1609,22 @@ export class Desk {
     // The sweeper treats in_progress with no worker as stuck: the decision is this issue's worker for now.
     this.started.set(issueId, Date.now());
     let d: ResultDecision;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      d = await this.decideResult!({
+      const asked = this.decideResult!({
         request: issue.request,
         ...(issue.target ? { goal: issue.target.goal, doneWhen: issue.target.doneWhen, deliverable: issue.target.deliverable } : {}),
         result: clip(result, 2000),
-        changed: this.appChange(app, since),
+        changed: this.appChange(app, issue),
         ledger: this.repo.ledger(issueId).filter((e) => e.ok).map((e) => `${e.slug.toLowerCase().replace(/_/g, " ")} → ${clip(e.result, 200)}`),
       });
+      // The decider has its own timeout; this one holds whatever the decider does.
+      d = await Promise.race([asked, new Promise<never>((_, no) => (timer = setTimeout(() => no(new Error(`no answer in ${this.resultGateMs} ms`)), this.resultGateMs)))]);
     } catch (error) {
       this.log(`desk: #${issueId} result gate failed, trying the app: ${error instanceof Error ? error.message : String(error)}`);
       d = { check: "tried" };
+    } finally {
+      clearTimeout(timer);
     }
     try {
       if (this.qaRunning.get(issueId) !== waiting || this.runs.get(issueId) !== run) return; // something else took the issue over
@@ -1636,15 +1645,17 @@ export class Desk {
     }
   }
 
-  /** What an engineer's run changed in an app, in a line the result gate can weigh. */
-  private appChange(app: Artifact, since?: Date): string {
+  /**
+   * What this issue changed in an app, in a line the result gate can weigh. Measured from the app as
+   * it was when the issue was filed: an earlier run of the same issue that failed is part of the change.
+   */
+  private appChange(app: Artifact, issue: Issue): string {
     const lines = (html?: string) => (html ?? "").split("\n");
     const now = lines(app.html);
-    const before = since ? this.repo.artifactVersions(app.id).filter((v) => Date.parse(v.at) < since.getTime()).at(-1) : undefined;
+    const filed = Date.parse(issue.createdAt);
+    const before = this.repo.artifactVersions(app.id).filter((v) => Date.parse(v.at) < filed).at(-1);
     if (!before) return `app "${app.title}": new, ${now.length} lines`;
-    const old = lines(before.html);
-    const changed = now.filter((l) => !old.includes(l)).length + old.filter((l) => !now.includes(l)).length;
-    return `app "${before.title}": version ${before.version} → ${app.version ?? 1}, ${changed} of ${now.length} lines changed`;
+    return `app "${before.title}": version ${before.version} → ${app.version ?? 1}, ${linesChanged(lines(before.html), now)} of ${now.length} lines changed`;
   }
 
   /** How many times QA sends one issue's app back before the PM hears what's still wrong. */
@@ -1850,8 +1861,10 @@ export class Desk {
    * About an app nobody has checked yet, it waits on the issue until the check is settled.
    */
   async messageCaller(issueId: number, text: string, channel?: NoticeChannel, subject?: string, media: string[] = []): Promise<Result<string>> {
-    const issue = this.repo.issue(issueId);
-    if (!issue) return err(`no issue ${issueId}`);
+    const named = this.repo.issue(issueId);
+    if (!named) return err(`no issue ${issueId}`);
+    // A follow-up's engineer works in the earlier issue's conversation, so its tools name that issue.
+    const issue = this.repo.issues((i) => i.links.continues === issueId && i.status === "in_progress").at(-1) ?? named;
     if (!this.notify) return err("Kloru can't text or email from here yet. Tell them plainly; offer to say it on the call.");
     const body = text.trim();
     if (!body) return err("nothing to send");
@@ -2667,6 +2680,7 @@ export class Desk {
         if (started !== undefined) this.host.stop(issue.id);
         this.runs.delete(issue.id);
         this.started.delete(issue.id);
+        this.qaRunning.delete(issue.id); // a check that was waiting on this run is over too
         const why = started === undefined ? "no worker was running it" : `its worker ran over ${Math.round(Desk.WORKER_MS / 60_000)} minutes`;
         // An ops change that already happened is finished from the ledger, never run again (#12).
         if (issue.kind === "ops" && this.repo.ledger(issue.id).some((e) => e.ok)) {
@@ -3362,6 +3376,28 @@ export class Desk {
 }
 
 /** A question for the caller; closing the issue with one would drop the answer (#3). */
+
+/**
+ * Lines removed plus lines added between two versions of a file, by longest common subsequence, so
+ * a line that moved counts. A change too big to compare counts every line between its first and last difference.
+ */
+function linesChanged(old: string[], now: string[]): number {
+  let head = 0;
+  while (head < old.length && head < now.length && old[head] === now[head]) head++;
+  let tail = 0;
+  while (tail < old.length - head && tail < now.length - head && old[old.length - 1 - tail] === now[now.length - 1 - tail]) tail++;
+  const a = old.slice(head, old.length - tail);
+  const b = now.slice(head, now.length - tail);
+  if (!a.length || !b.length || a.length * b.length > 4_000_000) return a.length + b.length;
+  let row = new Array<number>(b.length + 1).fill(0);
+  for (const line of a) {
+    const next = [0];
+    for (let j = 0; j < b.length; j++) next.push(line === b[j] ? row[j]! + 1 : Math.max(row[j + 1]!, next[j]!));
+    row = next;
+  }
+  const same = row[b.length]!;
+  return a.length - same + (b.length - same);
+}
 
 function textOf(content: unknown): string {
   if (typeof content === "string") return content;

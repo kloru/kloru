@@ -18,6 +18,8 @@ const LIST = `<!doctype html>\n<title>Groceries</title>\n<ul id="items"></ul>\n<
 const text = (r: unknown) => (r as { content: Array<{ text: string }> }).content[0]!.text;
 const failed = (r: unknown) => !!(r as { isError?: boolean }).isError;
 const tick = () => new Promise((r) => setTimeout(r, 0));
+/** Long enough that the next timestamp is a later one. */
+const later = () => new Promise((r) => setTimeout(r, 3));
 
 interface Run {
   issue: number;
@@ -48,7 +50,7 @@ class PM implements Planner {
   }
 }
 
-function setup(o: { qa?: boolean; store?: boolean; gate?: (c: ResultCheck) => Promise<ResultDecision>; notify?: boolean } = {}) {
+function setup(o: { qa?: boolean; store?: boolean; gate?: (c: ResultCheck) => Promise<ResultDecision>; gateMs?: number; notify?: boolean } = {}) {
   const host = new Host();
   const pm = new PM();
   const store = new AppStore(":memory:");
@@ -65,6 +67,7 @@ function setup(o: { qa?: boolean; store?: boolean; gate?: (c: ResultCheck) => Pr
     qa: o.qa ?? true,
     ...(o.store === false ? {} : { appStore: () => store }),
     ...(o.gate ? { decideResult: o.gate } : {}),
+    ...(o.gateMs !== undefined ? { resultGateMs: o.gateMs } : {}),
     ...(o.notify ? { notify: async () => true } : {}),
   });
   const tools = Object.fromEntries(appTools(desk).map((t) => [t.spec.name, t]));
@@ -379,11 +382,87 @@ describe("the result gate says whether a changed app needs trying", () => {
     const first = s.assigned("Make us a shared grocery list");
     const id = await made(s, first);
     await s.finish("Made the list.");
+    await later();
     const follow = s.assigned("Call the list Shopping", "app", first);
     await s.as(first)("app_update", { id, replace: { old: "<title>Groceries</title>", new: "<title>Shopping</title>" } });
     await s.finish("Renamed.");
     expect(s.now(follow).status).toBe("in_review");
     expect(seen.at(-1)!.changed).toBe('app "Groceries": version 1 → 2, 2 of 7 lines changed');
+  });
+
+  it("an app made on this issue in a run that failed is still new to the gate", async () => {
+    const seen: ResultCheck[] = [];
+    const s = setup({ gate: async (c) => (seen.push(c), { check: "tried" }) });
+    const issue = s.assigned("Make us a shared grocery list");
+    const id = await made(s, issue);
+    s.last().fail("model error");
+    await tick();
+    expect(s.now(issue).status).toBe("failed");
+    await later();
+    expect(s.desk.assign(issue, "work", "Make us a shared grocery list", []).ok).toBe(true);
+    await s.as(issue)("app_update", { id, replace: { old: "<title>Groceries</title>", new: "<title>Shopping</title>" } });
+    await s.finish("Made the list.");
+    expect(seen.at(-1)!.changed).toBe('app "Groceries": new, 7 lines');
+  });
+
+  it("a follow-up's change is measured from the app as it was before the follow-up, across its runs", async () => {
+    const seen: ResultCheck[] = [];
+    const s = setup({ gate: async (c) => (seen.push(c), { check: "none", p: 0.8 }) });
+    const first = s.assigned("Make us a shared grocery list");
+    const id = await made(s, first);
+    await s.finish("Made the list.");
+    await later();
+    const follow = s.assigned("Show how many are left", "app", first);
+    await s.as(first)("app_update", { id, replace: { old: "items.length", new: "items.filter((i) => !i.done).length" } });
+    s.last().fail("model error");
+    await tick();
+    await later();
+    expect(s.desk.assign(follow, "work", "Show how many are left", [], undefined, { continues: first }).ok).toBe(true);
+    await s.as(first)("app_update", { id, replace: { old: "<title>Groceries</title>", new: "<title>Shopping</title>" } });
+    await s.finish("Done.");
+    expect(seen.at(-1)!.changed).toBe('app "Groceries": version 1 → 3, 4 of 7 lines changed');
+  });
+
+  it("lines that only moved count as changed", async () => {
+    const seen: ResultCheck[] = [];
+    const s = setup({ gate: async (c) => (seen.push(c), { check: "none", p: 0.8 }) });
+    const first = s.assigned("Make us a shared grocery list");
+    const id = await made(s, first);
+    await s.finish("Made the list.");
+    await later();
+    s.assigned("Tidy the list app", "app", first);
+    await s.as(first)("app_update", { id, replace: { old: '<title>Groceries</title>\n<ul id="items"></ul>', new: '<ul id="items"></ul>\n<title>Groceries</title>' } });
+    await s.finish("Tidied.");
+    expect(seen.at(-1)!.changed).toBe('app "Groceries": version 1 → 2, 2 of 7 lines changed');
+  });
+
+  it("a gate that never answers means the app is tried", async () => {
+    const s = setup({ gate: () => new Promise(() => {}), gateMs: 20 });
+    const issue = s.assigned("Make us a shared grocery list");
+    await made(s, issue);
+    await s.finish("Made the list.");
+    expect(s.last().role.name).toBe("engineer");
+    await new Promise((r) => setTimeout(r, 60));
+    expect(s.last().role.name).toBe("qa");
+    expect(s.now(issue).thread.at(-1)).toMatchObject({ by: "system", text: "Result check: try the app" });
+  });
+
+  it("after the sweeper gives up on a run, what the caller says reaches the next one", async () => {
+    let release!: (d: ResultDecision) => void;
+    const s = setup({ gate: () => new Promise((r) => (release = r)) });
+    const issue = s.assigned("Make us a shared grocery list");
+    await made(s, issue);
+    await s.finish("Made the list.");
+    s.desk.sweep(new Date(Date.now() + 31 * 60_000));
+    expect(s.now(issue).status).toBe("open");
+    expect(s.desk.assign(issue, "work", "Make us a shared grocery list", []).ok).toBe(true);
+    const runs = s.host.runs.length;
+    s.desk.comment(issue, s.now(issue).filedBy.call, "Also add a quantity field");
+    expect(s.host.steered.join("\n")).toContain("Also add a quantity field");
+    release({ check: "tried" });
+    await tick();
+    expect(s.host.runs).toHaveLength(runs);
+    expect(s.now(issue).prs).toHaveLength(0);
   });
 
   it("what the caller says while the gate decides reaches the engineer", async () => {
@@ -485,6 +564,27 @@ describe("a worker's message about an app waits until the app has been checked",
     await s.finish("Works.");
     await tick();
     expect(inbox(s, issue)).toContain(LINK);
+  });
+
+  it("a follow-up's message, written in the earlier issue's conversation, waits for the follow-up's check", async () => {
+    const s = setup({ notify: true });
+    const first = s.assigned("Make us a shared grocery list");
+    const id = await made(s, first);
+    await s.finish("Made the list.");
+    await s.as(first, "qa")("app_verdict", { usable: true });
+    await s.finish("Works.");
+    const follow = s.assigned("Add a quantity field to the grocery list", "app", first);
+    await s.as(first)("app_update", { id, replace: { old: "items.length", new: "items.length + 0" } });
+    // The engineer's tools name the first issue: the follow-up runs in its conversation.
+    expect(await said(s, first, LINK)).toMatch(/^Kept/);
+    expect(s.now(follow).heldMessages).toMatchObject([{ text: LINK }]);
+    await s.finish("Added quantity.");
+    expect(inbox(s, follow)).not.toContain(LINK);
+    await s.as(follow, "qa")("app_verdict", { usable: true });
+    await s.finish("Works.");
+    await tick();
+    expect(inbox(s, follow)).toContain(LINK);
+    expect(inbox(s, first)).not.toContain(LINK);
   });
 
   it("is not sent when QA still finds bugs: the PM sees it on the thread", async () => {
