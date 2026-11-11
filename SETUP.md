@@ -163,7 +163,9 @@ your number. Your Kloru already serves the privacy policy, terms and opt-in page
   previous release back if the new one doesn't come up. **Admin** shows the version you run.
 - **Models:** engineers run on OpenAI's Luna, the cheapest. For harder errands (research, long
   drafts), set `KLORU_ENGINEER_MODEL = "openrouter/openai/gpt-6.1-terra"` in
-  `.selfhost/<app>/fly.toml` and update: smarter, at about 10× the price.
+  `.selfhost/<app>/fly.toml` and update: smarter, at about 10× the price. Apps are already made on
+  Terra (`KLORU_APP_ENGINEER_MODEL`), and QA tries each one in a browser before you get the link
+  (`KLORU_QA = "off"` skips that; `KLORU_QA_MODEL` gives QA its own model).
 - **Logs:** `fly logs -a <app>`. A shell on the machine: `fly ssh console -a <app>`.
 - **Costs and activity:** your site's **Admin → Metrics**.
 - **Change a key:** edit `kloru.env` and run setup again with `--apply`. It skips what exists

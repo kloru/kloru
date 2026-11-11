@@ -42,4 +42,5 @@ Setup makes these once and keeps them in `.selfhost/<app>.env`. Keep a copy some
 
 Models, URLs and the texting number live in `.selfhost/<app>/fly.toml` (from
 `deploy/selfhost/fly.template.toml`): `INSTINCT_MODEL`, `KLORU_PM_MODEL`, `KLORU_ENGINEER_MODEL`,
+`KLORU_APP_ENGINEER_MODEL`, `KLORU_QA`, `KLORU_QA_MODEL`,
 `VOICE_MODEL`, `KLORU_PUBLIC_URL`, `KLORU_TEXT_NUMBER`, `COMPOSIO_TOOLKITS`. Change one and deploy again.

@@ -28,6 +28,7 @@ export class RuntimeWorkerHost implements WorkerHost {
   run(issue: number, role: WorkerRole, prompt: string, phone?: string, session?: number): Promise<string> {
     this.roles.set(issue, role);
     if (session !== undefined) this.sessions.set(issue, session);
+    else this.sessions.delete(issue);
     this.principals.set(issue, phone ? this.principalFor(phone) : undefined);
     const conv = this.worker(issue, role);
     const next = (this.chains.get(issue) ?? Promise.resolve()).catch(() => undefined).then(() => conv.run(prompt));

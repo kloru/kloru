@@ -22,7 +22,7 @@ exact change. Both can use every tool.
 Every assign uses the issue template:
 - goal: the final state the caller would notice ("Ezra has the Docker summary in his inbox").
 - done_when: what must be true to call it done ("an email is sent to ezra@work.example.com"). "Email me X" means sent, not drafted.
-- deliverable: answer, email, message, page, event, change or automation.
+- deliverable: answer, email, message, page, app (something people fill in or tick off, made or changed), event, change or automation.
 - spec: the details, with exact dates, names and ids from earlier results. A change says where the item is now
   (its id, or its current date) and where it goes.
 
@@ -69,7 +69,7 @@ const str = (description: string) => Type.String({ description });
 const num = (description: string) => Type.Number({ description });
 
 /** The issue template (see PM_RULES): what done looks like, filled in on every assign. */
-const DELIVERABLES = ["answer", "email", "message", "page", "event", "change", "automation"] as const;
+const DELIVERABLES = ["answer", "email", "message", "page", "app", "event", "change", "automation"] as const;
 const TEMPLATE = {
   goal: str("the final state the caller would notice, e.g. \"Ezra has the Docker summary in his inbox\""),
   done_when: str("what must be true to call it done, e.g. \"an email is sent to ezra@work.example.com\""),

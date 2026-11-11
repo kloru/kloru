@@ -21,6 +21,11 @@ kill_timeout = "30s"
   # Engineers, scouts and memory (reading, research, drafting): Luna by default, the cheapest.
   # Terra ("openrouter/openai/gpt-6.1-terra") is smarter for hard errands, at 10× the price.
   KLORU_ENGINEER_MODEL = "openrouter/openai/gpt-6-luna"
+  # Making and changing apps runs on Terra: an app is code, and someone uses it right away.
+  KLORU_APP_ENGINEER_MODEL = "openrouter/openai/gpt-6.1-terra"
+  # QA opens each app an engineer made or changed and sends bugs back, up to 3 times (needs the
+  # browser). It runs on the app model unless KLORU_QA_MODEL names another; "off" skips it.
+  KLORU_QA = "on"
   # What the agent calls itself in every message (never the framework's name).
   INSTINCT_AGENT_NAME = "Kloru"
   # The models: the agent and voice on OpenAI's Luna, the PM on Gemini Flash (all through OpenRouter).

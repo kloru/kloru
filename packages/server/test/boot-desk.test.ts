@@ -51,5 +51,20 @@ describe("boot: desk", () => {
     await bootWith({ KLORU_ENGINEER_MODEL: "openrouter/openai/gpt-6.1-terra" });
     expect(logs.some((l) => l.includes("engineers on openrouter/openai/gpt-6.1-terra"))).toBe(true);
   });
+
+  it("KLORU_APP_ENGINEER_MODEL puts app work on its own model; QA needs a browser, and KLORU_QA=off leaves it out", async () => {
+    logs.length = 0;
+    await bootWith({ KLORU_ENGINEER_MODEL: "openrouter/openai/gpt-6-luna", KLORU_APP_ENGINEER_MODEL: "openrouter/openai/gpt-6.1-terra", KLORU_QA_MODEL: "openrouter/openai/gpt-6-luna", STEEL_API_KEY: "steel_test" });
+    expect(logs.some((l) => l.includes("engineers on openrouter/openai/gpt-6-luna, apps on openrouter/openai/gpt-6.1-terra, QA tries apps on openrouter/openai/gpt-6-luna"))).toBe(true);
+    await app?.close();
+    logs.length = 0;
+    await bootWith({ KLORU_APP_ENGINEER_MODEL: "openrouter/openai/gpt-6.1-terra", STEEL_API_KEY: "steel_test", KLORU_QA: "off" });
+    expect(logs.some((l) => l.includes("apps on openrouter/openai/gpt-6.1-terra"))).toBe(true);
+    expect(logs.some((l) => l.includes("QA tries apps"))).toBe(false);
+    await app?.close();
+    logs.length = 0;
+    await bootWith({ KLORU_BROWSER: "off", STEEL_API_KEY: "steel_test" });
+    expect(logs.some((l) => l.includes("QA tries apps"))).toBe(false);
+  });
 });
 

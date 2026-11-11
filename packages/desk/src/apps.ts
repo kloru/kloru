@@ -11,9 +11,14 @@ import type { Desk } from "./desk.js";
 import { err, ok, type Result } from "./result.js";
 
 export const APP_MAX = 512_000;
+/** How much of a collection one app_data list shows. */
+const DATA_OUT = 24_000;
+/** A record a worker put there, as the app shows who added it. */
+const KLORU = { by: "Kloru", owner: "kloru" };
 
 const failed = (text: string) => ({ content: [{ type: "text" as const, text }], isError: true });
 const issueOf = (ctx: { conversationKey?: string } | undefined) => Number(/^desk:issue:(\d+):/.exec(ctx?.conversationKey ?? "")?.[1] ?? NaN);
+const isQa = (ctx: { conversationKey?: string } | undefined) => /^desk:issue:\d+:qa$/.test(ctx?.conversationKey ?? "");
 const CLASSIC = /^(|text\/javascript|application\/javascript)$/i;
 const ONE_FILE = "an app is one file: put the script and style inline (nothing can load from another address)";
 
@@ -107,6 +112,83 @@ export function appTools(desk: Desk): RegisteredTool[] {
         if (!r.ok) return failed(r.error);
         const a = r.value.app;
         return textResult(`${a.title} (app, version ${a.version ?? 1}, visitors: ${a.visitors ?? "none"}, ${desk.artifactUrl(id)})${reported(r.value.errors)}\n\n${a.html ?? ""}`);
+      },
+    }),
+    defineTool({
+      name: "app_data",
+      label: "An app's data",
+      description:
+        "Read or change what an app holds: the same records its page reads with kloru.list. list: with no collection, the collections and how many records each has; with one, its records. " +
+        "put: add records, or replace the ones whose id you give (to put a list someone sent you into the app, or fix an entry). remove: by id. " +
+        "This is what the family entered unless scratch is true: then it is the copy app_test runs on, and clear empties it for a fresh try.",
+      parameters: Type.Object({
+        id: Type.String({ description: "the app id" }),
+        action: Type.Union([Type.Literal("list"), Type.Literal("put"), Type.Literal("remove"), Type.Literal("clear")]),
+        collection: Type.Optional(Type.String({ description: "the collection, as the app's script names it, e.g. items" })),
+        records: Type.Optional(Type.Array(Type.Record(Type.String(), Type.Unknown()), { description: "for put: the records, with the fields the app's script uses" })),
+        ids: Type.Optional(Type.Array(Type.String(), { description: "for remove: the ids of the records to remove" })),
+        scratch: Type.Optional(Type.Boolean({ description: "true: the scratch copy app_test uses, not what the family entered" })),
+      }),
+      meta: { capabilities: [], group: "files" as const },
+      execute: async ({ id, action, collection, records, ids, scratch }, ctx) => {
+        const who = caller(ctx);
+        if (!who) return failed("Only desk workers can reach an app's data.");
+        const got = desk.appData(id, who.phone, scratch === true);
+        if (!got.ok) return failed(got.error);
+        const { store, space } = got.value;
+        const where = scratch ? "the scratch copy" : "the app";
+        try {
+          if (action === "list") {
+            if (!collection) {
+              const all = store.collections(space);
+              return textResult(all.length ? all.map((c) => `${c.collection}: ${c.records}`).join("\n") : `Nothing is in ${where} yet.`);
+            }
+            const rows = store.list(space, collection);
+            const body = JSON.stringify(rows);
+            return textResult(`${rows.length} in ${collection}${body.length > DATA_OUT ? ` (showing the first ${DATA_OUT} characters)` : ""}:\n${body.slice(0, DATA_OUT)}`);
+          }
+          // QA looks at what the family entered but changes only the scratch copy.
+          if (isQa(ctx) && !scratch) return failed("QA changes only the scratch copy: pass scratch: true.");
+          if (action === "clear") {
+            if (!scratch) return failed("clear is for the scratch copy (scratch: true). What the family entered is removed one record at a time, by id.");
+            return textResult(`Emptied the scratch copy (${store.clear(space)} records).`);
+          }
+          if (!collection) return failed("Name the collection.");
+          if (action === "put") {
+            if (!records?.length) return failed("Give the records to put.");
+            const saved: string[] = [];
+            for (const r of records) {
+              const put = store.put(space, collection, r, KLORU);
+              if (!put.ok) return failed(`${saved.length} saved, then one was refused: ${put.error}`);
+              saved.push(put.record.id);
+            }
+            if (!scratch) desk.appDataChanged(who.issue, id, `put ${saved.length} in ${collection}`);
+            return textResult(`Saved ${saved.length} in ${collection} (${where}); open pages show them within seconds. Ids: ${saved.join(", ")}`);
+          }
+          if (!ids?.length) return failed("Give the ids to remove.");
+          const gone = ids.filter((i) => store.remove(space, collection, i));
+          if (!scratch && gone.length) desk.appDataChanged(who.issue, id, `removed ${gone.length} from ${collection}`);
+          const missing = ids.length - gone.length;
+          return textResult(`Removed ${gone.length} from ${collection} (${where})${missing ? `; ${missing} weren't there` : ""}.`);
+        } catch (error) {
+          return failed(`The app's data couldn't be reached: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      },
+    }),
+    defineTool({
+      name: "app_verdict",
+      label: "QA's verdict",
+      description: "QA only: say what you found after using the app. usable false sends bugs back to the engineer to fix, and you try it again after.",
+      parameters: Type.Object({
+        usable: Type.Boolean({ description: "true when people can do what the request asked for, even if it isn't perfect" }),
+        bugs: Type.Optional(Type.String({ description: "what stops people using it: for each, the steps you took, what happened and what should have" })),
+      }),
+      meta: { capabilities: [], group: "files" as const },
+      execute: async ({ usable, bugs }, ctx) => {
+        if (!isQa(ctx)) return failed("Only QA gives a verdict.");
+        if (!usable && !bugs?.trim()) return failed("Say what stops people using it: the steps, what happened and what should have.");
+        const said = desk.qaVerdict(issueOf(ctx), usable, bugs ?? "");
+        return said.ok ? textResult(usable ? "Noted: usable. End with one line on what you tried." : "Noted: the engineer gets these. End with one line on what you tried.") : failed(said.error);
       },
     }),
   ];

@@ -11,7 +11,7 @@ export type IssueStatus =
 export const CLOSED: ReadonlySet<IssueStatus> = new Set(["merged", "done", "failed", "reverted", "resolved", "duplicate", "wont_do", "superseded", "not_planned"]);
 export const isClosed = (s: IssueStatus): boolean => CLOSED.has(s);
 
-export type Author = "talker" | "pm" | "engineer" | "ops" | "system";
+export type Author = "talker" | "pm" | "engineer" | "ops" | "qa" | "system";
 
 export interface ThreadEntry {
   at: string;
@@ -27,7 +27,7 @@ export interface PullRequest {
   status: "open" | "merged" | "rejected";
 }
 
-export type Deliverable = "answer" | "email" | "message" | "page" | "event" | "change" | "automation";
+export type Deliverable = "answer" | "email" | "message" | "page" | "app" | "event" | "change" | "automation";
 
 export interface IssueTarget {
   /** The final state the caller would notice. */
@@ -73,6 +73,8 @@ export interface Issue {
   fast?: { changes: Array<{ slug: string; args: Record<string, unknown>; account?: string }>; say: string };
   /** The artifact (page) this issue made or edited. */
   artifact?: string;
+  /** QA on the app this issue made or changed: how many times it sent the engineer back, the version it last tried, and what it found there. */
+  qa?: { rounds: number; version?: number; verdict?: { usable: boolean; bugs: string } };
   /** A family member the owner described, waiting on the owner's yes to the read-back. */
   member?: MemberPlan;
   /** A line the person asked to add to their own policy.md, tied to the read-back (draft id) their own yes answers. */

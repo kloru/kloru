@@ -11,10 +11,9 @@
 import { makeConnectToken, readConnectToken } from "./connect-link.js";
 import { readCalls } from "./calls.js";
 import { readTranscript } from "./transcripts.js";
-import { ARTIFACT_ID, MEDIA_ID, MediaStore, type Artifact } from "@kloru/desk";
+import { AppStore, ARTIFACT_ID, COLLECTION, MEDIA_ID, MediaStore, type Artifact } from "@kloru/desk";
 import { automationsSection, outboxPage, storeSection, artifactGonePage, artifactPage, artifactsSection, revokeArtifact, revokedArtifacts, deskCallPage, deskPage, issuePage, ledgerPage, memoryCommitPage, memoryFile, memoryPage, openMemory, openRepo, publicDiff, readAlerts } from "./desk-pages.js";
 import { appAccess, appFramePage, appShellPage, FRAME_CSP, pagesPage } from "./app-pages.js";
-import { AppStore, COLLECTION } from "./app-store.js";
 import { improveKloru, setImproveKloru } from "./prefs.js";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";

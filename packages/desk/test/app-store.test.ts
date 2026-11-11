@@ -67,6 +67,21 @@ describe("app store (2026-11-09)", () => {
     expect(s.put(APP, "items", { id: s.list(APP, "items")[0]!.id, i: "changed" }, CLEO)).toMatchObject({ ok: true });
   });
 
+  it("lists an app's collections with their counts, and clears an app's records (a worker's scratch copy)", () => {
+    const s = new AppStore(":memory:");
+    s.put(APP, "items", { name: "Milk" }, CLEO);
+    s.put(APP, "items", { name: "Eggs" }, CLEO);
+    s.put(APP, "stores", { name: "Corner Market" }, EZRA);
+    s.put(`${APP}~test`, "items", { name: "Test" }, EZRA);
+    expect(s.collections(APP)).toEqual([{ collection: "items", records: 2 }, { collection: "stores", records: 1 }]);
+    expect(s.collections("nothing-here-nothing-he")).toEqual([]);
+    const rev = s.rev(`${APP}~test`);
+    expect(s.clear(`${APP}~test`)).toBe(1);
+    expect(s.rev(`${APP}~test`)).toBeGreaterThan(rev);
+    expect(s.collections(`${APP}~test`)).toEqual([]);
+    expect(s.list(APP, "items")).toHaveLength(2);
+  });
+
   it("keeps each script error once per version, the first few only", () => {
     const s = new AppStore(":memory:");
     s.reportError(APP, 1, "TypeError: items.map is not a function\n  (line 6)");

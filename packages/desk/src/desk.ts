@@ -18,6 +18,7 @@ import { capabilitiesForSlug, innerCalls, isReadSlug, isWriteCall, toolkitOfSlug
 import type { Model } from "@earendil-works/pi-ai";
 import { hashArgs, type Capability, type RegisteredTool, type ScheduleEntry, type ScheduleEvent, type Scheduler, type WorkerRole } from "@kloru/core";
 import { transition } from "./machine.js";
+import type { AppStore } from "./app-store.js";
 import { checkApp } from "./apps.js";
 import { OWNER_ONLY, PERMISSION_OF, PLUMBING, PUBLIC_NEEDS, PUBLIC_PLUMBING_NO, READ_ONLY, SURE, accessLine, describeNeed, hasNeed, type AccessCheck, type AccessDecision, type AccessReview, type Need } from "./access.js";
 import { mediaNote, type MediaItem, type MediaStore } from "./media.js";
@@ -184,6 +185,12 @@ export interface DeskOptions {
   telemetry?: DeskTelemetry;
   /** A smarter model for engineers (reading, research, drafting). Default: the agent's model. */
   engineerModel?: Model<any>;
+  /** A smarter model for the engineer when the work is an app (a whole program to write and debug); default: engineerModel. */
+  appEngineerModel?: Model<any>;
+  /** QA tries each app an engineer made or changed (it needs app_test, so a browser) and sends real bugs back before the PM sees the result. */
+  qa?: boolean;
+  /** QA's model; default: the app engineer's. */
+  qaModel?: Model<any>;
   /** Whether this phone allows its words in traces. Default: no. */
   contentAllowed?: (phone: string) => boolean;
   /** Household memory: briefs at call start, and a memory ops issue after every call. */
@@ -264,6 +271,8 @@ export interface DeskOptions {
   isMember?: (phone: string) => boolean;
   /** Script errors people's browsers reported for one version of an app (the website keeps them). */
   appErrors?: (id: string, version: number) => string[];
+  /** The store apps keep their data in (the website's file), for a worker's app_data; unset: workers can't reach app data. */
+  appStore?: () => AppStore | undefined;
   /** What the owner said about this caller (their trust policy, his words), by phone. */
   ownerWords?: (phone: string) => string | undefined;
   /** A caller's name, by phone, for what the owner is told. */
@@ -454,6 +463,11 @@ export class Desk {
   private readonly telemetry: DeskTelemetry | undefined;
   private readonly contentAllowed: (phone: string) => boolean;
   private readonly engineerModel: Model<any> | undefined;
+  private readonly appEngineerModel: Model<any> | undefined;
+  private readonly qa: boolean;
+  private readonly qaModel: Model<any> | undefined;
+  /** Issues whose app QA is trying now, with what arrived for the engineer meanwhile. */
+  private readonly qaRunning = new Map<number, string[]>();
   private readonly memory: Memory | undefined;
   private readonly legacyMemory: (() => string) | undefined;
   private readonly notify: ((n: Notice) => Promise<boolean | NoticeChannel>) | undefined;
@@ -472,6 +486,7 @@ export class Desk {
   private readonly ownerWords: DeskOptions["ownerWords"];
   private readonly isMember: (phone: string) => boolean;
   private readonly appErrors: (id: string, version: number) => string[];
+  private readonly appStore: () => AppStore | undefined;
   private readonly setMemberModel: ((words: string) => Promise<MemberPlan>) | undefined;
   private readonly applyMember: ((plan: MemberPlan) => void) | undefined;
   private readonly nameOf: (phone: string) => string | undefined;
@@ -514,6 +529,9 @@ export class Desk {
     this.telemetry = o.telemetry;
     this.contentAllowed = o.contentAllowed ?? (() => false);
     this.engineerModel = o.engineerModel;
+    this.appEngineerModel = o.appEngineerModel ?? o.engineerModel;
+    this.qa = o.qa ?? false;
+    this.qaModel = o.qaModel ?? this.appEngineerModel;
     this.memory = o.memory;
     this.legacyMemory = o.legacyMemory;
     this.notify = o.notify;
@@ -528,6 +546,7 @@ export class Desk {
     this.ownerWords = o.ownerWords;
     this.isMember = o.isMember ?? (() => false);
     this.appErrors = o.appErrors ?? (() => []);
+    this.appStore = o.appStore ?? (() => undefined);
     this.setMemberModel = o.setMember;
     this.applyMember = o.applyMember;
     this.nameOf = o.nameOf ?? (() => undefined);
@@ -713,7 +732,7 @@ export class Desk {
       if (call && call.channel !== "schedule") this.outbox.personSpoke(call.phone);
       for (const issue of this.repo.issues((i) => i.filedBy.call === callId && i.kind !== "untriaged" && !isClosed(i.status))) {
         const steer = () =>
-          this.host.steer(issue.id, `The caller said on the phone: "${t.text}". Kloru answers them there. Change your work only if this changes the request; if it doesn't, don't reply to it: your final message must still be your complete result.`);
+          this.steerWorker(issue.id, `The caller said on the phone: "${t.text}". Kloru answers them there. Change your work only if this changes the request; if it doesn't, don't reply to it: your final message must still be your complete result.`);
         if (!this.steerFilter) steer();
         else
           void this.steerFilter(issue, t.text).then(
@@ -858,7 +877,7 @@ export class Desk {
     this.note(issue, "talker", text, callId);
     // Something new from the caller while the fast path thinks: its answer would be stale.
     if (this.fastPending.delete(issueId)) this.trigger({ kind: "filed", issue: issueId });
-    this.host.steer(issueId, `Update on your issue from the call: "${text}". Follow the newest instruction; if it cancels the work, stop and say so.`);
+    this.steerWorker(issueId, `Update on your issue from the call: "${text}". Follow the newest instruction; if it cancels the work, stop and say so.`);
     this.trigger({ kind: "comment", issue: issueId, call: callId, text });
   }
 
@@ -938,7 +957,7 @@ export class Desk {
     }
     this.log(`desk: new guideline for ${call.phone}: ${clip(text, 120)}`);
     for (const issue of this.repo.issues((i) => i.filedBy.phone === call.phone && !i.purpose && !isClosed(i.status))) {
-      this.host.steer(issue.id, `New guideline from the caller, which wins: "${text}". Follow it in what's left of your work and in your result.`);
+      this.steerWorker(issue.id, `New guideline from the caller, which wins: "${text}". Follow it in what's left of your work and in your result.`);
     }
     return "guideline";
   }
@@ -1429,8 +1448,16 @@ export class Desk {
   // Workers
   // ---------------------------------------------------------------------------
 
-  private runWorker(issue: Issue, prompt: string): void {
-    const role = issue.purpose === "memory" ? this.memoryRole(issue.id) : issue.purpose === "scout" ? this.scoutRole(issue.id) : issue.kind === "ops" ? this.opsRole(issue.id) : this.engineerRole(issue.id);
+  /** New input for an issue's worker. While QA has the app, it waits for the engineer's next run. */
+  private steerWorker(issueId: number, text: string): boolean {
+    const held = this.qaRunning.get(issueId);
+    if (!held) return this.host.steer(issueId, text);
+    held.push(text);
+    return true;
+  }
+
+  private runWorker(issue: Issue, prompt: string, qa = false): void {
+    const role = qa ? this.qaRole(issue.id) : issue.purpose === "memory" ? this.memoryRole(issue.id) : issue.purpose === "scout" ? this.scoutRole(issue.id) : issue.kind === "ops" ? this.opsRole(issue.id) : this.engineerRole(issue.id);
     const run = ++this.runSeq;
     this.runs.set(issue.id, run);
     const safely = (what: string, f: () => void) => {
@@ -1442,6 +1469,7 @@ export class Desk {
       }
     };
     const start = new Date();
+    const since = this.now();
     const report = (outcome: string, output?: string) => {
       const now = this.mustIssue(issue.id);
       this.emit(issue, {
@@ -1459,22 +1487,23 @@ export class Desk {
     };
     // Household memory is written as the owner; everything else runs as the person who asked.
     const as = issue.purpose === "memory" ? undefined : issue.filedBy.phone;
-    void this.host.run(issue.id, role, prompt, as, issue.links.continues).then(
+    // QA starts fresh on each issue; an engineer's follow-up continues the earlier conversation.
+    void this.host.run(issue.id, role, prompt, as, qa ? undefined : issue.links.continues).then(
       (text) => {
         ended();
-        safely("result", () => this.workerDone(issue.id, text));
+        safely("result", () => (qa ? this.qaDone(issue.id, text) : this.workerDone(issue.id, text, since)));
         safely("trace", () => report("ok", text));
       },
       (error: unknown) => {
         ended();
         const why = error instanceof Error ? error.message : String(error);
-        safely("failure", () => this.workerFailed(issue.id, why));
+        safely("failure", () => (qa ? this.qaDone(issue.id, "", why) : this.workerFailed(issue.id, why)));
         safely("trace", () => report("failed", why));
       },
     );
   }
 
-  private workerDone(issueId: number, text: string): void {
+  private workerDone(issueId: number, text: string, since?: Date): void {
     const issue = this.mustIssue(issueId);
     this.inflight.delete(issueId);
     if (isClosed(issue.status)) return; // cancelled while it ran
@@ -1497,9 +1526,8 @@ export class Desk {
       return;
     }
     if (issue.kind === "work") {
-      issue.prs.push({ at: new Date().toISOString(), body: text, baseTurn: this.repo.lastTurn(issue.filedBy.call), status: "open" });
-      this.move(issue, "in_review");
-      this.trigger({ kind: "pr", issue: issueId });
+      if (this.startQa(issue, text, since)) return;
+      this.openPr(issue, text);
       return;
     }
     if (issue.cancelRequested) {
@@ -1519,6 +1547,89 @@ export class Desk {
       this.note(original, "system", `Reverted by #${issue.id}`);
     }
     this.trigger({ kind: "ops_finished", issue: issueId });
+  }
+
+  /** The engineer's result goes to the PM for review. */
+  private openPr(issue: Issue, body: string): void {
+    issue.prs.push({ at: new Date().toISOString(), body, baseTurn: this.repo.lastTurn(issue.filedBy.call), status: "open" });
+    this.move(issue, "in_review");
+    this.trigger({ kind: "pr", issue: issue.id });
+  }
+
+  /** How many times QA sends one issue's app back before the PM hears what's still wrong. */
+  static readonly QA_ROUNDS = 3;
+
+  /**
+   * The app this issue's engineer made or changed in the run that began at `since`, when QA hasn't
+   * tried this version yet. A follow-up's engineer works in the earlier issue's conversation, so the app is on that issue.
+   */
+  private appForQa(issue: Issue, since?: Date): Artifact | undefined {
+    if (!this.qa || issue.status !== "in_progress") return undefined;
+    const id = issue.artifact ?? (issue.links.continues !== undefined ? this.repo.issue(issue.links.continues)?.artifact : undefined);
+    const app = id ? this.repo.artifact(id) : undefined;
+    if (!app || app.kind !== "app" || issue.qa?.version === (app.version ?? 1)) return undefined;
+    const changed = since !== undefined && Date.parse(app.updatedAt ?? app.createdAt) >= since.getTime();
+    return changed || issue.qa ? app : undefined;
+  }
+
+  /** An engineer finished an app: QA uses it before the PM reviews the result. True when QA started. */
+  private startQa(issue: Issue, result: string, since?: Date): boolean {
+    const app = this.appForQa(issue, since);
+    if (!app) return false;
+    issue.qa = { rounds: issue.qa?.rounds ?? 0, version: app.version ?? 1 };
+    this.repo.saveIssue(issue);
+    this.qaRunning.set(issue.id, []);
+    this.runWorker(
+      issue,
+      [
+        `Issue #${issue.id}: the engineer says this app is ready. App id ${app.id}: ${app.title} (version ${app.version ?? 1}).`,
+        `Request: ${issue.request}`,
+        issue.target ? `Goal: ${issue.target.goal}\nDone when: ${issue.target.doneWhen}` : `Spec: ${issue.spec ?? issue.request}`,
+        `The engineer's result:\n${result}`,
+        issue.qa.rounds ? `You sent it back ${issue.qa.rounds === 1 ? "once" : `${issue.qa.rounds} times`} already; check those fixes first.` : "",
+      ].filter(Boolean).join("\n\n"),
+      true,
+    );
+    return true;
+  }
+
+  /** QA's verdict on the app, from its app_verdict call. */
+  qaVerdict(issueId: number, usable: boolean, bugs: string): Result<true> {
+    const issue = this.repo.issue(issueId);
+    if (!issue?.qa || !this.qaRunning.has(issueId)) return err("no app is waiting on QA for this issue");
+    issue.qa.verdict = { usable, bugs: bugs.trim() };
+    this.repo.saveIssue(issue);
+    return ok(true);
+  }
+
+  /** QA finished (or broke): real bugs go back to the engineer, a few times at most; otherwise the PM reviews the engineer's result. */
+  private qaDone(issueId: number, text: string, error?: string): void {
+    const issue = this.mustIssue(issueId);
+    const held = this.qaRunning.get(issueId) ?? [];
+    this.qaRunning.delete(issueId);
+    this.inflight.delete(issueId);
+    if (isClosed(issue.status) || issue.status !== "in_progress") return;
+    const result = issue.thread.filter((e) => e.by === "engineer").at(-1)?.text ?? "";
+    const verdict = issue.qa?.verdict;
+    const news = held.length ? `\nMeanwhile: ${held.join("\n")}` : "";
+    if (error !== undefined || !verdict) {
+      this.note(issue, "system", error !== undefined ? `QA couldn't try the app: ${error}` : `QA gave no verdict: ${clip(text, 400)}`);
+      if (held.length) return this.runWorker(issue, news.trim());
+      return this.openPr(issue, result);
+    }
+    const rounds = issue.qa?.rounds ?? 0;
+    if (verdict.usable || !verdict.bugs) {
+      this.note(issue, "qa", `Tried the app: usable.${verdict.bugs ? ` Minor: ${verdict.bugs}` : ""}`);
+      if (held.length) return this.runWorker(issue, news.trim());
+      return this.openPr(issue, result);
+    }
+    if (rounds >= Desk.QA_ROUNDS) {
+      this.note(issue, "qa", `Still wrong after ${rounds} rounds: ${verdict.bugs}`);
+      return this.openPr(issue, `${result}\n\nQA still finds, after ${rounds} rounds of fixes: ${verdict.bugs}`);
+    }
+    issue.qa = { ...issue.qa!, rounds: rounds + 1 };
+    this.note(issue, "qa", `Sent back (${rounds + 1}/${Desk.QA_ROUNDS}): ${verdict.bugs}`);
+    this.runWorker(issue, `QA used the app on a phone and found problems that stop people using it:\n${verdict.bugs}\nSee each one happen yourself first (app_test), fix it, then check the same steps again.${news}`);
   }
 
   private workerFailed(issueId: number, error: string): void {
@@ -2228,6 +2339,32 @@ export class Desk {
     return ok({ app: a, errors });
   }
 
+  /** An app's data for a worker: what the family entered, or (scratch) the copy app_test runs on. */
+  appData(id: string, phone: string, scratch = false): Result<{ store: AppStore; space: string; app: Artifact }> {
+    const a = this.repo.artifact(id);
+    if (!a || a.kind !== "app" || !this.maySee(a, phone)) return err(`no app ${id} for this caller`);
+    let store: AppStore | undefined;
+    try {
+      store = this.appStore();
+    } catch (error) {
+      this.log(`desk: app data unreadable: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!store) return err("this Kloru has nowhere to keep app data");
+    return ok({ store, space: scratch ? `${id}~test` : id, app: a });
+  }
+
+  /** A worker changed what an app holds for the family: said on its issue, like any other change. */
+  appDataChanged(issueId: number, id: string, what: string): void {
+    const issue = this.repo.issue(issueId);
+    const a = this.repo.artifact(id);
+    if (!issue || !a) return;
+    if (!issue.artifact) {
+      issue.artifact = id;
+      this.repo.saveIssue(issue);
+    }
+    this.note(issue, "system", `Changed the data in ${a.title}: ${what}`);
+  }
+
   /** Where a worker tries an app in a browser: the app itself, on scratch data nobody else sees. */
   appTestUrl(id: string, phone: string): Result<string> {
     const a = this.repo.artifact(id);
@@ -2868,10 +3005,33 @@ export class Desk {
     };
   }
 
+  /** App work: the PM called the deliverable an app, or the issue (or the one it continues) already has one. */
+  private isAppWork(issue: Issue | undefined): boolean {
+    if (!issue) return false;
+    const has = (i: Issue | undefined) => !!i?.artifact && this.repo.artifact(i.artifact)?.kind === "app";
+    return issue.target?.deliverable === "app" || has(issue) || (issue.links.continues !== undefined && has(this.repo.issue(issue.links.continues)));
+  }
+
+  /** Reads an app, uses it in a browser, seeds its scratch data, and says what it found: nothing else. */
+  private static readonly QA_TOOLS = new Set(["app_read", "app_test", "app_data", "app_verdict", "load_skill"]);
+
+  private qaRole(issueId: number): WorkerRole {
+    return {
+      name: "qa",
+      ...(this.qaModel ? { model: this.qaModel } : {}),
+      prompt:
+        "You are QA on Kloru's desk. An engineer made or changed an app. Use it on a phone as the family would (app_test; the web-apps skill shows how) and do what the request asked for, start to finish. " +
+        "Then call app_verdict. Report only what stops people using it: something that doesn't save, comes back, disappears or can't be tapped. Looks and wishes aren't bugs.",
+      ...this.plumbing(issueId),
+      visible: (t) => Desk.QA_TOOLS.has(t.spec.name),
+    };
+  }
+
   private engineerRole(issueId: number): WorkerRole {
+    const model = this.isAppWork(this.repo.issue(issueId)) ? this.appEngineerModel : this.engineerModel;
     return {
       name: "engineer",
-      ...(this.engineerModel ? { model: this.engineerModel } : {}),
+      ...(model ? { model } : {}),
       prompt:
         "You are an engineer on Kloru's desk. Do what the request needs, end to end, then give the result: the outcome with its exact details (names, ids, times in their timezone). " +
         "Take the likeliest reading rather than asking, and check the live state before saying something can't be done. " +

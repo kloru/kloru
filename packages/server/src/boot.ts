@@ -16,7 +16,7 @@ import { actionDecider } from "./action-decider.js";
 import { gmailNotifier } from "./notify.js";
 import { loadToolGuide } from "./tool-guide.js";
 import { appErrorsReader } from "./app-errors.js";
-import { Desk, MediaStore, Memory, Vault, type DraftCheck, vaultTools, type VaultKind, type MemberPlan, type Notice, type NoticeMedia, artifactTools, appTools, automationTools, deleteAutomation, type AutomationEvents, groceryTools, mediaTools, workerTools, TechnicalPM, OutboxOrganizer, memoryTools } from "@kloru/desk";
+import { AppStore, Desk, MediaStore, Memory, Vault, type DraftCheck, vaultTools, type VaultKind, type MemberPlan, type Notice, type NoticeMedia, artifactTools, appTools, automationTools, deleteAutomation, type AutomationEvents, groceryTools, mediaTools, workerTools, TechnicalPM, OutboxOrganizer, memoryTools } from "@kloru/desk";
 import { mediaIngest } from "./media-ingest.js";
 import { RuntimeWorkerHost } from "./desk-host.js";
 import { langfuseFromEnv, prefsAllowContent } from "./telemetry.js";
@@ -742,6 +742,19 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
     const pmModel = pmSpec ? resolveModel(pmSpec, env) : model;
     const engineerSpec = env.KLORU_ENGINEER_MODEL?.trim();
     const engineerModel = engineerSpec ? resolveModel(engineerSpec, env) : undefined;
+    // An app is a whole program to write and debug: its engineer, and the QA that tries it, can run on a smarter model.
+    const appEngineerSpec = env.KLORU_APP_ENGINEER_MODEL?.trim();
+    const appEngineerModel = appEngineerSpec ? resolveModel(appEngineerSpec, env) : undefined;
+    const qaSpec = env.KLORU_QA_MODEL?.trim();
+    const qaModel = qaSpec ? resolveModel(qaSpec, env) : undefined;
+    // The browser: headless Chromium on this machine, or Steel. QA needs it to try an app.
+    const chromiumPath = findChromium(env);
+    const steelApiKey = env.STEEL_API_KEY?.trim();
+    const hasBrowser = !!(chromiumPath || steelApiKey) && env.KLORU_BROWSER?.trim() !== "off";
+    const qaOn = hasBrowser && env.KLORU_QA?.trim().toLowerCase() !== "off";
+    // What apps hold (the website's file): opened on a worker's first app_data.
+    const appsDb = env.KLORU_APPS_DB?.trim() || "/data/kloru/apps.db";
+    let appStore: AppStore | undefined;
     // The store (#27): a synced copy of Gmail and Calendar that workers search in milliseconds,
     // and the fast path that answers reads from it before the PM starts.
     let store: Store | undefined;
@@ -927,11 +940,15 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       ...(langfuse ? { telemetry: langfuse.telemetry } : {}),
       contentAllowed: prefsAllowContent(env.KLORU_VOICE_PREFS?.trim()),
       ...(engineerModel ? { engineerModel } : {}),
+      ...(appEngineerModel ? { appEngineerModel } : {}),
+      ...(qaModel ? { qaModel } : {}),
+      qa: qaOn,
       ...(householdMemory ? { memory: householdMemory, legacyMemory: () => memory.readDurable() } : {}),
       ...(artifactBase(env) ? { artifactBaseUrl: artifactBase(env)! } : {}),
       scheduler,
       // Script errors an app threw in someone's browser, from the website's store, so a worker can fix them.
-      appErrors: appErrorsReader(env.KLORU_APPS_DB?.trim() || "/data/kloru/apps.db", log),
+      appErrors: appErrorsReader(appsDb, log),
+      appStore: () => (appStore ??= new AppStore(appsDb)),
       ...(config.owner.timezone ? { timezone: config.owner.timezone } : {}),
       onWrite: (slug: string) => void storeRunner?.kick(slug).catch(() => undefined),
       // Each person's outbox: a fast pass (Jev) on every message for them, and an organizer agent for what waits.
@@ -987,10 +1004,8 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
         log(`vault: off (${error instanceof Error ? error.message : String(error)})`);
       }
     }
-    // The browser: headless Chromium on this machine, one profile per person.
-    const chromiumPath = findChromium(env);
-    const steelApiKey = env.STEEL_API_KEY?.trim();
-    if ((chromiumPath || steelApiKey) && env.KLORU_BROWSER?.trim() !== "off") {
+    // One browser profile per person.
+    if (hasBrowser) {
       const b = browserTools({ desk, ...(vault ? { vault } : {}), vaultUrl, publicUrl: env.KLORU_PUBLIC_URL?.trim() || "https://kloru.com", ...(steelApiKey ? { steelApiKey } : {}), profilesDir: state.path("browser"), executablePath: chromiumPath ?? "", log });
       browserPool = b.pool;
       registry.registerMany(b.tools);
@@ -1058,7 +1073,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       if (resend && env.RESEND_WEBHOOK_SECRET?.trim()) resendIn = { webhookSecret: env.RESEND_WEBHOOK_SECRET.trim(), received: (id) => resend.received(id), attachmentUrl: (e, a) => resend.attachmentUrl(e, a) };
       log(`text: texts${resendIn ? " and emails" : ""} start desk conversations`);
     }
-    log(`desk: ready, PM model ${pmModel.provider}/${pmModel.id}${engineerModel ? `, engineers on ${engineerModel.provider}/${engineerModel.id}` : ""}${householdMemory ? `, memory for ${householdMemory.operators().join(", ")}` : ""}${langfuse ? ", tracing to Langfuse" : ""}`);
+    log(`desk: ready, PM model ${pmModel.provider}/${pmModel.id}${engineerModel ? `, engineers on ${engineerModel.provider}/${engineerModel.id}` : ""}${appEngineerModel ? `, apps on ${appEngineerModel.provider}/${appEngineerModel.id}` : ""}${qaOn ? `, QA tries apps${qaModel ? ` on ${qaModel.provider}/${qaModel.id}` : ""}` : ""}${householdMemory ? `, memory for ${householdMemory.operators().join(", ")}` : ""}${langfuse ? ", tracing to Langfuse" : ""}`);
   }
 
   return {

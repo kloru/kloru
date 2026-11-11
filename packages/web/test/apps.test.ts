@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Repo, type AppVisitors } from "@kloru/desk";
 import type { AgentClient } from "../src/agent-client.js";
 import { FRAME_CSP } from "../src/app-pages.js";
-import { AppStore } from "../src/app-store.js";
+import { AppStore } from "@kloru/desk";
 import { revokeArtifact } from "../src/desk-pages.js";
 import { createConsole } from "../src/server.js";
 import { SESSION_COOKIE, newSession, signSession } from "../src/session.js";

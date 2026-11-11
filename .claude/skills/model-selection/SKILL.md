@@ -71,8 +71,13 @@ The data says what a model can do in general. Only our cases say whether it does
   (build first), then the full suite with `TEXT_MODEL=<id> npx vitest run test/text-talker.live.test.ts`
   in `packages/server`, at least twice. Add the real miss as a case before benching.
 - **PM:** `KLORU_PM_MODEL=openrouter/<id> npx vitest run test/pm.live.test.ts` in `packages/desk`.
-- **Engineers and ops:** no live suite runs a real worker model yet (`pm.live.test.ts` fakes the
-  workers). Write a case before choosing one; production picks it with `KLORU_ENGINEER_MODEL`.
+- **App engineer:** `ENGINEER_MODEL=openrouter/<id> RUNS=5 npx vitest run test/app-bench.live.test.ts`
+  in `packages/server` (make a list, fix a broken one, a chore chart through QA; `BENCH_OUT=<file>`
+  keeps each run). Production picks it with `KLORU_APP_ENGINEER_MODEL`.
+- **QA:** `QA_MODEL=openrouter/<id> npx vitest run test/app-qa.live.test.ts` (it must catch a list
+  whose removed items come back, and pass a working one). `KLORU_QA_MODEL`; unset, the app model.
+- **Other engineers and ops:** no live suite runs a real worker model on other work yet
+  (`pm.live.test.ts` fakes the workers). Write a case before choosing one; `KLORU_ENGINEER_MODEL`.
 - **Voice:** `voice.bench` (see the `prompt-editing` skill), with the model set in its config.
 - **Quick check and other Jev decisions:** not this skill (`decision-models`).
 
@@ -114,3 +119,11 @@ Point the role's model constant or env var at the winner, and keep the bench cas
 - **Fast path and action decider:** Gemini 3.5 Flash, an old version: bench 3.8 Flash. Flash Lite missed items (10-29); Flash with
   thinking turned on took up to 16 s.
 - **Engineers, ops, voice:** gpt-6-luna. Terra and Flash scored worse on voice.
+- **App engineer and QA** (`KLORU_APP_ENGINEER_MODEL`): **GPT-6.1 Terra since 2026-11-10** (Evan asked
+  for a smarter model for apps). Bench, ZDR, thinking medium, make / fix / chores: Terra 4/4, 5/5, 5/5
+  (62–81 s, ~$0.07 a run); Luna 5/5, 5/5, 4/5 (96–111 s, ~$0.005; one chart came up empty). On pass rate
+  that is within noise: the `app_data` tool and the web-apps skill fixed what made Luna's apps
+  broken. Terra won on time, same vendor and provider (Azure). GLM-5.3 0/3 on fix (ticks didn't
+  stay) and needed a QA round on every chart; Gemini 4 Carbon passed but took 3–9 min a run;
+  GPT-6.1 Sol's ZDR provider refused every call (capacity). QA on Terra passed every usable chart
+  first time (~$0.05 a look); on Luna it caught the planted bug in one smoke run. Not benched 5×.

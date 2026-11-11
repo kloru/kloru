@@ -222,6 +222,14 @@ describe.skipIf(!key)("PM on real-call situations", () => {
     expect(desk.repo.issue(1)!.status).toBe("in_progress");
   }, 120_000);
 
+  it("Nov 10 grocery list: 'make an app for my grocery list' is assigned as an app, so it gets the app engineer and QA", async () => {
+    const { host, desk, call } = setup();
+    desk.addTurn(call.id, { role: "caller", text: "Can you make an app for my grocery list?" });
+    desk.fileIssue(call.id, "Make an app for Ezra's grocery list that the family can add to and tick off.");
+    await until(() => host.finishers.has(1));
+    expect(desk.repo.issue(1)!.target?.deliverable).toBe("app");
+  }, 90_000);
+
   it("stuck and outdated: yesterday's news rundown that lost its worker is closed, not restarted", async () => {
     let t = Date.now();
     const { host, desk, call } = setup(() => new Date(t));
@@ -347,7 +355,8 @@ describe.skipIf(!key)("PM on real-call situations", () => {
     // This week's Friday, so the result is never in the past.
     const d = new Date();
     d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7 || 7));
-    const friday = d.toISOString().slice(0, 10);
+    // The local date: in the evening, UTC is already tomorrow.
+    const friday = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     // As a real worker's change would be: recorded in the ledger as it happens.
     desk.repo.appendLedger({ issue: 1, call: call.id, phone: "+14155550190", tool: "app_googlecalendar_patch_event", slug: "GOOGLECALENDAR_PATCH_EVENT", args: { event_id: "5k2", start_datetime: `${friday}T15:00:00-08:00` }, ok: true, result: "updated 5k2" });
     host.finishers.get(1)!(`Moved 'Dentist' from this Thursday 3 PM to this Friday (${friday}) 3 PM on ezra@personal.example.com's calendar. Event id 5k2.`);

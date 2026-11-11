@@ -8,6 +8,7 @@ export { Memory, parseFile, type MemoryFile, type MemoryOwner } from "./memory.j
 export { MEMORY_READ_TOOLS, MEMORY_WRITE_TOOLS, memoryTools } from "./memory-tools.js";
 export { artifactTools } from "./artifacts.js";
 export { APP_MAX, appTools, checkApp } from "./apps.js";
+export { AppStore, COLLECTION, ERRORS_PER_VERSION, RECORD_MAX, RECORDS_PER_APP, type AppRecord, type Stored, type Writer } from "./app-store.js";
 export { ARTIFACT_ID } from "./repo.js";
 export { automationTools, deleteAutomation, describeAutomation, AUTOMATION_CREATE, AUTOMATION_DELETE, AUTOMATION_EVENTS, AUTOMATION_LIST, type AutomationEvents } from "./automations.js";
 export { workerTools } from "./worker-tools.js";

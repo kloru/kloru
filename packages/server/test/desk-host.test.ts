@@ -64,6 +64,25 @@ describe("RuntimeWorkerHost", () => {
     expect(conv.steered).toEqual(["actually skip the second one"]);
   });
 
+  it("QA on a follow-up runs in the follow-up's own conversation, and the engineer's next run goes back to the earlier one", async () => {
+    const { runtime, convs } = fakeRuntime();
+    const host = new RuntimeWorkerHost(runtime);
+    const qa: WorkerRole = { name: "qa", prompt: "use the app" };
+    const one = host.run(103, role, "add a quantity field", undefined, 102);
+    await tick();
+    convs.get("desk:issue:102:engineer")!.release!();
+    await one;
+    const two = host.run(103, qa, "try the app");
+    await tick();
+    expect(convs.get("desk:issue:103:qa")!.runs).toEqual(["try the app"]);
+    expect(convs.has("desk:issue:102:qa")).toBe(false);
+    convs.get("desk:issue:103:qa")!.release!();
+    await two;
+    void host.run(103, role, "QA found a bug", undefined, 102);
+    await tick();
+    expect(convs.get("desk:issue:102:engineer")!.runs).toEqual(["add a quantity field", "QA found a bug"]);
+  });
+
   it("runs each worker as the person who filed: Cleo as her contact, no phone as the owner", async () => {
     const { runtime } = fakeRuntime();
     const CLEO = { kind: "contact", id: "contact:cleo", tier: "partner" };

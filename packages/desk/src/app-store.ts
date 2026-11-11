@@ -2,6 +2,8 @@
  * What people put into Kloru's apps (a grocery list's items, a sign-up's names): SQLite on the
  * website's disk (node:sqlite, like the metrics). Records are any JSON object, in collections an
  * app names as it goes; there is no schema, so an app that gains a field needs no migration.
+ * The website writes it for the people using an app; the agent opens the same file for a worker's
+ * app_data, so both wait for each other's writes (busy_timeout).
  *
  * Every change bumps the app's `rev`, which open pages poll to know when to draw again. Script
  * errors that people's browsers report are kept per version, for the engineer's next look.
@@ -48,6 +50,7 @@ export class AppStore {
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = NORMAL;
       PRAGMA journal_size_limit = 16777216;
+      PRAGMA busy_timeout = 5000;
       CREATE TABLE IF NOT EXISTS records (
         app TEXT NOT NULL, collection TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL,
         by_who TEXT NOT NULL, owner TEXT NOT NULL, at TEXT NOT NULL,
@@ -110,6 +113,18 @@ export class AppStore {
       : this.db.prepare("DELETE FROM records WHERE app = ? AND collection = ? AND id = ? AND owner = ?").run(app, collection, id, owner);
     if (Number(done.changes) > 0) this.bump(app);
     return Number(done.changes) > 0;
+  }
+
+  /** An app's collections and how many records each holds. */
+  collections(app: string): Array<{ collection: string; records: number }> {
+    return this.db.prepare("SELECT collection, COUNT(*) AS records FROM records WHERE app = ? GROUP BY collection ORDER BY collection").all(app) as unknown as Array<{ collection: string; records: number }>;
+  }
+
+  /** Remove everything an app holds (a worker starting its scratch data over). How many records went. */
+  clear(app: string): number {
+    const done = this.db.prepare("DELETE FROM records WHERE app = ?").run(app);
+    if (Number(done.changes) > 0) this.bump(app);
+    return Number(done.changes);
   }
 
   /** How many times the app's data has changed. */

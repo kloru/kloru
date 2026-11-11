@@ -1,6 +1,6 @@
 ---
 name: web-apps
-description: Make a small app people use from their phones at a Kloru link, such as a shared grocery list, a chore chart, a sign-up or RSVP form, a tracker or a simple game. Use when someone asks for something the family fills in or ticks off themselves, or asks to change or fix an app you made. Write one HTML file with app_create, try it with app_test, send the link, and change it later with app_update at the same link.
+description: Make a small app people use from their phones at a Kloru link, such as a shared grocery list, a chore chart, a sign-up or RSVP form, a tracker or a simple game. Use when someone asks for something the family fills in or ticks off themselves, or asks to change or fix an app you made. Write one HTML file with app_create, try it with app_test, read or fill its data with app_data, send the link, and change it later with app_update at the same link. Also for QA trying an app an engineer made.
 ---
 
 # Web apps
@@ -38,6 +38,19 @@ promise rejects with words people can read). Put text on the page with `textCont
 `innerHTML`, since other people typed it. A record holds up to 16 KB and an app 5,000 records;
 nothing else is stored (no `localStorage`, no cookies).
 
+## Its data, from your side
+
+`app_data` reads and changes the same records the page does: `list` (what's there), `put` (add, or
+replace by `id`), `remove`.
+
+- A list someone gave you ("put these 17 things on it") goes in with `app_data` `put`, once. Never
+  write their items into the script: code that adds them when the page loads adds them again after
+  someone removes them.
+- When something is reported wrong ("deleted items come back"), `list` what the app really holds
+  before changing code. Old records may lack fields newer code expects.
+- `scratch: true` is the copy `app_test` runs on. `clear` it for a fresh start, or `put` records
+  shaped like the real ones to see how the page handles them.
+
 ## Who can use it
 
 The family, signed in, by default. Ask for guests only when the request needs them (`visitors`):
@@ -58,6 +71,20 @@ Check that nothing is wider than the screen:
 `return await app.locator("html").evaluate((e) => e.scrollWidth <= e.clientWidth)`.
 Fix what's wrong with `app_update` and try again. The result lists script errors the app threw.
 Without `app_test`, read the file once more against this page before you send the link.
+
+Each `app_test` opens the app fresh, like someone coming back to it. So check that a change stuck
+in a second call: what you removed is still gone, what you ticked is still ticked.
+
+For a bug someone reported, make it happen in `app_test` first. A fix you haven't seen fail before
+and pass after isn't a fix yet.
+
+## QA
+
+When you say an app is ready, QA uses it on a phone before anyone gets the link, and sends back
+what stops people using it. As QA: `clear` the scratch copy, then do what the request asked the
+way the family would, with a few records in it: add, change, tick, remove, come back (a second
+`app_test`) and look again. Then `app_verdict`. For each bug give the steps, what happened, and
+what should have. An app that works but could look better is usable.
 
 ## Change it
 
