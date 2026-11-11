@@ -84,6 +84,8 @@ For gates 1–3:
   multiplies cost.
 - **Every decision is noted on the ticket** with its choice and probability.
 - **Each gate runs once per ticket.** A second `assign` after a spec review is not gated again.
+  Gate 3 is asked each time an engineer finishes with a changed app until the ticket has a result
+  review; after that, every new version is tried without asking.
 
 ## The review plan
 
@@ -112,7 +114,10 @@ open ─► passed
 open ─► changes ─► open        (the maker ran again; rounds + 1)
 open ─► waived                 (the reviewer failed or gave no verdict)
 changes ─► waived              (round cap reached; the notes travel with the result)
+passed ─► open, waived ─► open (a later version is checked again)
 ```
+
+There is one review per kind on a ticket; a new version re-opens it and keeps its rounds.
 
 `Issue.reviews?: Review[]` replaces `Issue.qa`. A plan is settled when no review is `open` or
 `changes`. The issue's own statuses do not change: reviews run while it is `open` (spec) or
@@ -189,6 +194,10 @@ both routes in `messageCaller`: the live conversation (`deliver`) and the outbox
 
 This is delivery order, so it is plumbing. If the gate chooses `none`, the message goes as soon as
 the engineer finishes. Messages on tickets with no changed app are not held.
+
+A kept message is not sent when the check ended with known problems (the round cap, or an engineer
+who changed nothing after a send-back) or the work failed. It is noted on the thread, and the PM
+decides what the person hears.
 
 ## Direct answers (gate 0)
 
