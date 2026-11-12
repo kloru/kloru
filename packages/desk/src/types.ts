@@ -202,6 +202,20 @@ export interface Artifact {
   visitors?: AppVisitors;
   /** Opens an app on scratch data (<link>?test=<key>), so a worker can try it in a browser without touching what people entered. */
   testKey?: string;
+  /** An app's own server, when it has one: code Kloru runs for it. */
+  server?: AppServer;
+}
+
+/** An app's server: its code, the npm packages it uses and the vault entries it is given. */
+export interface AppServer {
+  /** Its files by path. server.js is where it starts; what is under public/ is served as it is. */
+  files: Record<string, string>;
+  /** npm packages by name and version, installed before it starts. */
+  packages?: Record<string, string>;
+  /** Vault entries by name: the code reads them as kloru.secrets[name], and nothing else holds them. */
+  secrets?: string[];
+  /** Goes up with every change to the server, so a running one is known to be old. */
+  rev: number;
 }
 
 /** none: family only. add: guests add records and see their own. all: guests see and change everything. */
@@ -215,6 +229,7 @@ export interface ArtifactVersion {
   markdown: string;
   html?: string;
   visitors?: AppVisitors;
+  server?: AppServer;
   /** The issue that wrote it, or who edited it on the website. */
   issue?: number;
   by?: string;

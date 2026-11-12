@@ -17,12 +17,12 @@ import { actionDecider } from "./action-decider.js";
 import { gmailNotifier } from "./notify.js";
 import { loadToolGuide } from "./tool-guide.js";
 import { appErrorsReader } from "./app-errors.js";
-import { AppStore, Desk, MediaStore, Memory, Vault, type DraftCheck, vaultTools, type VaultKind, type MemberPlan, type Notice, type NoticeMedia, artifactTools, appTools, automationTools, deleteAutomation, type AutomationEvents, groceryTools, mediaTools, workerTools, TechnicalPM, OutboxOrganizer, memoryTools } from "@kloru/desk";
+import { AppServers, AppStore, Desk, MediaStore, Memory, Vault, type DraftCheck, vaultTools, type VaultKind, type MemberPlan, type Notice, type NoticeMedia, artifactTools, appTools, automationTools, deleteAutomation, type AutomationEvents, groceryTools, mediaTools, workerTools, TechnicalPM, OutboxOrganizer, memoryTools } from "@kloru/desk";
 import { mediaIngest } from "./media-ingest.js";
 import { RuntimeWorkerHost } from "./desk-host.js";
 import { langfuseFromEnv, prefsAllowContent } from "./telemetry.js";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { Model } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
@@ -719,6 +719,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
         },
         conversations: (phone: string) => desk?.repo.callsFor(phone).length ?? 0,
         metrics: { report: (days?: number) => (metrics ? metrics.report(days) : Promise.reject(new Error("metrics aren't running yet"))) },
+        appServers: { wake: (id: string, test: boolean) => appServers?.ensure(id, test) ?? Promise.resolve({ ok: false as const, error: "this agent runs no app servers" }) },
         family: (phone: string) => {
           const who = familyCallers(config.owner, contacts)(phone);
           if (!who.allowed) return undefined;
@@ -733,6 +734,8 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
 
   // The desk: talking models file issues; the PM (its own model if KLORU_PM_MODEL is set) triages and merges.
   let desk: Desk | undefined;
+  // Apps' own servers: a process each, beside the apps' data.
+  let appServers: AppServers | undefined;
   let events: Events | undefined;
   let textDesk: TextDesk | undefined;
   let resendIn: BootResult["resend"];
@@ -978,7 +981,23 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       ...(router ? { notify: (n: Notice) => router.notify(n), channelsFor: (phone: string) => router.channelsFor(phone) } : apps && appsConnected?.includes("gmail") ? { notify: gmailNotifier({ apps, ownerPhones: config.owner.phones, ...(config.owner.emails[0] ? { ownerEmail: config.owner.emails[0] } : {}), people: (phone: string) => memberMail(phone), log }) } : {}),
     });
     // Photos and files people text or email Kloru, kept beside the desk's repo (the website serves them at /m/).
-    registry.registerMany([...artifactTools(desk), ...appTools(desk), ...automationTools(desk, automationEvents), ...workerTools(desk), ...groceryTools(desk), ...mediaTools(desk, media, { workspaceDir: state.path("workspace") })]);
+    {
+      // An app's server runs here: its code and files beside the apps' data, the vault entries it
+      // was given, and the address the website carries its requests from.
+      const d = desk;
+      const servers = (appServers = new AppServers({
+        root: join(dirname(appsDb), "app-servers"),
+        app: (id) => d.repo.artifact(id),
+        secrets: (names) => d.appSecrets(names),
+        store: () => (appStore ??= new AppStore(appsDb)),
+        url: (id) => `${d.artifactUrl(id)}/api`,
+        tell: (id, text) => void d.appSays(id, text),
+        log,
+      }));
+      // After a restart, every app's server comes back up; one that won't start says so in its log.
+      setTimeout(() => void servers.startAll(d.repo.artifacts()).catch((err: unknown) => log(`app servers: ${(err as Error).message}`)), 5_000).unref();
+    }
+    registry.registerMany([...artifactTools(desk), ...appTools(desk, { servers: appServers }), ...automationTools(desk, automationEvents), ...workerTools(desk), ...groceryTools(desk), ...mediaTools(desk, media, { workspaceDir: state.path("workspace") })]);
     {
       const d = desk;
       events = new Events({
@@ -1112,6 +1131,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       await safely(log, "browser close", () => browserPool?.closeAll());
       storeRunner?.stop();
       await safely(log, "computer close", () => computer?.close());
+      await safely(log, "app servers close", () => appServers?.closeAll());
       await safely(log, "apps close", () => apps?.close());
       await safely(log, "atomicmail close", () => mailbox?.close());
     },

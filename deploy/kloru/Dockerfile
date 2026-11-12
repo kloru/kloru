@@ -46,6 +46,9 @@ RUN apt-get update \
   && groupadd --system kloru \
   && useradd --system --gid kloru --uid 10001 --create-home --home-dir /home/kloru --shell /usr/sbin/nologin kloru
 COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+# npm, for the packages an app's server names (packages/desk/src/app-servers.ts).
+COPY --from=node:22-bookworm-slim /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
 COPY --from=caddy:2.8.4 /usr/bin/caddy /usr/bin/caddy
 WORKDIR /app
 COPY --from=node-build /app/node_modules ./node_modules

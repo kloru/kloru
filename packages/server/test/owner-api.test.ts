@@ -275,3 +275,14 @@ describe("owner API: who's in the family", () => {
     expect((await call("family.lookup", { phone: "+14155550199" })).result).toBeNull();
   });
 });
+
+describe("owner API: an app's server (2026-11-12)", () => {
+  it("appserver.wake starts the app's server and says where it answers; one that won't start says why", async () => {
+    const asked: Array<[string, boolean]> = [];
+    const { call } = setup({ appServers: { wake: async (id, test) => (asked.push([id, test]), id === "good" ? { ok: true, value: { port: 4101 } } : { ok: false, error: "server.js: no route table" }) } });
+    expect(await call("appserver.wake", { id: "good", test: true })).toEqual({ status: 200, result: { port: 4101 } });
+    expect(await call("appserver.wake", { id: "bad" })).toEqual({ status: 409, result: { error: "server.js: no route table" } });
+    expect(asked).toEqual([["good", true], ["bad", false]]);
+    expect((await setup().call("appserver.wake", { id: "good" })).status).toBe(404);
+  });
+});

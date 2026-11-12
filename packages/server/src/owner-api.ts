@@ -30,6 +30,8 @@ export interface OwnerApiApps {
 export interface OwnerApiDeps {
   /** OWNER_API_SECRET. Unset: every envelope is refused. */
   secret?: string;
+  /** Apps' own servers: the website asks for one to be up before it carries a request to it. */
+  appServers?: { wake(id: string, test: boolean): Promise<{ ok: true; value: { port: number } } | { ok: false; error: string }> };
   policy: PolicyEngine;
   approvals: ApprovalStore;
   contacts: ContactStore;
@@ -141,6 +143,11 @@ export function createOwnerApi(deps: OwnerApiDeps): OwnerApi {
     "status.get": () => ok(deps.status()),
     "metrics.get": async (a) => (deps.metrics ? ok(await deps.metrics.report(Math.min(Math.max(Number(a.days) || 30, 1), 90))) : fail(404, "metrics aren't kept here")),
     "family.lookup": (a) => ok(deps.family?.(String(a.phone ?? "")) ?? null),
+    "appserver.wake": async (a) => {
+      if (!deps.appServers) return fail(404, "this agent runs no app servers");
+      const up = await deps.appServers.wake(String(a.id ?? ""), a.test === true);
+      return up.ok ? ok(up.value) : fail(409, up.error);
+    },
     "vault.list": (a) => (deps.vault ? ok(deps.vault.list(String(a.phone ?? ""))) : fail(404, "the vault isn't set up here")),
     "vault.add": (a) => {
       if (!deps.vault) return fail(404, "the vault isn't set up here");

@@ -50,10 +50,11 @@
       let value;
       if (m.op === "list") value = (await call("GET", `/data/${part(m.collection)}`)).records;
       else if (m.op === "put") value = (await call("PUT", `/data/${part(m.collection)}`, m.record)).record;
+      else if (m.op === "token") value = (await call("GET", "/token")).token;
       else if (m.op === "remove") value = (await call("DELETE", `/data/${part(m.collection)}/${part(m.id)}`)).ok;
       else throw new Error("unknown request");
       tell({ id: m.id, ok: true, value });
-      if (m.op !== "list") check();
+      if (m.op !== "list" && m.op !== "token") check();
     } catch (err) {
       tell({ id: m.id, ok: false, error: err && err.message ? err.message : "That didn't go through. Try again." });
     }

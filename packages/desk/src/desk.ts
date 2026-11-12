@@ -18,6 +18,7 @@ import { capabilitiesForSlug, innerCalls, isReadSlug, isWriteCall, toolkitOfSlug
 import type { Model } from "@earendil-works/pi-ai";
 import { hashArgs, type Capability, type RegisteredTool, type ScheduleEntry, type ScheduleEvent, type Scheduler, type WorkerRole } from "@kloru/core";
 import { transition } from "./machine.js";
+import { SERVER_FILE, SERVER_MAX } from "./app-servers.js";
 import type { AppStore } from "./app-store.js";
 import { checkApp } from "./apps.js";
 import { OWNER_ONLY, PERMISSION_OF, PLUMBING, PUBLIC_NEEDS, PUBLIC_PLUMBING_NO, READ_ONLY, SURE, accessLine, describeNeed, hasNeed, type AccessCheck, type AccessDecision, type AccessReview, type Need } from "./access.js";
@@ -29,7 +30,7 @@ import { Repo } from "./repo.js";
 import { REVIEW_ROUNDS, openReview, passReview, reviewOf, sendBackReview, waiveReview } from "./reviews.js";
 import { err, ok, type Result } from "./result.js";
 import { describeEntry, type Vault } from "./vault.js";
-import { isClosed, type AppVisitors, type Artifact, type Author, type CallRecord, type HeldMessage, type Issue, type IssueStatus, type IssueTarget, type LedgerEntry, type Merge, type MemberPlan, type MergeKind, type Suggestion, type Turn } from "./types.js";
+import { isClosed, type AppServer, type AppVisitors, type Artifact, type Author, type CallRecord, type HeldMessage, type Issue, type IssueStatus, type IssueTarget, type LedgerEntry, type Merge, type MemberPlan, type MergeKind, type Suggestion, type Turn } from "./types.js";
 
 /** Runs worker conversations. Production: AgentRuntime.worker; tests: a fake. */
 /** What the decision model weighs before a change. */
@@ -2538,6 +2539,118 @@ export class Desk {
     return ok(`${this.artifactUrl(id)}?test=${testKey}`);
   }
 
+  /**
+   * Give an app a server, or change the one it has: files set, one exact replacement, files removed,
+   * its npm packages, the vault entries its code may use. Every change is a new version of the app
+   * and a new revision of the server, which is what restarts it. `off` takes the server away.
+   */
+  setAppServer(
+    id: string,
+    change: { files?: Record<string, string>; replace?: { file: string; old: string; new: string }; remove?: string[]; packages?: Record<string, string>; secrets?: string[]; restart?: boolean; off?: boolean },
+    who: { issue?: number; phone: string },
+  ): Result<{ version: number; server?: AppServer }> {
+    const a = this.repo.artifact(id);
+    if (!a || a.kind !== "app" || !this.maySee(a, who.phone)) return err(`no app ${id} for this caller`);
+    const issue = who.issue === undefined ? undefined : this.repo.issue(who.issue);
+    let server: AppServer | undefined;
+    if (!change.off) {
+      const files = { ...(a.server?.files ?? {}), ...(change.files ?? {}) };
+      for (const path of Object.keys(change.files ?? {})) if (!SERVER_FILE.test(path)) return err(`${path} isn't a file name a server can have: a plain relative path like server.js or lib/routes.js`);
+      if (change.replace) {
+        const { file, old } = change.replace;
+        const body = files[file];
+        if (body === undefined) return err(`the server has no ${file}; read it with app_read`);
+        const found = old ? body.split(old).length - 1 : 0;
+        if (found === 0) return err(`replace.old isn't in ${file}; read it with app_read and copy the text exactly`);
+        if (found > 1) return err(`replace.old is in ${found} places in ${file}; include more of the text around it so it matches once`);
+        files[file] = body.replace(old, () => change.replace!.new);
+      }
+      for (const path of change.remove ?? []) {
+        if (!(path in files)) return err(`the server has no ${path} to remove`);
+        delete files[path];
+      }
+      if (files["server.js"] === undefined) return err("a server starts from server.js: export default async (request, kloru) => Response");
+      const size = Object.values(files).reduce((n, f) => n + f.length, 0);
+      if (size > SERVER_MAX) return err(`the server's files are too long together (${size} characters; at most ${SERVER_MAX})`);
+      const secrets = change.secrets ?? a.server?.secrets ?? [];
+      // The secrets it names must be ones this request may use; ones it already had stay.
+      for (const name of change.secrets ?? []) {
+        if (a.server?.secrets?.includes(name)) continue;
+        const entry = this.vault?.vault.get(name);
+        if (!entry) return err(`no vault entry ${name}; vault_list shows what this request may use`);
+        if (!issue || !this.maySecret(issue, entry.owner)) {
+          if (issue) this.recordSecret(issue, "app_server", [name], false, `${name} isn't this request's to use`, { app: id });
+          return err(`${name} isn't this request's to use`);
+        }
+      }
+      const packages = change.packages ?? a.server?.packages ?? {};
+      server = { files, ...(Object.keys(packages).length ? { packages } : {}), ...(secrets.length ? { secrets } : {}), rev: (a.server?.rev ?? 0) + 1 };
+      if (issue && change.secrets?.length) this.recordSecret(issue, "app_server", change.secrets, true, `${a.title}'s server is given ${change.secrets.join(", ")}`, { app: id });
+    } else if (!a.server) return err("this app has no server");
+    const at = this.now().toISOString();
+    const version = (a.version ?? 1) + 1;
+    const { server: _was, ...rest } = a;
+    this.repo.saveArtifact({ ...rest, ...(server ? { server } : {}), version, updatedAt: at });
+    this.repo.appendArtifactVersion(id, { version, at, title: a.title, markdown: "", html: a.html ?? "", ...(a.visitors ? { visitors: a.visitors } : {}), ...(server ? { server } : {}), ...(who.issue !== undefined ? { issue: who.issue } : {}) });
+    if (issue) {
+      issue.artifact = id;
+      this.repo.saveIssue(issue);
+      this.note(issue, "system", server ? `Changed the server of ${a.title} (version ${version}): ${Object.keys(server.files).join(", ")}` : `Took the server off ${a.title} (version ${version})`);
+    }
+    return ok({ version, ...(server ? { server } : {}) });
+  }
+
+  /** The vault entries an app's server was given, as its code gets them: the key itself, or a login's fields. */
+  appSecrets(names: string[]): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    if (!this.vault) return out;
+    const { vault } = this.vault;
+    for (const name of names) {
+      const entry = vault.get(name);
+      const secret = entry && vault.secretOf(name);
+      if (!entry || !secret) continue;
+      out[name] = entry.kind === "api_key" ? secret.key : entry.kind === "note" ? secret.text : { ...(entry.meta.site ? { site: entry.meta.site } : {}), ...(entry.meta.username ? { username: entry.meta.username } : {}), ...secret };
+    }
+    return out;
+  }
+
+  /** What a tool is about to show a model, with every vault value turned back into its name. */
+  scrubSecrets(text: string): string {
+    return this.vault ? this.vault.vault.scrub(text) : text;
+  }
+
+  /** Who a request is from, as an app's server is told (kloru.user): the same shape the website sends. */
+  appUser(phone: string): { name: string; id: string; family: boolean } {
+    return { name: this.nameOf(phone) ?? "Guest", id: `u:${phone}`, family: this.isFamily(phone) };
+  }
+
+  private appSaid = new Map<string, number[]>();
+  /** How many things an app may tell Kloru in an hour: each one is a request someone works on. */
+  static readonly APP_SAYS_PER_HOUR = 12;
+
+  /**
+   * An app's server has something to say (kloru.tell): filed as a request from the app's person,
+   * the way an automation's is, so the PM, the yes before anything is sent and the outbox all apply.
+   */
+  appSays(id: string, text: string): Issue | undefined {
+    const a = this.repo.artifact(id);
+    if (!a || a.kind !== "app" || !text.trim()) return undefined;
+    const now = this.now().getTime();
+    const recent = (this.appSaid.get(id) ?? []).filter((t) => now - t < 3_600_000);
+    if (recent.length >= Desk.APP_SAYS_PER_HOUR) {
+      this.log(`desk: ${a.title} (${id}) said more than ${Desk.APP_SAYS_PER_HOUR} things in an hour; dropped: ${clip(text, 120)}`);
+      return undefined;
+    }
+    this.appSaid.set(id, [...recent, now]);
+    const { call } = this.startCall({ callSid: `app:${id}:${now}`, phone: a.phone, channel: "schedule" });
+    const issue = this.fileIssue(call.id, `The app ${a.title} says: ${clip(text.trim(), 4_000)}`);
+    issue.artifact = id;
+    this.repo.saveIssue(issue);
+    this.note(issue, "system", `Said by the server of the app ${a.title} (${this.artifactUrl(id)}).`);
+    this.endCall(call.id);
+    return issue;
+  }
+
   /** Media someone sent: theirs, or anyone's for the owner. */
   mayReadMedia(sender: string, phone: string): boolean {
     return this.isOwner(phone) || samePhone(sender, phone);
@@ -3178,7 +3291,7 @@ export class Desk {
   }
 
   /** Reads an app, uses it in a browser, seeds its scratch data, and says what it found: nothing else. */
-  private static readonly QA_TOOLS = new Set(["app_read", "app_test", "app_data", "app_verdict", "load_skill"]);
+  private static readonly QA_TOOLS = new Set(["app_read", "app_test", "app_data", "app_logs", "app_call", "app_verdict", "load_skill"]);
 
   private qaRole(issueId: number): WorkerRole {
     return {

@@ -144,8 +144,9 @@ export class R2Store implements ObjectStore {
  * Linux tar restores as empty files. On macOS, archive plain contents and no metadata.
  */
 export function tarCreate(dir: string, platform: NodeJS.Platform = process.platform): { args: string[]; env: NodeJS.ProcessEnv } {
-  if (platform === "darwin") return { args: ["--no-mac-metadata", "--no-xattrs", "-czf", "-", "-C", dir, "."], env: { ...process.env, COPYFILE_DISABLE: "1" } };
-  return { args: ["czf", "-", "-C", dir, "."], env: process.env };
+  // What npm installed for an app's server is left out: it is installed again when the server next starts.
+  if (platform === "darwin") return { args: ["--exclude=node_modules", "--no-mac-metadata", "--no-xattrs", "-czf", "-", "-C", dir, "."], env: { ...process.env, COPYFILE_DISABLE: "1" } };
+  return { args: ["--exclude=node_modules", "-czf", "-", "-C", dir, "."], env: process.env };
 }
 
 /**

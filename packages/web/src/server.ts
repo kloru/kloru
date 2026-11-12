@@ -14,11 +14,12 @@ import { readTranscript } from "./transcripts.js";
 import { AppStore, ARTIFACT_ID, COLLECTION, MEDIA_ID, MediaStore, type Artifact } from "@kloru/desk";
 import { automationsSection, outboxPage, storeSection, artifactGonePage, artifactPage, artifactsSection, revokeArtifact, revokedArtifacts, deskCallPage, deskPage, issuePage, ledgerPage, memoryCommitPage, memoryFile, memoryPage, openMemory, openRepo, publicDiff, readAlerts } from "./desk-pages.js";
 import { appAccess, appFramePage, appShellPage, FRAME_CSP, pagesPage } from "./app-pages.js";
+import { API_PATH, appApi, type AppCaller } from "./app-api.js";
 import { improveKloru, setImproveKloru } from "./prefs.js";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import http from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { AgentError, type AgentClient } from "./agent-client.js";
 import { type Banner, esc, layout } from "./html.js";
 import { metricsPage, type MetricsView } from "./metrics-page.js";
@@ -191,6 +192,9 @@ export function createConsole(o: ConsoleOptions): http.Server {
   const visitorWrites = new RateLimiter(VISITOR_WRITES, 60_000);
   let appStore: AppStore | undefined;
   const apps = () => (appStore ??= o.appsDbPath ? new AppStore(o.appsDbPath) : undefined);
+  /** Apps' servers: the agent runs them beside the apps' data; this site carries requests to them. */
+  const api = appApi({ secret: o.sessionSecret, root: join(dirname(o.appsDbPath ?? join(o.deskDir ?? ".", "apps.db")), "app-servers"), publicUrl: o.publicUrl, client: () => o.pageClient?.(), log });
+  const callerOf = (user: ConsoleUser): AppCaller => ({ name: user.name ?? familyNow(user.phone)?.name ?? "Family", id: `u:${user.phone}`, family: true });
   /** The editor's content hash, so a page always loads the editor it was served with. */
   let editorVersion = "";
   for (const name of Object.keys(STATIC)) {
@@ -371,8 +375,6 @@ export function createConsole(o: ConsoleOptions): http.Server {
     // Data and errors: JSON, for the shell's script.
     if (gone) return sendJson(res, 410, { error: "this app was taken down" });
     if (!test && access === "sign-in") return sendJson(res, 401, { error: "sign in to use this app" });
-    const store = apps();
-    if (!store) return sendJson(res, 503, { error: "this Kloru has nowhere to keep app data" });
     const family = !test && !!ctx.user;
     const guest = !test && !ctx.user;
     const token = String(req.headers["x-visitor"] ?? "");
@@ -381,6 +383,10 @@ export function createConsole(o: ConsoleOptions): http.Server {
       : ctx.user
         ? { by: ctx.user.name ?? familyNow(ctx.user.phone)?.name ?? "Family", owner: `u:${ctx.user.phone}` }
         : { by: "Guest", owner: VISITOR_TOKEN.test(token) ? `v:${createHash("sha256").update(token).digest("base64url").slice(0, 32)}` : "" };
+    // What the app's page shows its server, to say who is using it (the frame has no cookies to send).
+    if (sub === "token" && method === "GET" && !collection) return sendJson(res, 200, { token: api.token(id, { name: who.by, id: who.owner, family }, test) });
+    const store = apps();
+    if (!store) return sendJson(res, 503, { error: "this Kloru has nowhere to keep app data" });
     // Scratch data lives beside the real app's, under a name no app id can be.
     const space = test ? `${id}~test` : id;
     // A guest of an "add" app sees and changes only their own entries.
@@ -425,6 +431,21 @@ export function createConsole(o: ConsoleOptions): http.Server {
     return sendJson(res, 405, { error: "method not allowed" });
   }
 
+  /** Who is this? A valid session naming a user we still know. */
+  async function sessionOf(ctx: Ctx): Promise<void> {
+    const session = readSession(o.sessionSecret, ctx.req.headers.cookie);
+    const user = session ? await o.store.user(session.uid) : undefined;
+    // Access is re-checked on every request, so removing an invite or an admin ends existing sessions too.
+    if (session && user && user.phone === normPhone(session.phone) && await allowed(user.phone)) {
+      ctx.user = user;
+      ctx.csrf = session.csrf;
+    }
+  }
+  const appAt = (id: string): Artifact | undefined => {
+    const a = o.deskDir ? openRepo(o.deskDir).artifact(id) : undefined;
+    return a?.kind === "app" ? a : undefined;
+  };
+
   async function route(ctx: Ctx): Promise<void> {
     const { req, res, url } = ctx;
     const method = req.method ?? "GET";
@@ -440,17 +461,14 @@ export function createConsole(o: ConsoleOptions): http.Server {
     }
     if (method === "GET" && path === "/health") return send(res, 200, '{"ok":true}', { "content-type": "application/json" });
 
-    // Who is this? A valid session naming a user we still know.
-    const session = readSession(o.sessionSecret, req.headers.cookie);
-    const user = session ? await o.store.user(session.uid) : undefined;
-    // Access is re-checked on every request, so removing an invite or an admin ends existing sessions too.
-    if (session && user && user.phone === normPhone(session.phone) && await allowed(user.phone)) {
-      ctx.user = user;
-      ctx.csrf = session.csrf;
-    }
+    await sessionOf(ctx);
+
+    // An app's server: whatever comes after /api is the app's own, slashes and all.
+    const apiPath = API_PATH.exec(url.pathname);
+    if (apiPath) return api.handle(req, res, url, appAt(apiPath[1]!), apiPath[2], { gone: revokedArtifacts(o.revokedArtifactsPath).has(apiPath[1]!), ...(ctx.user ? { signedIn: callerOf(ctx.user) } : {}) });
 
     // An app: its shell, its frame, its data. (A page's own routes follow.)
-    const appPath = /^\/a\/([A-Za-z0-9_-]{22})(?:\/(app|data|errors)(?:\/([^/]+)(?:\/([^/]+))?)?)?$/.exec(path);
+    const appPath = /^\/a\/([A-Za-z0-9_-]{22})(?:\/(app|data|errors|token)(?:\/([^/]+)(?:\/([^/]+))?)?)?$/.exec(path);
     const maybeApp = appPath && o.deskDir ? openRepo(o.deskDir).artifact(appPath[1]!) : undefined;
     if (appPath && maybeApp?.kind === "app") return appRoute(ctx, maybeApp, appPath[2], appPath[3], appPath[4]);
 
@@ -930,6 +948,19 @@ export function createConsole(o: ConsoleOptions): http.Server {
       if (!res.headersSent) send(res, 500, layout({ title: "Error", body: messageBody("Something went wrong", "Try again in a moment.") }));
       else res.end();
     });
+  });
+  // A socket to an app's server; nothing else on this site upgrades.
+  server.on("upgrade", (req, socket, head) => {
+    const url = new URL(req.url ?? "/", "http://console.local");
+    const apiPath = API_PATH.exec(url.pathname);
+    if (!apiPath) return void socket.destroy();
+    const ctx: Ctx = { req, res: undefined as never, url };
+    sessionOf(ctx)
+      .then(() => api.upgrade(req, socket, head, url, appAt(apiPath[1]!), apiPath[2], { gone: revokedArtifacts(o.revokedArtifactsPath).has(apiPath[1]!), ...(ctx.user ? { signedIn: callerOf(ctx.user) } : {}) }))
+      .catch((err: unknown) => {
+        log(`unhandled: ${(err as Error).message}`);
+        socket.destroy();
+      });
   });
   server.on("close", () => appStore?.close());
   return server;

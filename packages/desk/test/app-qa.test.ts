@@ -168,7 +168,7 @@ describe("QA uses an app before the PM reviews it", () => {
     expect(qa.prompt).toContain(`App id ${id}`);
     expect(qa.prompt).toContain("Make us a shared grocery list");
     const seen = Object.values(s.tools).filter((t) => qa.role.visible!(t)).map((t) => t.spec.name);
-    expect(seen.sort()).toEqual(["app_data", "app_read", "app_verdict"]);
+    expect(seen.sort()).toEqual(["app_call", "app_data", "app_logs", "app_read", "app_verdict"]);
     expect(text(await s.as(issue, "qa")("app_verdict", { usable: true }))).toMatch(/Noted: usable/);
     await s.finish("Added, ticked and removed an item.");
     expect(s.now(issue)).toMatchObject({ status: "in_review", reviews: [{ kind: "result", how: "tried", askedBy: "gate", state: "passed", rounds: 0, version: 1 }] });

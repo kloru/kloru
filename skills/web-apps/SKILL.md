@@ -1,12 +1,13 @@
 ---
 name: web-apps
-description: Make an app people use from their phones at a Kloru link, such as a shared grocery list, a chore chart, a sign-up or RSVP form, a tracker, a map, a dashboard or a simple game. Use when someone asks for something the family fills in or ticks off themselves, or asks to change or fix an app you made. Write one HTML file with app_create, try it with app_test, read or fill its data with app_data, send the link, and change it later with app_update at the same link. Also for QA trying an app an engineer made.
+description: Make an app people use from their phones at a Kloru link, such as a shared grocery list, a chore chart, a sign-up or RSVP form, a tracker, a map, a dashboard or a simple game. Use when someone asks for something the family fills in or ticks off themselves, or asks to change or fix an app you made. Write one HTML file with app_create, give it a server with app_server when it needs a key or code of its own, try it with app_test, read or fill its data with app_data, send the link, and change it later with app_update at the same link. Also for QA trying an app an engineer made.
 ---
 
 # Web apps
 
 An app is one HTML file you write with `app_create`. Kloru hosts it at a link, keeps its data, and
-shows it to the family signed in. There is nothing to build or deploy, and nowhere else to host it. Anyone's request can make one.
+shows it to the family signed in. When the page isn't enough, `app_server` gives it code that runs
+on Kloru's machine. There is nothing to build or deploy, and nowhere else to host it. Anyone's request can make one.
 
 A page (`artifact_create`) is for a result people read. An app is for something they fill in or tick
 off themselves.
@@ -22,10 +23,9 @@ off themselves.
   routes, places and weather come from APIs that need no key (OSRM, Nominatim, Open-Meteo). Use
   something else when these don't fit.
 - A link out needs `target="_blank"`; the app can't move the page it sits in.
-- The app has no address of its own. An API that wants a key tied to a website, a sign-in with
-  another service, `localStorage` and cookies don't work in it. Keep what must last in `kloru`.
-- When the request needs what an app can't do (a secret key, code on a server, a site at its own
-  address), say what's missing in your result and let the PM ask. Don't host it somewhere else.
+- `localStorage` and cookies don't work in the page. Keep what must last in `kloru`.
+- Anything in the page is public to whoever opens it. A key, a call to a service that needs one, a
+  webhook, a sign-in with another service, scheduled work: those go in the app's server.
 - Phones first. Most people open the link from a text. Lay it out for a narrow screen, with text of
   16px or more (smaller makes iPhones zoom in on inputs), buttons and rows a thumb can hit (44px
   tall), no sideways scrolling, and the main action reachable without scrolling. Follow light or
@@ -48,6 +48,32 @@ Draw from `kloru.list`, not from a copy you keep. Show a short message when a sa
 promise rejects with words people can read). Put text on the page with `textContent`, never
 `innerHTML`, since other people typed it. A record holds up to 16 KB and an app 5,000 records;
 nothing else is stored.
+
+## Give it a server
+
+`app_server` puts code on Kloru's machine, starts it, and says whether it came up. It starts at
+`server.js`:
+
+    export default async (request, kloru) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/tiles") return fetch(`https://maps.example/tiles?key=${kloru.secrets["cleo-maps-key"]}`);
+      return { hello: kloru.user(request)?.name };
+    };
+
+- Return a `Response`, or anything else to send it as JSON. Files under `public/` are served as they are.
+- The page calls it with `await kloru.fetch("/tiles")` (like `fetch`; a plain object as `body` goes
+  as JSON). `await kloru.link(path)` is an address for an `<img>` or a download, and
+  `await kloru.socket(path)` a WebSocket.
+- `kloru.user(request)` is `{ name, id, family }` for whoever is using the app, or null. Only
+  `/public/...` is open to the world, as nobody: a webhook goes there, at `<the app's link>/api/public/...`.
+- A key lives in the vault. Save one you got with `vault_save_api_key`, name it in `secrets`, and
+  read it as `kloru.secrets["its-name"]`. Never write it in a file.
+- Also there: `kloru.data.list/put/remove` (the page's records), `kloru.db` (its own SQLite),
+  `kloru.dir` (a folder for files), `kloru.every("15m", fn)`, `kloru.tell("words")` to bring
+  something to the family through Kloru, and npm `packages`.
+- `export function listen(server, kloru)` hands you the Node server, for WebSockets or express.
+- Try it with `app_call` before the page uses it. When it doesn't answer, `app_logs` shows what it
+  printed and threw. `scratch: true` is the copy `app_test` and QA use, on scratch data.
 
 ## Its data, from your side
 
@@ -114,7 +140,7 @@ Agent: Your grocery list is ready: https://kloru.com/a/Qm9v... Anyone in the fam
 ## Do not
 
 - Do not ask for passwords, card numbers or other sensitive details in an app.
-- Do not put a key or a password in the file, and do not send what people entered to another site.
+- Do not put a key or a password in the page or in a server file; it goes in the vault. Do not send what people entered to another site unless the request is for exactly that.
 - Do not put someone's private details (address, mail, calendar) in an app unless they asked for exactly that; the whole family sees it.
 - Do not open an app to guests unless the request calls for it.
 - Do not rename a collection or clear data to make a change easier.

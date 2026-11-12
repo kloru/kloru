@@ -1,7 +1,8 @@
 /**
- * vault_list and vault_save_login for desk workers: what secrets this request may use (metadata
- * only), and saving a login Kloru made with a password generated in code. Values never reach a
- * model: tools that use them take `{{vault:name.field}}` references (script_run, browser_*).
+ * vault_list, vault_save_login and vault_save_api_key for desk workers: what secrets this request
+ * may use (metadata only), saving a login Kloru made with a password generated in code, and saving
+ * a key a service gave it. Tools that use them take `{{vault:name.field}}` references (script_run,
+ * browser_*) or names (app_server), and scrub the values out of what they return.
  */
 import { defineTool, textResult, type RegisteredTool } from "@kloru/core";
 import { Type } from "typebox";
@@ -45,6 +46,27 @@ export function vaultTools(desk: Desk, vault: Vault, nameOf: (phone: string) => 
         if (!r.ok) return failed(r.error);
         desk.recordSecret(issue, "vault_save_login", [name], true, `saved a login for ${site} as ${username}`);
         return textResult(`Saved ${name}: ${site} as ${username}. In browser_run: await fillSecret("<password field selector>", "${name}.password").`);
+      },
+    }),
+    defineTool({
+      name: "vault_save_api_key",
+      label: "Save a new API key",
+      description: "After getting an API key or token for the person who asked (a sign-up, a developer console): save it as theirs, at once, and from then on use it by name: an app's server gets it with app_server's secrets, a script with script_run's. Never put the key in a page, a message or a result.",
+      parameters: Type.Object({
+        name: Type.String({ description: "lowercase, e.g. ezra-carto-key" }),
+        service: Type.String({ description: "what it is a key for, e.g. CARTO" }),
+        key: Type.String({ description: "the key, exactly as the service showed it" }),
+      }),
+      meta: { capabilities: [], group: "files" as const },
+      execute: async ({ name, service, key }, ctx) => {
+        const issue = desk.issueOfKey(ctx?.conversationKey);
+        if (!issue) return failed("Only desk workers use the vault.");
+        const had = vault.get(name);
+        if (had && !desk.maySecret(issue, had.owner)) return failed(`${name} already exists and isn't this request's; pick another name.`);
+        const r = vault.put({ name, owner: had?.owner ?? issue.filedBy.phone, kind: "api_key", meta: { service }, secret: { key: key.trim() }, createdBy: "kloru" });
+        if (!r.ok) return failed(r.error);
+        desk.recordSecret(issue, "vault_save_api_key", [name], true, `${had ? "replaced" : "saved"} an API key for ${service}`);
+        return textResult(`Saved ${name}: API key for ${service}. An app's server uses it with app_server's secrets: ["${name}"] (kloru.secrets["${name}"]); a script with script_run's secrets.`);
       },
     }),
   ];

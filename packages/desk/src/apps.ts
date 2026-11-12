@@ -3,10 +3,14 @@
  * writes one HTML file (markup, style and script) with a tool call; the website serves it in a
  * sandboxed frame and keeps its data (`kloru.list/put/remove/onChange`). Same link, versions and
  * follow-ups as a page. No build, no deploy, no shell, so anyone's request can make one.
+ *
+ * An app may also have a server (app_server): code Kloru runs on its own machine, one process per
+ * app (app-servers.ts), reached at /a/<id>/api/ and given the vault entries it names.
  */
 import { Script } from "node:vm";
 import { defineTool, textResult, type RegisteredTool } from "@kloru/core";
 import { Type } from "typebox";
+import type { AppServers } from "./app-servers.js";
 import type { Desk } from "./desk.js";
 import { err, ok, type Result } from "./result.js";
 
@@ -51,7 +55,17 @@ const VISITORS = Type.Optional(
   }),
 );
 
-export function appTools(desk: Desk): RegisteredTool[] {
+/** How much of a server's answer app_call shows. */
+const CALL_OUT = 12_000;
+
+export function appTools(desk: Desk, o: { servers?: AppServers } = {}): RegisteredTool[] {
+  const servers = o.servers;
+  /** How the server is, in a line, with the end of its log when it isn't running. */
+  const serverLine = (id: string, scratch = false) => {
+    const st = servers?.status(id, scratch);
+    if (!st) return "not started";
+    return `${st.state}, revision ${st.rev}${st.error ? `: ${st.error.split("\n")[0]}` : ""}`;
+  };
   const caller = (ctx: { conversationKey?: string } | undefined) => {
     const issue = desk.repo.issue(issueOf(ctx));
     return issue ? { issue: issue.id, phone: issue.filedBy.phone } : undefined;
@@ -109,7 +123,104 @@ export function appTools(desk: Desk): RegisteredTool[] {
         const r = desk.readApp(id, who.phone);
         if (!r.ok) return failed(r.error);
         const a = r.value.app;
-        return textResult(`${a.title} (app, version ${a.version ?? 1}, visitors: ${a.visitors ?? "none"}, ${desk.artifactUrl(id)})${reported(r.value.errors)}\n\n${a.html ?? ""}`);
+        const server = a.server
+          ? `\n\nIts server (${serverLine(id)}; answers at ${desk.artifactUrl(id)}/api/${a.server.secrets?.length ? `; vault: ${a.server.secrets.join(", ")}` : ""}${a.server.packages ? `; packages: ${Object.entries(a.server.packages).map(([n, v]) => `${n}@${v}`).join(", ")}` : ""}):\n${Object.entries(a.server.files).map(([path, body]) => `--- ${path}\n${body}`).join("\n")}`
+          : "";
+        return textResult(`${a.title} (app, version ${a.version ?? 1}, visitors: ${a.visitors ?? "none"}, ${desk.artifactUrl(id)})${reported(r.value.errors)}\n\n${a.html ?? ""}${server}`);
+      },
+    }),
+    defineTool({
+      name: "app_server",
+      label: "An app's server",
+      description:
+        "Give an app code that runs on Kloru's own machine, or change it: for a key the page mustn't hold, calls to other services, webhooks, sign-in with another service, scheduled work, files, a database. " +
+        "files sets files by path; server.js is where it starts: export default async (request, kloru) => Response (or anything, sent as JSON), and/or export function listen(server, kloru) for the Node http server (WebSockets, express). " +
+        "Files under public/ are served as they are. The page reaches it with kloru.fetch(path); the world reaches /a/<id>/api/public/... " +
+        "kloru has: secrets (the vault entries you name here, by name), data.list/put/remove (the page's records), db (its own SQLite), dir (a folder to keep files), user(request), every('5m', fn), tell(text), url, test. " +
+        "packages are npm dependencies. Every change restarts it; the result says whether it came up, with the reason if not.",
+      parameters: Type.Object({
+        id: Type.String({ description: "the app id" }),
+        files: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "files to set, by path: server.js, lib/routes.js, public/logo.svg" })),
+        replace: Type.Optional(Type.Object({ file: Type.String(), old: Type.String({ description: "text that appears exactly once in the file" }), new: Type.String() })),
+        remove: Type.Optional(Type.Array(Type.String(), { description: "files to remove" })),
+        packages: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "all its npm packages and versions, e.g. { \"stripe\": \"17.3.1\" }" })),
+        secrets: Type.Optional(Type.Array(Type.String(), { description: "all the vault entries its code may use, by name (vault_list, vault_save_api_key)" })),
+        restart: Type.Optional(Type.Boolean({ description: "true: start it again as it is (a vault entry changed, or it is stuck)" })),
+        off: Type.Optional(Type.Boolean({ description: "true: take the server away" })),
+      }),
+      meta: { capabilities: [], group: "files" as const },
+      execute: async ({ id, files, replace, remove, packages, secrets, restart, off }, ctx) => {
+        const who = caller(ctx);
+        if (!who || isQa(ctx)) return failed("Only the engineer changes an app's server.");
+        if (!servers) return failed("This Kloru can't run app servers.");
+        if (!files && !replace && !remove?.length && !packages && !secrets && !restart && !off) return failed("Say what to change: files, replace, remove, packages, secrets, restart or off.");
+        const r = desk.setAppServer(id, { ...(files ? { files } : {}), ...(replace ? { replace } : {}), ...(remove ? { remove } : {}), ...(packages ? { packages } : {}), ...(secrets ? { secrets } : {}), ...(restart ? { restart } : {}), ...(off ? { off } : {}) }, who);
+        if (!r.ok) return failed(r.error);
+        if (!r.value.server) {
+          await servers.stop(id);
+          return textResult(`The app has no server now (version ${r.value.version}).`);
+        }
+        const up = await servers.ensure(id);
+        if (!up.ok) return failed(desk.scrubSecrets(`Saved (version ${r.value.version}), but the server didn't start:\n${up.error}\n\nFix it with app_server; app_logs shows what it printed.`));
+        return textResult(`The server is running (version ${r.value.version}, revision ${r.value.server.rev}). It answers at ${desk.artifactUrl(id)}/api/ : the page calls kloru.fetch("/..."), and anyone may reach ${desk.artifactUrl(id)}/api/public/...\nTry it with app_call, and the page with app_test if you have it.`);
+      },
+    }),
+    defineTool({
+      name: "app_logs",
+      label: "An app server's log",
+      description: "How an app's server is (running, failed and why) and the end of what it printed and threw. scratch: the copy app_test runs on.",
+      parameters: Type.Object({ id: Type.String({ description: "the app id" }), scratch: Type.Optional(Type.Boolean()) }),
+      meta: { capabilities: [], group: "files" as const },
+      execute: async ({ id, scratch }, ctx) => {
+        const who = caller(ctx);
+        if (!who) return failed("Only desk workers read an app's log.");
+        const r = desk.readApp(id, who.phone);
+        if (!r.ok) return failed(r.error);
+        if (!r.value.app.server || !servers) return failed("This app has no server.");
+        const log = servers.logs(id, scratch === true).trim();
+        return textResult(desk.scrubSecrets(`${serverLine(id, scratch === true)}\n\n${log || "It has printed nothing."}`));
+      },
+    }),
+    defineTool({
+      name: "app_call",
+      label: "Call an app's server",
+      description: "Send a request to an app's server and see what it answers, as the person who asked: to check an endpoint works. scratch: the copy app_test runs on, with its own data.",
+      parameters: Type.Object({
+        id: Type.String({ description: "the app id" }),
+        path: Type.String({ description: "the path and query after /api, e.g. /routes?from=home" }),
+        method: Type.Optional(Type.String({ description: "GET (default), POST, PUT, PATCH, DELETE" })),
+        body: Type.Optional(Type.Unknown({ description: "the body: text as it is, anything else as JSON" })),
+        headers: Type.Optional(Type.Record(Type.String(), Type.String())),
+        scratch: Type.Optional(Type.Boolean()),
+        guest: Type.Optional(Type.Boolean({ description: "true: as someone not signed in" })),
+      }),
+      meta: { capabilities: [], group: "files" as const },
+      execute: async ({ id, path, method, body, headers, scratch, guest }, ctx) => {
+        const who = caller(ctx);
+        if (!who) return failed("Only desk workers call an app's server.");
+        if (isQa(ctx) && !scratch) return failed("QA calls only the scratch copy: pass scratch: true.");
+        const r = desk.readApp(id, who.phone);
+        if (!r.ok) return failed(r.error);
+        if (!servers) return failed("This Kloru can't run app servers.");
+        const up = await servers.ensure(id, scratch === true);
+        if (!up.ok) return failed(desk.scrubSecrets(`The server isn't up: ${up.error}`));
+        const verb = (method ?? "GET").toUpperCase();
+        const sent = body === undefined || verb === "GET" || verb === "HEAD" ? undefined : typeof body === "string" ? body : JSON.stringify(body);
+        try {
+          const res = await fetch(`http://127.0.0.1:${up.value.port}${path.startsWith("/") ? path : `/${path}`}`, {
+            method: verb,
+            headers: { ...(sent !== undefined && typeof body !== "string" ? { "content-type": "application/json" } : {}), ...(headers ?? {}), ...(guest ? {} : { "x-kloru-user": encodeURIComponent(JSON.stringify(desk.appUser(who.phone))) }) },
+            ...(sent !== undefined ? { body: sent } : {}),
+            redirect: "manual",
+            signal: AbortSignal.timeout(60_000),
+          });
+          const type = res.headers.get("content-type") ?? "";
+          const out = /^(text\/|application\/(json|xml|javascript|geo\+json|x-www-form-urlencoded))|\+json|\+xml/.test(type) || !type ? await res.text() : `(${type}, ${(await res.arrayBuffer()).byteLength} bytes)`;
+          const location = res.headers.get("location");
+          return textResult(desk.scrubSecrets(`${res.status} ${res.statusText}${type ? ` (${type})` : ""}${location ? ` → ${location}` : ""}\n${out.length > CALL_OUT ? `${out.slice(0, CALL_OUT)}\n… (${out.length} characters in all)` : out}`));
+        } catch (error) {
+          return failed(desk.scrubSecrets(`The call didn't finish: ${error instanceof Error ? error.message : String(error)}\n${servers.logs(id, scratch === true, 1_500)}`));
+        }
       },
     }),
     defineTool({

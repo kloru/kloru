@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,7 +46,19 @@ describe("backup", () => {
     const mac = tarCreate("/data", "darwin");
     expect(mac.args).toContain("--no-mac-metadata");
     expect(mac.env.COPYFILE_DISABLE).toBe("1");
-    expect(tarCreate("/data", "linux").args).toEqual(["czf", "-", "-C", "/data", "."]);
+    expect(tarCreate("/data", "linux").args).toEqual(["--exclude=node_modules", "-czf", "-", "-C", "/data", "."]);
+  });
+
+  it("leaves out what npm installed for an app's server: it is installed again after a restore (2026-11-12)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "backup-tar-"));
+    mkdirSync(join(dir, "kloru", "app-servers", "A", "code", "node_modules", "ws"), { recursive: true });
+    writeFileSync(join(dir, "kloru", "app-servers", "A", "code", "node_modules", "ws", "index.js"), "x");
+    writeFileSync(join(dir, "kloru", "app-servers", "A", "code", "server.js"), "y");
+    const t = tarCreate(dir);
+    const made = spawnSync("tar", t.args, { env: t.env, maxBuffer: 1 << 24 });
+    const listed = spawnSync("tar", ["tzf", "-"], { input: made.stdout }).stdout.toString();
+    expect(listed).toContain("server.js");
+    expect(listed).not.toContain("node_modules");
   });
 
   it("names objects by date so lifecycle rules and 'latest' work", () => {
