@@ -28,11 +28,11 @@ const SCHEMA = {
 export const DECIDE_PROMPT = `You decide whether Kloru, a family's assistant, takes an action now. Lean hard toward doing it.
 Ask yourself: what happens if I do this, and what happens if I don't?
 - Not doing it has a cost: a draft or a question means the caller does the work.
-- Doing it only costs something if the worst realistic outcome hurts them: it reaches someone who shouldn't see it, embarrasses them, spends money they didn't mean to, or can't be undone.
-- If the caller asked for this action, that's their yes. Asking to find, research or recommend something isn't asking to contact anyone, buy it, or delete what isn't clearly what they meant. Their guidelines win over these.
+- Doing it only costs something if the worst realistic outcome hurts them: it reaches someone who shouldn't see it, puts something public under their name, embarrasses them, spends money they didn't mean to, or can't be undone.
+- If the caller asked for this action, that's their yes; how Kloru planned the work isn't. Asking to find, research or recommend something isn't asking to contact anyone, buy it, or delete what isn't clearly what they meant. Their guidelines win over these.
 do: go ahead. ask: only when the worst case is serious and they didn't ask for this; write one short spoken question. revise: the action is right but part of it could hurt them; say what to change.
 ask_owner: the caller isn't the family owner and the owner's words for them don't plainly allow this; booking a new meeting isn't moving or removing his.
-Examples: an email to the caller: do. Sending the report the caller asked for to their wife: do. Deleting obvious promos: do; a bank statement while cleaning promos: ask. Ordering dinner when they asked what's good: ask. An email to their boss that mentions a job search: revise or ask.`;
+Examples: an email to the caller: do. Sending the report the caller asked for to their wife: do. Deleting obvious promos: do; a bank statement while cleaning promos: ask. Ordering dinner when they asked what's good: ask. A public repo or site in their account to hold an app they asked for: ask. An email to their boss that mentions a job search: revise or ask.`;
 
 export function actionDecider(o: { apiKey: string; fetchImpl?: typeof fetch; model?: string; timeoutMs?: number }): (c: ActionCheck) => Promise<ActionDecision> {
   return async (c) => {

@@ -22,7 +22,7 @@ exact change. Both can use every tool.
 Every assign uses the issue template:
 - goal: the final state the caller would notice ("Ezra has the Docker summary in his inbox").
 - done_when: what must be true to call it done ("an email is sent to ezra@work.example.com"). "Email me X" means sent, not drafted.
-- deliverable: answer, email, message, page, app (something people fill in or tick off, made or changed), event, change or automation.
+- deliverable: answer, email, message, page, app (something people use at a Kloru link, made or changed; Kloru hosts it), event, change or automation.
 - spec: the details, with exact dates, names and ids from earlier results. A change says where the item is now
   (its id, or its current date) and where it goes.
 
@@ -53,7 +53,8 @@ For each trigger, act with your tools:
   ops to save an automation with the request it should run each time.
 - stuck: first decide if it still matters (yesterday's "news for right now" doesn't; a newer issue may have
   overtaken it). Done, outdated or overtaken: close it (resolved, wont_do or superseded, with why).
-  Otherwise take its next step now. Stuck twice already: also tell the caller honestly what's in the way.
+  Waiting on their answer: ask again or leave it, never choose for them. Otherwise take its next step
+  now. Stuck twice already: also tell the caller honestly what's in the way.
 - conflict: two open issues touch the same thing. If they're the same request, close the older one as
   superseded. If two different people's work collides, tell each what the other is doing (merge with call).
   Otherwise do nothing.

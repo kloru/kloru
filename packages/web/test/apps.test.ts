@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { Repo, type AppVisitors } from "@kloru/desk";
 import type { AgentClient } from "../src/agent-client.js";
-import { FRAME_CSP } from "../src/app-pages.js";
+import { FRAME_CSP, FRAME_SANDBOX } from "../src/app-pages.js";
 import { AppStore } from "@kloru/desk";
 import { revokeArtifact } from "../src/desk-pages.js";
 import { createConsole } from "../src/server.js";
@@ -90,7 +90,7 @@ describe("apps on the website (2026-11-09, #43)", () => {
     expect((await guest.rev()).status).toBe(401);
   });
 
-  it("the shell is Kloru's page around a sandboxed frame; the frame holds the app and may load or send nothing", async () => {
+  it("the shell is Kloru's page around a sandboxed frame; the frame holds the app, with no Kloru origin, and may use the web over https", async () => {
     const c = await start();
     const cleo = await c.signedIn(CLEO, "Cleo");
     const res = await c.get(`/a/${APP}`, cleo.cookie);
@@ -99,7 +99,7 @@ describe("apps on the website (2026-11-09, #43)", () => {
     expect(res.headers.get("content-security-policy")).toContain("script-src 'self'");
     expect(res.headers.get("x-robots-tag")).toMatch(/noindex/);
     const shell = await res.text();
-    expect(shell).toContain('sandbox="allow-scripts allow-forms"');
+    expect(shell).toContain(`sandbox="${FRAME_SANDBOX}"`);
     expect(shell).not.toContain("kloru.list"); // the app's file is never part of Kloru's own page
     expect(c.attr(shell, "data-key")).toBe(cleo.key);
     expect(JSON.parse(c.attr(shell, "name")!.replace(/&quot;/g, '"'))).toEqual({ me: { name: "Cleo" } });
@@ -108,10 +108,20 @@ describe("apps on the website (2026-11-09, #43)", () => {
     const frame = await c.get(src); // the frame is sandboxed: it sends no cookie
     expect(frame.status).toBe(200);
     expect(frame.headers.get("content-security-policy")).toBe(FRAME_CSP);
-    expect(FRAME_CSP).toContain("sandbox allow-scripts allow-forms;");
+    expect(FRAME_CSP).toContain(`sandbox ${FRAME_SANDBOX};`);
     expect(FRAME_CSP).toContain("default-src 'none'");
-    expect(FRAME_CSP).not.toContain("allow-same-origin");
-    expect(FRAME_CSP).not.toContain("connect-src");
+    // No Kloru origin, and no way to move the page around it: the frame is cut off from the site.
+    expect(FRAME_SANDBOX).not.toContain("allow-same-origin");
+    expect(FRAME_SANDBOX).not.toContain("allow-top-navigation");
+    // Links open in a new tab, as an ordinary page.
+    expect(FRAME_SANDBOX.split(" ")).toEqual(expect.arrayContaining(["allow-scripts", "allow-forms", "allow-popups", "allow-popups-to-escape-sandbox"]));
+    // Libraries, styles, fonts, pictures, map tiles and public APIs load over https and nothing else.
+    const policy = Object.fromEntries(FRAME_CSP.split("; ").map((d) => [d.split(" ")[0], d.split(" ").slice(1)]));
+    for (const d of ["script-src", "style-src", "img-src", "font-src", "media-src", "connect-src", "frame-src"]) expect(policy[d], d).toContain("https:");
+    expect(FRAME_CSP).not.toMatch(/\shttp:|\sws:|\s\*/);
+    expect(policy["base-uri"]).toEqual(["'none'"]);
+    expect(policy["form-action"]).toEqual(["'none'"]);
+    expect(policy["frame-ancestors"]).toEqual(["'self'"]);
     expect(frame.headers.get("x-frame-options")).toBe("SAMEORIGIN");
     const body = await frame.text();
     expect(body.indexOf("window.kloru")).toBeGreaterThan(-1);

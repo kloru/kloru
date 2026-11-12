@@ -109,11 +109,11 @@ describe("apps (2026-11-09)", () => {
     expect(s.desk.repo.artifact(id)!.version).toBe(1);
   });
 
-  it("checkApp: empty, too long, and scripts or styles loaded from elsewhere are refused; data and module scripts are left alone", () => {
+  it("checkApp: empty, too long and a script that doesn't parse are refused; libraries and styles from other addresses, data and module scripts are left alone", () => {
     expect(checkApp(" ").ok).toBe(false);
     expect(checkApp("x".repeat(512_001)).ok).toBe(false);
-    expect(checkApp(`<script src="https://cdn.example/vue.js"></script>`)).toMatchObject({ ok: false, error: expect.stringMatching(/one file/) });
-    expect(checkApp(`<link rel="stylesheet" href="https://cdn.example/a.css">`).ok).toBe(false);
+    expect(checkApp(`<link rel="stylesheet" href="https://cdn.example/leaflet@1.9.4/leaflet.css"><script src="https://cdn.example/leaflet@1.9.4/leaflet.js"></script><div id="map"></div><script>L.map("map");</script>`).ok).toBe(true);
+    expect(checkApp(`<script src="https://cdn.example/vue.js"></script><script>let = ;</script>`)).toMatchObject({ ok: false, error: expect.stringMatching(/doesn't parse/) });
     expect(checkApp(`<script type="application/json">{not json</script><script type="module">await 1;</script><p>ok</p>`).ok).toBe(true);
     expect(checkApp(LIST).ok).toBe(true);
   });

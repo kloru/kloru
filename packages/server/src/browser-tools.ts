@@ -10,7 +10,9 @@
 import { fork } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { lookup as dnsLookup } from "node:dns/promises";
 import { createRequire } from "node:module";
+import { BlockList, isIP } from "node:net";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { defineTool, textResult, type RegisteredTool } from "@kloru/core";
@@ -150,7 +152,8 @@ export class BrowserPool {
 
   /**
    * A throwaway phone-sized browser for trying out an app this task made: no profile, no sign-ins,
-   * and it loads nothing but the app's own site. Closed with the task, or after ten quiet minutes.
+   * and it loads the app's own site and the public web over https, as the app's frame does; never
+   * this machine or its network. Closed with the task, or after ten quiet minutes.
    */
   async attachTest(issue: Issue, origin: string): Promise<{ page: Page; cdp: string; target: string }> {
     const key = `test-${issue.id}`;
@@ -171,7 +174,7 @@ export class BrowserPool {
         const ctx = await chromium.launchPersistentContext(dir, { executablePath: this.o.executablePath, headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0"], viewport: PHONE_VIEW, isMobile: true, hasTouch: true });
         have = { ctx, cdp: await devtoolsUrl(dir), close: () => ctx.close().finally(tidy) };
       }
-      await have.ctx.route("**/*", (route) => (onSite(route.request().url(), origin) ? route.continue() : route.abort("blockedbyclient")));
+      await have.ctx.route("**/*", async (route) => ((await mayLoad(route.request().url(), origin)) ? route.continue() : route.abort("blockedbyclient")));
       this.contexts.set(key, have);
     }
     this.touch(key);
@@ -311,6 +314,41 @@ export function onSite(url: string, origin: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Addresses that are this machine, its network, or nobody's: never the public web. */
+const INSIDE = new BlockList();
+for (const [net, bits] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 3]] as const) INSIDE.addSubnet(net, bits, "ipv4");
+for (const [net, bits] of [["::", 127], ["64:ff9b::", 96], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8]] as const) INSIDE.addSubnet(net, bits, "ipv6");
+
+function inside(address: string): boolean {
+  const mapped = /^::ffff:(.+)$/i.exec(address)?.[1];
+  if (mapped && isIP(mapped) === 4) return INSIDE.check(mapped, "ipv4");
+  const kind = isIP(address);
+  return kind === 0 || INSIDE.check(address, kind === 4 ? "ipv4" : "ipv6");
+}
+
+const resolve = async (host: string) => (await dnsLookup(host, { all: true })).map((a) => a.address);
+
+/**
+ * Whether a browser trying out an app may make this request: the app's own site, or the public web
+ * over https (a library, map tiles, an API), which is what the app's frame allows. A name that is,
+ * or resolves to, an address inside is refused, so an app can't use the test to reach Kloru's network.
+ */
+export async function mayLoad(url: string, origin: string, lookup: (host: string) => Promise<string[]> = resolve): Promise<boolean> {
+  if (onSite(url, origin)) return true;
+  let at: URL;
+  try {
+    at = new URL(url);
+  } catch {
+    return false;
+  }
+  if (at.protocol !== "https:" && at.protocol !== "wss:") return false;
+  const host = at.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
+  if (isIP(host)) return !inside(host);
+  if (host === "localhost" || /\.(localhost|local|internal)$/.test(host)) return false;
+  const found = await lookup(host).catch(() => []);
+  return found.length > 0 && !found.some(inside);
 }
 
 /** Chromium writes its debugging port to DevToolsActivePort in the profile once it's listening. */

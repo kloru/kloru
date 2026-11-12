@@ -261,6 +261,29 @@ describe.skipIf(!key)("PM on real-call situations", () => {
     expect(host.finishers.has(1)).toBe(true);
   }, 120_000);
 
+  it("stuck on the caller's answer: a question nobody answered is asked again or left, never answered for them", async () => {
+    const sent: string[] = [];
+    const { host, desk, logs, call: voice } = setup(undefined, async (n) => (sent.push(JSON.stringify(n)), true));
+    desk.endCall(voice.id);
+    const { call } = desk.startCall({ callSid: "imessage:evt-map", phone: EZRA, channel: "imessage" });
+    desk.addTurn(call.id, { role: "caller", text: "Make me an app with a map of my bike commute along the river trail" });
+    desk.fileIssue(call.id, "Make an app with a map of Ezra's bike commute along the river trail.");
+    await until(() => host.finishers.has(1));
+    host.finishers.get(1)!("The app is made, but the map can't show inside it. Should I host the map somewhere else, such as a public site on your GitHub account, or keep a link to OpenStreetMap in the app?");
+    await until(() => desk.repo.issue(1)!.status === "needs_info");
+    expect(desk.repo.issue(1)!.status).toBe("needs_info");
+    desk.endCall(call.id);
+    host.finishers.clear();
+    const before = desk.repo.issue(1)!.thread.length;
+    desk.sweep(new Date(Date.now() + 7 * 60 * 60_000)); // no answer all day
+    const acted = () => host.finishers.has(1) || isClosedStatus(desk.repo.issue(1)!.status) || desk.repo.issue(1)!.thread.slice(before).some((e) => e.by === "pm");
+    await until(acted);
+    await new Promise((r) => setTimeout(r, 3000));
+    if (process.env.SHOW) console.log(sent, logs.filter((l) => l.startsWith("pm")), JSON.stringify(desk.repo.issue(1)!.thread.map((t) => `${t.by}: ${t.text}`), null, 1));
+    expect(acted()).toBe(true);
+    expect(host.finishers.has(1)).toBe(false); // no engineer was started on a choice Ezra never made
+  }, 240_000);
+
   it("#493 (Nov 8): research whose worker keeps getting stuck is told to the caller honestly, not reassigned all day", async () => {
     const sent: string[] = [];
     const { host, desk, logs, call: voice } = setup(undefined, async (n) => (sent.push(JSON.stringify(n)), true));

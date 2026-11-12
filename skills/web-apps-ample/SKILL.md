@@ -1,6 +1,6 @@
 ---
 name: web-apps-ample
-description: Put a public website or a server of its own online with Ample (ample_deploy). Use only when you have the ample_deploy tool and the owner wants what a Kloru app (skill web-apps) can't be, such as a public site at its own address, several pages, or code that runs on a server. Builds it in the workspace, deploys it, texts back the URL, and redeploys after changes.
+description: Put a public website or a server of its own online with Ample (ample_deploy). Use only when you have the ample_deploy tool and the owner asked for Ample by name, or said yes when asked about it. Everything else is a Kloru app (skill web-apps), which can load libraries, maps and public APIs. Builds it in the workspace, deploys it, texts back the URL, and redeploys after changes.
 ---
 
 # Web apps on Ample

@@ -4,16 +4,26 @@
  * - The shell, at /a/<id>: Kloru's own page. It knows who is using the app and talks to the
  *   app's data routes for them.
  * - The frame, at /a/<id>/app: the app's HTML, sandboxed. It has no kloru.com cookies or storage
- *   and can make no network request; all it can do is ask the shell for its own data.
+ *   and can't touch the page around it; all it can ask this site for is its own data, through the
+ *   shell. It may use the rest of the web over https: any library, map tiles, a public API.
  *
- * So an app can't reach anything on this site but its own records, and can't send them anywhere.
+ * So an app, or a library it loads, can't reach anything on this site but its own records. Those
+ * it can send anywhere: what is put into an app is the thing to be careful about.
  */
 import type { Artifact } from "@kloru/desk";
 import { esc } from "./html.js";
 
-/** The frame's whole world: its own inline script and style, nothing loaded, nothing sent. */
+/**
+ * What the frame may do. No allow-same-origin: its origin is opaque, so it has no Kloru cookies or
+ * storage. No top navigation: it can't replace the page around it. Links open in a new tab.
+ */
+export const FRAME_SANDBOX = "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads";
+
+/** The frame's world: its own file, and the web over https (never http, so nothing on the visitor's own network). */
 export const FRAME_CSP =
-  "sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
+  `sandbox ${FRAME_SANDBOX}; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https:; style-src 'unsafe-inline' https:; ` +
+  "img-src data: blob: https:; font-src data: https:; media-src data: blob: https:; connect-src https: wss:; frame-src https:; worker-src blob:; " +
+  "base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
 
 export type AppAccess = "family" | "visitor" | "sign-in";
 
@@ -30,7 +40,7 @@ export function appShellPage(a: Artifact, o: { key: string; frameKey: string; me
   return (
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<meta name="robots" content="noindex,nofollow"><title>${esc(a.title)}</title><link rel="stylesheet" href="/static/app.css"></head>` +
-    `<body class="app-shell"><iframe id="kloru-app" title="${esc(a.title)}" sandbox="allow-scripts allow-forms" src="/a/${esc(a.id)}/app?k=${esc(o.frameKey)}&amp;v=${version}"` +
+    `<body class="app-shell"><iframe id="kloru-app" title="${esc(a.title)}" sandbox="${FRAME_SANDBOX}" src="/a/${esc(a.id)}/app?k=${esc(o.frameKey)}&amp;v=${version}"` +
     ` name="${esc(JSON.stringify({ me: o.me ?? null }))}" data-app="${esc(a.id)}" data-key="${esc(o.key)}" data-version="${version}"${o.me ? "" : ` data-visitor="1"`}${o.test ? ` data-test="1"` : ""}></iframe>` +
     `<script src="/static/app-shell.js${v}"></script></body></html>`
   );

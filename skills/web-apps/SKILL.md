@@ -1,25 +1,36 @@
 ---
 name: web-apps
-description: Make a small app people use from their phones at a Kloru link, such as a shared grocery list, a chore chart, a sign-up or RSVP form, a tracker or a simple game. Use when someone asks for something the family fills in or ticks off themselves, or asks to change or fix an app you made. Write one HTML file with app_create, try it with app_test, read or fill its data with app_data, send the link, and change it later with app_update at the same link. Also for QA trying an app an engineer made.
+description: Make an app people use from their phones at a Kloru link, such as a shared grocery list, a chore chart, a sign-up or RSVP form, a tracker, a map, a dashboard or a simple game. Use when someone asks for something the family fills in or ticks off themselves, or asks to change or fix an app you made. Write one HTML file with app_create, try it with app_test, read or fill its data with app_data, send the link, and change it later with app_update at the same link. Also for QA trying an app an engineer made.
 ---
 
 # Web apps
 
 An app is one HTML file you write with `app_create`. Kloru hosts it at a link, keeps its data, and
-shows it to the family signed in. There is nothing to build or deploy. Anyone's request can make one.
+shows it to the family signed in. There is nothing to build or deploy, and nowhere else to host it. Anyone's request can make one.
 
 A page (`artifact_create`) is for a result people read. An app is for something they fill in or tick
 off themselves.
 
 ## Write it
 
-- One file: markup, `<style>` and `<script>` inline. Nothing loads from another address (no CDN, no
-  fonts, no images by URL), and the app can't call the network. Use emoji or inline SVG for pictures.
+- One file: your markup, `<style>` and `<script>`. Plain HTML and ES modules; no build step.
+- The app can use the web over https: a library, a stylesheet, fonts, images, map tiles, `fetch`
+  to a public API that allows any origin. Load a library by URL with an exact version, from
+  cdn.jsdelivr.net or unpkg.com: `https://unpkg.com/leaflet@1.9.4/dist/leaflet.js`.
+- Picks that work here: a map is Leaflet with OpenStreetMap tiles
+  (`https://tile.openstreetmap.org/{z}/{x}/{y}.png`, with its attribution); a chart is Chart.js;
+  routes, places and weather come from APIs that need no key (OSRM, Nominatim, Open-Meteo). Use
+  something else when these don't fit.
+- A link out needs `target="_blank"`; the app can't move the page it sits in.
+- The app has no address of its own. An API that wants a key tied to a website, a sign-in with
+  another service, `localStorage` and cookies don't work in it. Keep what must last in `kloru`.
+- When the request needs what an app can't do (a secret key, code on a server, a site at its own
+  address), say what's missing in your result and let the PM ask. Don't host it somewhere else.
 - Phones first. Most people open the link from a text. Lay it out for a narrow screen, with text of
   16px or more (smaller makes iPhones zoom in on inputs), buttons and rows a thumb can hit (44px
   tall), no sideways scrolling, and the main action reachable without scrolling. Follow light or
   dark with `prefers-color-scheme`. It should still look right on a laptop.
-- Keep it plain: the title, the thing to do, the list. No sign-in screen; Kloru knows who is there.
+- Keep it plain: the title, the thing to do, the list or the map. No sign-in screen; Kloru knows who is there.
 
 ## Keep its data
 
@@ -36,7 +47,7 @@ off themselves.
 Draw from `kloru.list`, not from a copy you keep. Show a short message when a save fails (the
 promise rejects with words people can read). Put text on the page with `textContent`, never
 `innerHTML`, since other people typed it. A record holds up to 16 KB and an app 5,000 records;
-nothing else is stored (no `localStorage`, no cookies).
+nothing else is stored.
 
 ## Its data, from your side
 
@@ -103,6 +114,7 @@ Agent: Your grocery list is ready: https://kloru.com/a/Qm9v... Anyone in the fam
 ## Do not
 
 - Do not ask for passwords, card numbers or other sensitive details in an app.
+- Do not put a key or a password in the file, and do not send what people entered to another site.
 - Do not put someone's private details (address, mail, calendar) in an app unless they asked for exactly that; the whole family sees it.
 - Do not open an app to guests unless the request calls for it.
 - Do not rename a collection or clear data to make a change easier.

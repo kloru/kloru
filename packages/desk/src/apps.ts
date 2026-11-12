@@ -20,19 +20,17 @@ const failed = (text: string) => ({ content: [{ type: "text" as const, text }], 
 const issueOf = (ctx: { conversationKey?: string } | undefined) => Number(/^desk:issue:(\d+):/.exec(ctx?.conversationKey ?? "")?.[1] ?? NaN);
 const isQa = (ctx: { conversationKey?: string } | undefined) => /^desk:issue:\d+:qa$/.test(ctx?.conversationKey ?? "");
 const CLASSIC = /^(|text\/javascript|application\/javascript)$/i;
-const ONE_FILE = "an app is one file: put the script and style inline (nothing can load from another address)";
 
 /**
- * What can be checked without running an app: it has something in it, it fits, nothing loads from
- * elsewhere (the frame's policy would block it), and every inline script compiles.
+ * What can be checked without running an app: it has something in it, it fits, and every inline
+ * script compiles. What it loads from other addresses is its own business (the frame keeps it off Kloru).
  */
 export function checkApp(html: string): Result<true> {
   if (!html.trim()) return err("the app is empty");
   if (html.length > APP_MAX) return err(`the app is too long (${html.length} characters; at most ${APP_MAX})`);
-  if (/<link\b[^>]*\brel\s*=\s*["']?stylesheet/i.test(html)) return err(ONE_FILE);
   for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
     const attrs = m[1] ?? "";
-    if (/\bsrc\s*=/i.test(attrs)) return err(ONE_FILE);
+    if (/\bsrc\s*=/i.test(attrs)) continue; // a library, loaded from its own address
     const type = /\btype\s*=\s*["']?([^"'\s>]*)/i.exec(attrs)?.[1] ?? "";
     if (!CLASSIC.test(type)) continue;
     const line = html.slice(0, (m.index ?? 0) + m[0].indexOf(">") + 1).split("\n").length;
@@ -64,10 +62,10 @@ export function appTools(desk: Desk): RegisteredTool[] {
       name: "app_create",
       label: "Make an app",
       description:
-        "Make a small web app for this task: something people fill in or tick off themselves (a shared list, a sign-up, a tracker). One HTML file with inline style and script; its data is kept for you: await kloru.list(collection), kloru.put(collection, record), kloru.remove(collection, id), kloru.onChange(fn), kloru.me. Follow-ups change it with app_update. Returns the link.",
+        "Make a small web app for this task: something people fill in or tick off themselves (a shared list, a sign-up, a tracker). One HTML file, which may load libraries, map tiles and public APIs over https; its data is kept for you: await kloru.list(collection), kloru.put(collection, record), kloru.remove(collection, id), kloru.onChange(fn), kloru.me. Follow-ups change it with app_update. Returns the link.",
       parameters: Type.Object({
         title: Type.String({ description: "short, plain title, e.g. Grocery list" }),
-        html: Type.String({ description: "the whole app: one HTML file, phone-first, no outside scripts, styles, fonts or images" }),
+        html: Type.String({ description: "the whole app: one HTML file, phone-first; libraries load by https URL with a pinned version" }),
         visitors: VISITORS,
       }),
       meta: { capabilities: [], group: "files" as const },

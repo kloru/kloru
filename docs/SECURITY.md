@@ -185,12 +185,19 @@ loopback-only listener that answers `/health` and `/webhooks/inkbox` and nothing
 ### Apps Kloru makes
 
 An app is one HTML file a model wrote, so the website treats it as untrusted. It is served only
-inside a sandboxed frame (`sandbox="allow-scripts allow-forms"`, and the same as a response
-header), which gives it an opaque origin: no kloru.com cookies or storage, and no way to read
-the page around it. Its content policy is `default-src 'none'` with inline script and style
-only, so it can load nothing and send nothing. All it can do is ask the page around it, by
-`postMessage`, for its own records; that page calls the app's data routes as whoever is signed in,
-and the server scopes every call to that one app.
+inside a sandboxed frame (`allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox
+allow-downloads`, and the same as a response header), which gives it an opaque origin: no
+kloru.com cookies or storage, no way to read or move the page around it, and no identity on any
+Kloru route. Its content policy lets it use the public web over https (libraries, styles, fonts,
+images, map tiles, `fetch`, `wss`), so an app can be built from anything without a list of
+approved libraries. What it can reach of Kloru is only its own records: it asks the page around
+it, by `postMessage`; that page calls the app's data routes as whoever is signed in, and the
+server scopes every call to that one app. Data from mail, calendars or other apps gets into an
+app only when a worker puts it there, through the access review.
+
+The accepted risk: an app, or a library it loads, can send that app's own records elsewhere. So
+the skill tells the model to keep keys and private details out of apps, and a link out opens in
+a new tab with no way back into Kloru.
 
 - A family app answers only to a signed-in family member. Guests get in only when the app was
   made with `visitors: add` (they see and change only their own entries) or `all`, and their
@@ -201,7 +208,8 @@ and the server scopes every call to that one app.
   skill tells the model to render it with `textContent`.
 - **Testing.** A worker tries its app through a test link (`?test=<key>`, a random key per app)
   that opens it on scratch data, never the family's. The browser it uses (`app_test`) is a
-  throwaway: no profile, no sign-ins, no vault, and requests off the app's own site are blocked.
+  throwaway: no profile, no sign-ins, no vault. Like the frame, it loads the app's own site and the public web over https; a
+  name that is, or resolves to, a private or internal address is refused.
   Unlike `browser_run`, any family member's request may use it, since it holds nothing of anyone's.
 - Taking a page down (`/admin/desk`) takes an app down too: its link and data routes answer 410.
 

@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Desk, Vault, type Planner, type WorkerHost } from "@kloru/desk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { bounded, browserTools, findChromium, onSite, sameSite } from "../src/browser-tools.js";
+import { bounded, browserTools, findChromium, mayLoad, onSite, sameSite } from "../src/browser-tools.js";
 
 const chrome = findChromium(process.env);
 const EZRA = "+14155550190";
@@ -61,6 +61,32 @@ describe("where an app being tried out may load from", () => {
     expect(onSite("http://kloru.com/a/abc", "https://kloru.com")).toBe(false);
     expect(onSite("not a url", "https://kloru.com")).toBe(false);
   });
+
+  it("and the public web over https: a library, map tiles, an API; never this machine or its network", async () => {
+    const at: Record<string, string[]> = { "unpkg.com": ["104.16.0.1"], "tile.osm.example": ["2a04:4e42::1"], "rebind.example": ["93.184.216.34", "127.0.0.1"], "inside.example": ["fdaa:0:1::3"] };
+    const lookup = async (host: string) => at[host] ?? [];
+    const ok = (url: string) => mayLoad(url, "https://kloru.com", lookup);
+    expect(await ok("https://kloru.com/a/abc?test=k")).toBe(true);
+    expect(await ok("data:image/png;base64,AAAA")).toBe(true);
+    expect(await ok("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js")).toBe(true);
+    expect(await ok("https://tile.osm.example/13/1310/3166.png")).toBe(true);
+    expect(await ok("wss://unpkg.com/live")).toBe(true);
+    expect(await ok("http://unpkg.com/leaflet.js")).toBe(false); // the frame's policy refuses http too
+    expect(await ok("https://localhost:8787/chat")).toBe(false);
+    expect(await ok("https://127.0.0.1/")).toBe(false);
+    expect(await ok("https://169.254.169.254/latest/meta-data")).toBe(false);
+    expect(await ok("https://[fdaa:0:1::3]/")).toBe(false);
+    expect(await ok("https://[::ffff:10.0.0.1]/")).toBe(false);
+    expect(await ok("https://kloru.internal/")).toBe(false);
+    expect(await ok("https://inside.example/")).toBe(false);
+    expect(await ok("https://rebind.example/")).toBe(false); // any private address refuses the name
+    expect(await ok("https://nowhere.example/")).toBe(false);
+    expect(await ok("not a url")).toBe(false);
+  });
+
+  it("a test browser on Kloru's own site over http (a laptop) still loads its app", async () => {
+    expect(await mayLoad("http://127.0.0.1:8787/a/abc/app", "http://127.0.0.1:8787", async () => [])).toBe(true);
+  });
 });
 
 describe.skipIf(!chrome)("trying an app in a throwaway phone-sized browser (app_test, #43)", () => {
@@ -101,8 +127,8 @@ describe.skipIf(!chrome)("trying an app in a throwaway phone-sized browser (app_
       expect(asked.at(-1)).toMatch(new RegExp(`^/a/${made.value.id}\\?test=[A-Za-z0-9_-]{16,}$`));
       // Each run starts from a fresh load, and the script has no saved logins or other tabs to reach.
       expect(text(await run(`return String(await app.locator("li").count()) + typeof fillSecret + typeof context`))).toContain("0undefinedundefined");
-      // Nothing off the app's own site loads.
-      expect(text(await run(`return await page.goto("https://example.com/").then(() => "left", () => "stayed")`))).toContain("stayed");
+      // Off the app's own site only the public web loads, never this machine.
+      expect(text(await run(`return await page.goto("https://localhost:9/").then(() => "left", (e) => e.message)`))).toContain("ERR_BLOCKED_BY_CLIENT");
       expect(text(await t.app_test!.spec.execute({ id: "nope-nope-nope-nope-00", code: "return 1" }, ctx))).toMatch(/isError/);
     } finally {
       await pool.closeAll();
