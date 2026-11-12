@@ -1552,8 +1552,8 @@ export class Desk {
       this.move(issue, issue.kind === "ops" ? "executing" : "in_progress");
     }
     this.note(issue, issue.kind === "ops" ? "ops" : "engineer", text);
+    // Still waiting on the yes: they were asked when it was needed, so it isn't asked again.
     if (issue.status === "needs_confirmation" && issue.confirmation && !issue.confirmation.confirmedBy) {
-      this.deliver(issue.filedBy.call, { kind: "info", text: `Needs a yes before I do it: ${issue.confirmation.draft}`, issue: issueId, draft: issue.confirmation.id });
       this.trigger({ kind: "needs_confirmation", issue: issueId });
       return;
     }
@@ -3354,7 +3354,8 @@ export class Desk {
 
   /** Real-world changes this issue's workers made, from the ledger. */
   private writes(issueId: number): number {
-    return this.repo.ledger(issueId).filter((e) => e.ok).length;
+    // Kloru's own message about the issue (the question itself) is not the worker changing something.
+    return this.repo.ledger(issueId).filter((e) => e.ok && !(e.tool === "outbox" && (e.args as { from?: string } | undefined)?.from !== "worker")).length;
   }
 
   private move(issue: Issue, to: IssueStatus): void {

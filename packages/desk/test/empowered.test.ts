@@ -129,4 +129,32 @@ describe("a yes, when a worker judges one is needed", () => {
     await settle();
     expect(desk.repo.issue(eng.id)!.status).toBe("needs_confirmation");
   });
+
+  it("the question's own send is not the worker going ahead: nobody in a conversation, it still waits", async () => {
+    const host = new Host();
+    const sent: string[] = [];
+    const desk = new Desk({
+      root: mkdtempSync(join(tmpdir(), "empowered-")),
+      host,
+      planner: new PM(),
+      notify: async (n) => {
+        sent.push(n.text);
+        return true;
+      },
+    });
+    const { call } = desk.startCall({ callSid: "CA1", phone: EZRA, channel: "voice" });
+    const eng = desk.fileIssue(call.id, "Tell Cleo I'm late");
+    desk.assign(eng.id, "work", "Email Cleo", []);
+    desk.endCall(call.id);
+    const [ask] = workerTools(desk);
+    await ask!.spec.execute({ draft: "Email Cleo: running late" }, { conversationKey: `desk:issue:${eng.id}:engineer` } as never);
+    await settle();
+    expect(sent.filter((t) => t.includes("Email Cleo: running late"))).toHaveLength(1);
+    host.last(eng.id).finish("Waiting for your yes.");
+    await settle();
+    const after = desk.repo.issue(eng.id)!;
+    expect(after.status).toBe("needs_confirmation");
+    expect(after.confirmation).toBeDefined();
+    expect(sent.filter((t) => t.includes("Email Cleo: running late"))).toHaveLength(1);
+  });
 });

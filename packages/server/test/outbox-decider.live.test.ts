@@ -24,6 +24,10 @@ const base = (i: OutboxItem, o: Partial<Omit<FirstPassCheck, "person">> & { pers
   person: { name: "Ezra", localTime: "Tue, Nov 10, 2:00 PM", guidelines: GUIDELINES, preferences: "", notes: "", inConversation: undefined, turns: [], running: [], channels: ["imessage", "email"], ...o.person },
 });
 
+// Nov 12: an inbox automation on every new email; most of its reports were dropped.
+const TRIAGE = "Inbox triage (very important only): Review each new message in Ezra's Gmail. Trash promotions, mark the rest read unless it needs him. Text him only for very important mail. Never text before 7 AM or after 7 PM.";
+const TRIAGE_DROPS = ["BritBox", "Fever", "Lightscape", "LinkedIn", "Swing Left", "Lumos"].map((who, n) => `2${Math.floor(n / 3)}:${10 + n * 7} UTC dropped, never sent (default to +14155550190): I've triaged your Gmail. The promotional ${who} email has been moved to Trash, and no alert was sent.`);
+
 // [name, check, the choices Ezra would accept]
 const CASES: Array<[string, FirstPassCheck, FirstPassChoice[]]> = [
   [
@@ -54,6 +58,23 @@ const CASES: Array<[string, FirstPassCheck, FirstPassChoice[]]> = [
   [
     "a question the booking is stopped on, mid-afternoon",
     base(item({ why: "question", text: "Morning or afternoon for Nora's dentist visit?", from: { agent: "pm", issue: 7 } }), { request: "Book Nora's dentist visit" }),
+    ["send"],
+  ],
+  [
+    "Nov 12: the same question in other words, 23 seconds after the first one went",
+    base(item({ why: "question", text: "Before I do this I need your yes: This email from Sora is about December dinner reservations, which doesn't seem promotional. Do you want me to keep it instead of trashing it?", from: { agent: "pm", issue: 7 } }), {
+      request: TRIAGE,
+      recent: [...TRIAGE_DROPS, "21:59 UTC sent (imessage to +14155550190): Before I do this I need your yes: Sora's email is about your December dinner reservations; do you want me to keep it instead of trashing it?"],
+      person: { running: [TRIAGE] },
+    }),
+    ["drop", "organizer"],
+  ],
+  [
+    "a different question on the same work, a minute after the first one went",
+    base(item({ why: "question", text: "Before I do this I need your yes: unsubscribe you from the Sora mailing list?", from: { agent: "pm", issue: 7 } }), {
+      request: "Inbox triage: trash promotions, mark the rest read, text me only for very important mail",
+      recent: ["21:59 UTC sent (imessage to +14155550190): Before I do this I need your yes: Sora's email is about your December dinner reservations; do you want me to keep it instead of trashing it?"],
+    }),
     ["send"],
   ],
   [
