@@ -112,11 +112,39 @@ export interface Takeover {
   touched: boolean;
 }
 
+/**
+ * Where typing goes on the tab as it shows now: the fields of the page and of the frames in it. A
+ * phone raises its keyboard only inside a tap, so the takeover page must know before the tap lands.
+ */
+async function typingFields(page: Page): Promise<Box[]> {
+  // Runs in the tab, so it is text here: this package is not compiled against the DOM.
+  const inFrame = `[...document.querySelectorAll("input, textarea, select, [contenteditable]:not([contenteditable=false])")]
+    .filter((el) => el.tagName !== "INPUT" || !["checkbox", "radio", "button", "submit", "reset", "file", "range", "color", "image", "hidden"].includes(el.type))
+    .map((el) => el.getBoundingClientRect())
+    .filter((r) => r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight)
+    .slice(0, 40)
+    .map((r) => ({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }))`;
+  const all = await Promise.all(
+    page.frames().slice(0, 12).map(async (f) => {
+      const at = f === page.mainFrame() ? { x: 0, y: 0 } : await (await f.frameElement()).boundingBox();
+      return at ? ((await f.evaluate(inFrame)) as Box[]).map((b) => ({ ...b, x: b.x + Math.round(at.x), y: b.y + Math.round(at.y) })) : [];
+    }).map((p) => p.catch(() => [] as Box[])),
+  );
+  return all.flat();
+}
+
 /** What the takeover page shows and sends: a frame of the tab, and a tap, typing, a key or a scroll. */
-export type TakeoverInput = { kind: "click"; x: number; y: number } | { kind: "type"; text: string } | { kind: "key"; key: string } | { kind: "scroll"; dy: number };
+export type TakeoverInput =
+  | { kind: "click"; x: number; y: number }
+  | { kind: "drag"; x: number; y: number; toX: number; toY: number }
+  | { kind: "type"; text: string }
+  | { kind: "key"; key: string }
+  | { kind: "scroll"; dy: number; dx?: number; x?: number; y?: number }
+  | { kind: "view"; width: number; height: number };
+type Box = { x: number; y: number; w: number; h: number };
 const TAKEOVER_MS = 10 * 60_000;
 const PHONE_VIEW = { width: 430, height: 860 };
-const KEYS = new Set(["Enter", "Backspace", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
+const KEYS = new Set(["Enter", "Backspace", "Delete", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
 
 export class BrowserPool {
   private readonly contexts = new Map<string, { ctx: BrowserContext; cdp: string; close: () => Promise<void>; timer?: ReturnType<typeof setTimeout> }>();
@@ -239,24 +267,44 @@ export class BrowserPool {
     return t;
   }
 
-  async takeoverFrame(token: string, phone: string): Promise<{ image: string; width: number; height: number; url: string; title: string; reason: string } | undefined> {
+  async takeoverFrame(token: string, phone: string): Promise<{ image: string; width: number; height: number; url: string; title: string; reason: string; fields: Box[] } | undefined> {
     const t = this.takeover(token, phone);
     const page = t ? this.existing(t.issue) : undefined;
     if (!t || !page) return undefined;
     const image = (await page.screenshot({ type: "jpeg", quality: 60, timeout: 10_000 })).toString("base64");
     const size = page.viewportSize() ?? PHONE_VIEW;
-    return { image, width: size.width, height: size.height, url: page.url(), title: await page.title().catch(() => ""), reason: t.reason };
+    return { image, width: size.width, height: size.height, url: page.url(), title: await page.title().catch(() => ""), reason: t.reason, fields: await typingFields(page) };
   }
 
   async takeoverInput(token: string, phone: string, e: TakeoverInput): Promise<boolean> {
     const t = this.takeover(token, phone);
     const page = t ? this.existing(t.issue) : undefined;
     if (!t || !page) return false;
+    if (e.kind === "view") {
+      // The tab takes the size of the screen it is shown on, so the page is laid out for that screen
+      // and a tap lands where it looks. Sizing it is not yet touching it.
+      const fit = (v: unknown, min: number, max: number) => Math.round(Math.max(min, Math.min(max, Number(v) || min)));
+      await page.setViewportSize({ width: fit(e.width, 320, 1280), height: fit(e.height, 400, 1400) }).catch(() => undefined);
+      return true;
+    }
     t.touched = true;
     if (e.kind === "click") await page.mouse.click(Number(e.x), Number(e.y));
     else if (e.kind === "type") await page.keyboard.type(String(e.text).slice(0, 500));
     else if (e.kind === "key" && KEYS.has(e.key)) await page.keyboard.press(e.key);
-    else if (e.kind === "scroll") await page.mouse.wheel(0, Math.max(-2000, Math.min(2000, Number(e.dy) || 0)));
+    else if (e.kind === "drag") {
+      await page.mouse.move(Number(e.x), Number(e.y));
+      await page.mouse.down();
+      await page.mouse.move(Number(e.toX), Number(e.toY), { steps: 8 });
+      await page.mouse.up();
+    } else if (e.kind === "scroll") {
+      // A wheel turns whatever is under the pointer, and a tab nobody has tapped has no pointer:
+      // on Steel the scroll then did nothing (CARTO's key form, 2026-11-12). Point first.
+      const size = page.viewportSize() ?? PHONE_VIEW;
+      const within = (v: unknown, max: number) => (Number.isFinite(Number(v)) && v !== undefined && v !== null ? Math.max(0, Math.min(max - 1, Number(v))) : max / 2);
+      const delta = (v: unknown) => Math.max(-2000, Math.min(2000, Number(v) || 0));
+      await page.mouse.move(within(e.x, size.width), within(e.y, size.height));
+      await page.mouse.wheel(delta(e.dx), delta(e.dy));
+    }
     return true;
   }
 

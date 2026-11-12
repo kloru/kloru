@@ -541,15 +541,17 @@ export function vaultPage(entries: VaultView[], csrf: string): string {
     form("api_key", "Add an API key", field("service", "Service", "required") + field("key", "Key", 'required type="password" autocomplete="off"'));
 }
 
-/** Kloru's browser tab, live, for the person to finish one step (a check, a code) by hand. */
+/**
+ * Kloru's browser tab, live, for the person to finish one step (a check, a code) by hand. The tab is
+ * the page: they tap, swipe, scroll and type on it as on any site, with nothing beside it but Done
+ * (2026-11-12: scroll buttons under the picture were missed, and a CAPTCHA below the fold with them).
+ */
 export function takeoverPage(token: string, csrf: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">` +
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,interactive-widget=resizes-content">` +
     `<title>Finish this step · Kloru</title><link rel="stylesheet" href="/static/takeover.css"><script src="/static/takeover.js" defer></script></head>` +
     `<body data-token="${esc(token)}" data-csrf="${esc(csrf)}"><header><p id="reason">Loading Kloru's browser…</p><button id="done" type="button">Done</button></header>` +
-    `<main><img id="screen" alt="Kloru's browser"></main>` +
-    `<footer><form id="typing"><input id="text" autocomplete="off" autocapitalize="off" placeholder="Type here, then Send"><button>Send</button></form>` +
-    `<div class="keys"><button data-key="Backspace" type="button">⌫</button><button data-key="Tab" type="button">Tab</button><button data-key="Enter" type="button">Enter</button><button data-scroll="-500" type="button">▲</button><button data-scroll="500" type="button">▼</button></div>` +
-    `<p id="status">Tap the page as you would on the site. Kloru carries on when you're done.</p></footer></body></html>`;
+    `<main><img id="screen" alt="Kloru's browser" draggable="false"><textarea id="keys" aria-label="Type into the page" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>` +
+    `<p id="status" hidden></p></main></body></html>`;
 }
 
 /** Your own policy.md: what others in the family may and may not do with your things. Only you change it. */

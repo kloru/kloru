@@ -233,4 +233,71 @@ describe.skipIf(!chrome)("browser tools on a real Chromium", () => {
       await pool.closeAll();
     }
   }, 60_000);
+
+  it("a takeover scrolls what they point at with no tap first, drags, and takes the keys of a keyboard (2026-11-12)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "browser-"));
+    const desk = new Desk({ root, host: new Host(), planner: { handle: async () => {} } as Planner, ownerPhone: EZRA });
+    const { tools, pool } = browserTools({ desk, profilesDir: join(root, "browser"), executablePath: chrome!, log: () => {} });
+    const t = Object.fromEntries(tools.map((x) => [x.spec.name, x]));
+    const { call } = desk.startCall({ callSid: "CA3", phone: EZRA, channel: "voice" });
+    const issue = desk.fileIssue(call.id, "Get a key");
+    const ctx = { conversationKey: `desk:issue:${issue.id}:engineer` } as never;
+    const run = (code: string) => t.browser_run!.spec.execute({ code }, ctx);
+    // A long page with a form that scrolls on its own lower down, as CARTO's key form did.
+    const page =
+      `<body style="margin:0"><div id="inner" style="position:fixed;top:600px;left:0;width:430px;height:200px;overflow:auto"><div style="height:2000px"></div></div><div style="height:3000px"></div>` +
+      `<script>window.seen=[];for(const n of ["mousedown","mouseup","keydown"])addEventListener(n,(e)=>seen.push(n==="keydown"?e.key:n+" "+e.clientX+","+e.clientY))</script></body>`;
+    const state = async () => JSON.parse(String((await run(`await page.waitForTimeout(400); return JSON.stringify(await page.evaluate(() => ({ page: scrollY, inner: document.getElementById("inner").scrollTop, seen })))`)).content[0]?.text).split("\n\n(page:")[0]!) as { page: number; inner: number; seen: string[] };
+    try {
+      await run(`await page.setContent(${JSON.stringify(page)})`);
+      const told: string[] = [];
+      const needs = desk.needsPerson.bind(desk);
+      desk.needsPerson = (id, msg) => (told.push(msg), needs(id, msg));
+      const waiting = t.browser_takeover!.spec.execute({ reason: "Tick the box" }, ctx);
+      await new Promise((r) => setTimeout(r, 300));
+      const link = /\/b\/([A-Za-z0-9_-]+)/.exec(told[0] ?? "")?.[1] ?? "";
+      expect(await pool.takeoverInput(link, EZRA, { kind: "scroll", dy: 300 })).toBe(true);
+      expect(await state()).toMatchObject({ page: 300, inner: 0 });
+      await pool.takeoverInput(link, EZRA, { kind: "scroll", dy: 200, x: 200, y: 700 });
+      expect(await state()).toMatchObject({ page: 300, inner: 200 });
+      await pool.takeoverInput(link, EZRA, { kind: "drag", x: 50, y: 100, toX: 250, toY: 120 });
+      await pool.takeoverInput(link, EZRA, { kind: "key", key: "Delete" });
+      expect((await state()).seen).toEqual(["mousedown 50,100", "mouseup 250,120", "Delete"]);
+      pool.finishTakeover(link, EZRA);
+      await waiting;
+    } finally {
+      await pool.closeAll();
+    }
+  }, 60_000);
+
+  it("a takeover's tab takes the size of the screen it is shown on, and its frame says where typing goes (2026-11-12)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "browser-"));
+    const desk = new Desk({ root, host: new Host(), planner: { handle: async () => {} } as Planner, ownerPhone: EZRA });
+    const { tools, pool } = browserTools({ desk, profilesDir: join(root, "browser"), executablePath: chrome!, log: () => {} });
+    const t = Object.fromEntries(tools.map((x) => [x.spec.name, x]));
+    const { call } = desk.startCall({ callSid: "CA4", phone: EZRA, channel: "voice" });
+    const issue = desk.fileIssue(call.id, "Get a key");
+    const ctx = { conversationKey: `desk:issue:${issue.id}:engineer` } as never;
+    try {
+      await t.browser_run!.spec.execute({ code: `await page.setContent("<p>hi</p>")` }, ctx);
+      const told: string[] = [];
+      const needs = desk.needsPerson.bind(desk);
+      desk.needsPerson = (id, msg) => (told.push(msg), needs(id, msg));
+      const waiting = t.browser_takeover!.spec.execute({ reason: "Tick the box" }, ctx);
+      await new Promise((r) => setTimeout(r, 300));
+      const link = /\/b\/([A-Za-z0-9_-]+)/.exec(told[0] ?? "")?.[1] ?? "";
+      await pool.takeoverInput(link, EZRA, { kind: "view", width: 390, height: 664 });
+      expect(await pool.takeoverFrame(link, EZRA)).toMatchObject({ width: 390, height: 664 });
+      await pool.takeoverInput(link, EZRA, { kind: "view", width: 9000, height: 3 });
+      expect(await pool.takeoverFrame(link, EZRA)).toMatchObject({ width: 1280, height: 400 });
+      // Where typing goes, so a tap on a field can raise the phone's keyboard: the page's own
+      // field and one inside a frame, not a button.
+      await t.browser_run!.spec.execute({ code: `await page.setContent(${JSON.stringify(`<body style="margin:0"><input style="position:absolute;left:20px;top:40px;width:200px;height:30px;box-sizing:border-box"><button style="position:absolute;left:20px;top:100px">Go</button><iframe style="position:absolute;left:50px;top:200px;width:300px;height:100px;border:0" srcdoc='<body style="margin:0"><textarea style="position:absolute;left:10px;top:10px;width:100px;height:40px;box-sizing:border-box"></textarea>'></iframe></body>`)}); await page.waitForTimeout(300)` }, ctx);
+      expect((await pool.takeoverFrame(link, EZRA))?.fields).toEqual([{ x: 20, y: 40, w: 200, h: 30 }, { x: 60, y: 210, w: 100, h: 40 }]);
+      pool.finishTakeover(link, EZRA);
+      await waiting;
+    } finally {
+      await pool.closeAll();
+    }
+  }, 60_000);
 });

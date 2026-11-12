@@ -1268,6 +1268,10 @@ describe("a takeover link (2026-11-03)", () => {
     const page = await (await c.get(`/b/${TOKEN}`, cookie)).text();
     expect(page).toContain(`data-token="${TOKEN}"`);
     expect(page).toContain("/static/takeover.js");
+    // The tab is used as a page: no scroll buttons or typing box beside it (2026-11-12).
+    expect(page).toContain('id="keys"');
+    expect(page).not.toContain("data-scroll");
+    expect(page).not.toContain('id="typing"');
     expect(await (await c.get(`/b/${TOKEN}/frame`, cookie)).json()).toMatchObject({ reason: "Tick the box", width: 430 });
     const tap = (key: string) => fetch(`${c.base}/b/${TOKEN}/input`, { method: "POST", headers: { cookie, "x-csrf": key, "content-type": "application/json" }, body: JSON.stringify({ kind: "click", x: 10, y: 20, phone: "+14155550190" }) });
     expect((await tap("nope")).status).toBe(403);
