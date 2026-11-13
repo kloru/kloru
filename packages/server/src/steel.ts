@@ -18,6 +18,8 @@ const API = "https://api.steel.dev/v1";
 const CONNECT_HOST = "connect.steel.dev";
 /** Steel's Launch plan ends a session at 15 minutes; a new one picks up the profile. */
 export const STEEL_SESSION_MS = 15 * 60_000;
+/** A profile takes a few seconds to load before the browser answers; two seconds apart, this is half a minute. */
+const CONNECT_TRIES = 15;
 
 export interface SteelBrowser {
   ctx: BrowserContext;
@@ -39,8 +41,12 @@ async function api(key: string, path: string, body?: unknown, f: Fetch = fetch):
  * A Steel session for one person, with their profile (dir/steel.json keeps its id). A profile still
  * saving from the last session answers 409 for a few seconds; without a proxy deposit, it runs
  * without the residential proxy and says so.
+ *
+ * 2026-11-12: a session with a profile is "live" a few seconds before its browser can be reached
+ * ("Target browser not available"), so connecting is tried until it is there; a session whose
+ * browser never comes is released, not left to run to its time limit.
  */
-export async function openSteel(o: { apiKey: string; dir: string; log: (m: string) => void; fetchImpl?: Fetch; throwaway?: { width: number; height: number } }): Promise<SteelBrowser> {
+export async function openSteel(o: { apiKey: string; dir: string; log: (m: string) => void; fetchImpl?: Fetch; throwaway?: { width: number; height: number }; connect?: (url: string) => Promise<Browser>; retryMs?: number }): Promise<SteelBrowser> {
   const file = join(o.dir, "steel.json");
   // A throwaway session (trying out an app) keeps no profile and needs no residential proxy.
   const saved = !o.throwaway && existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as { profileId?: string }) : {};
@@ -61,7 +67,18 @@ export async function openSteel(o: { apiKey: string; dir: string; log: (m: strin
   if (!created || created.status >= 300) throw new Error(`Steel couldn't start a browser (${created?.status})`);
   const sessionId = String(created.json.id);
   if (!o.throwaway && typeof created.json.profileId === "string") writeFileSync(file, JSON.stringify({ profileId: created.json.profileId }), { mode: 0o600 });
-  const browser: Browser = await chromium.connectOverCDP(`wss://${CONNECT_HOST}?apiKey=${encodeURIComponent(o.apiKey)}&sessionId=${encodeURIComponent(sessionId)}`);
+  const connect = o.connect ?? ((url: string) => chromium.connectOverCDP(url));
+  let browser: Browser | undefined;
+  let why = "";
+  for (let i = 0; i < CONNECT_TRIES && !browser; i++) {
+    if (i) await new Promise((r) => setTimeout(r, o.retryMs ?? 2_000));
+    browser = await connect(`wss://${CONNECT_HOST}?apiKey=${encodeURIComponent(o.apiKey)}&sessionId=${encodeURIComponent(sessionId)}`).catch((e: unknown) => ((why = String((e as Error).message ?? e).split(o.apiKey).join("…")), undefined));
+  }
+  if (!browser) {
+    await api(o.apiKey, `/sessions/${sessionId}/release`, undefined, o.fetchImpl).catch(() => undefined);
+    o.log(`browser: Steel session ${sessionId} never had a browser to reach: ${why.slice(0, 200)}`);
+    throw new Error("Steel's browser didn't come up; try again in a minute");
+  }
   const ctx = browser.contexts()[0] ?? (await browser.newContext());
   const relay = await relayTo(o.apiKey, sessionId);
   return {
@@ -70,7 +87,7 @@ export async function openSteel(o: { apiKey: string; dir: string; log: (m: strin
     sessionId,
     close: async () => {
       relay.close();
-      await browser.close().catch(() => undefined);
+      await browser!.close().catch(() => undefined);
       // Releasing saves the profile; a session left running bills until its timeout.
       await api(o.apiKey, `/sessions/${sessionId}/release`, undefined, o.fetchImpl).catch(() => undefined);
     },
