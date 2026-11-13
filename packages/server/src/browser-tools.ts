@@ -110,6 +110,10 @@ export interface Takeover {
   expires: number;
   done: boolean;
   touched: boolean;
+  /** They are pressing on the tab now. */
+  pressed?: boolean;
+  /** How many of each thing they did reached the tab, for the log: "nothing happened" has two causes. */
+  inputs: Record<string, number>;
 }
 
 /**
@@ -133,9 +137,14 @@ async function typingFields(page: Page): Promise<Box[]> {
   return all.flat();
 }
 
-/** What the takeover page shows and sends: a frame of the tab, and a tap, typing, a key or a scroll. */
+/**
+ * What the takeover page shows and sends: a frame of the tab, and a tap, typing, a key or a scroll.
+ * A press that stays down goes as it happens (down, move, up), so the tab is held for as long as
+ * their finger is: Zillow's "press and hold" check got taps and stayed put (2026-11-12).
+ */
 export type TakeoverInput =
   | { kind: "click"; x: number; y: number }
+  | { kind: "down" | "move" | "up"; x: number; y: number }
   | { kind: "drag"; x: number; y: number; toX: number; toY: number }
   | { kind: "type"; text: string }
   | { kind: "key"; key: string }
@@ -253,7 +262,7 @@ export class BrowserPool {
   /** A link for the person who asked to finish a step by hand; the tab turns phone-sized meanwhile. */
   async startTakeover(issue: Issue, reason: string): Promise<Takeover> {
     for (const [k, t] of this.takeovers) if (t.issue.id === issue.id) this.takeovers.delete(k);
-    const t: Takeover = { token: randomBytes(24).toString("base64url"), issue, reason, expires: Date.now() + TAKEOVER_MS, done: false, touched: false };
+    const t: Takeover = { token: randomBytes(24).toString("base64url"), issue, reason, expires: Date.now() + TAKEOVER_MS, done: false, touched: false, inputs: {} };
     this.takeovers.set(t.token, t);
     await this.existing(issue)?.setViewportSize(PHONE_VIEW).catch(() => undefined);
     return t;
@@ -288,10 +297,17 @@ export class BrowserPool {
       return true;
     }
     t.touched = true;
+    t.inputs[e.kind] = (t.inputs[e.kind] ?? 0) + 1;
     if (e.kind === "click") await page.mouse.click(Number(e.x), Number(e.y));
     else if (e.kind === "type") await page.keyboard.type(String(e.text).slice(0, 500));
     else if (e.kind === "key" && KEYS.has(e.key)) await page.keyboard.press(e.key);
-    else if (e.kind === "drag") {
+    else if (e.kind === "down" || e.kind === "move" || e.kind === "up") {
+      if (e.kind !== "down" && !t.pressed) return true;
+      await page.mouse.move(Number(e.x), Number(e.y), e.kind === "move" ? { steps: 3 } : {});
+      if (e.kind === "down") await page.mouse.down();
+      if (e.kind === "up") await page.mouse.up();
+      t.pressed = e.kind !== "up";
+    } else if (e.kind === "drag") {
       await page.mouse.move(Number(e.x), Number(e.y));
       await page.mouse.down();
       await page.mouse.move(Number(e.toX), Number(e.toY), { steps: 8 });
@@ -326,6 +342,8 @@ export class BrowserPool {
       }
     }
     this.takeovers.delete(t.token);
+    this.o.log(`browser: takeover for #${t.issue.id} ${t.done ? "done" : "expired"}; reached the tab: ${Object.entries(t.inputs).map(([k, n]) => `${k} ${n}`).join(", ") || "nothing"}`);
+    if (t.pressed) await page.mouse.up().catch(() => undefined);
     await page.setViewportSize({ width: 1280, height: 900 }).catch(() => undefined);
     return t.done ? "done" : "expired";
   }

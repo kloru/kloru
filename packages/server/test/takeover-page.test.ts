@@ -20,7 +20,10 @@ const chrome = findChromium(process.env);
 const EZRA = "+14155550190";
 const STATIC = join(import.meta.dirname, "../../web/static");
 // A long page with a field at the top, as a sign-up form is.
-const SITE = `<body style="margin:0"><input id="name" style="position:absolute;left:20px;top:40px;width:200px;height:30px"><div style="height:3000px"></div></body>`;
+const SITE = `<body style="margin:0"><input id="name" style="position:absolute;left:20px;top:40px;width:200px;height:30px"><div style="height:3000px"></div>` +
+  // And a button to press and hold, as some "are you human" checks are.
+  `<button id="hold" style="position:fixed;left:20px;top:150px;width:200px;height:60px">Press and hold</button>` +
+  `<script>window.held={down:false,ms:0,clicks:0};{let t=0;const b=document.getElementById("hold");b.addEventListener("mousedown",()=>{held.down=true;t=performance.now()});addEventListener("mouseup",()=>{if(held.down)held.ms=performance.now()-t;held.down=false});b.addEventListener("click",()=>held.clicks++)}</script></body>`;
 
 class Host implements WorkerHost {
   run(): Promise<string> {
@@ -57,7 +60,7 @@ describe.skipIf(!chrome)("the takeover page, used as a page (2026-11-12)", () =>
     const token = /\/b\/([A-Za-z0-9_-]+)/.exec(told[0] ?? "")?.[1] ?? "";
     server = http.createServer(async (req, res) => {
       const json = (status: number, body: unknown) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
-      const path = req.url ?? "";
+      const path = (req.url ?? "").split("?")[0]!;
       if (path.startsWith("/static/")) return res.writeHead(200, { "content-type": path.endsWith(".css") ? "text/css" : "text/javascript" }).end(readFileSync(join(STATIC, path.slice(8))));
       if (path === `/b/${token}`) return res.writeHead(200, { "content-type": "text/html" }).end(takeoverPage(token, "key"));
       if (path === `/b/${token}/frame`) {
@@ -119,6 +122,31 @@ describe.skipIf(!chrome)("the takeover page, used as a page (2026-11-12)", () =>
     // A tap anywhere else puts the keyboard away.
     await page.touchscreen.tap(box.x + 300, box.y + 300);
     expect(await page.evaluate(() => document.activeElement?.id)).not.toBe("keys");
+    await phone.close();
+  }, 60_000);
+
+  it("a press that is held is held on the tab for as long as the finger is down (2026-11-12)", async () => {
+    const held = async (): Promise<{ down: boolean; ms: number; clicks: number }> =>
+      JSON.parse(String((await t.browser_run!.spec.execute({ code: `return JSON.stringify(await page.evaluate(() => held))` }, ctx)).content[0]?.text).split("\n\n(page:")[0]!);
+    const phone = await person.newContext({ viewport: { width: 390, height: 700 }, hasTouch: true, isMobile: true });
+    const page = await phone.newPage();
+    await page.goto(link);
+    await page.waitForFunction(() => (document.getElementById("screen") as HTMLImageElement).naturalWidth > 0);
+    await expect.poll(async () => (await tab()).width, { timeout: 10_000 }).toBe(390);
+    const box = (await page.locator("#screen").boundingBox())!;
+    const cdp = await phone.newCDPSession(page);
+    const touch = (type: string, on = true) => cdp.send("Input.dispatchTouchEvent", { type: type as "touchStart", touchPoints: on ? [{ x: box.x + 100, y: box.y + 180 }] : [] });
+    await touch("touchStart");
+    // Down on the tab while the finger is still down here.
+    await expect.poll(async () => (await held()).down, { timeout: 5_000 }).toBe(true);
+    await page.waitForTimeout(1500);
+    expect((await held()).down).toBe(true);
+    await touch("touchEnd", false);
+    await expect.poll(async () => (await held()).down, { timeout: 5_000 }).toBe(false);
+    expect((await held()).ms).toBeGreaterThan(1200);
+    // A quick tap is still a tap.
+    await page.touchscreen.tap(box.x + 100, box.y + 180);
+    await expect.poll(async () => (await held()).clicks, { timeout: 5_000 }).toBe(2);
     await phone.close();
   }, 60_000);
 

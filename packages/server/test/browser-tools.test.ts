@@ -263,6 +263,12 @@ describe.skipIf(!chrome)("browser tools on a real Chromium", () => {
       await pool.takeoverInput(link, EZRA, { kind: "drag", x: 50, y: 100, toX: 250, toY: 120 });
       await pool.takeoverInput(link, EZRA, { kind: "key", key: "Delete" });
       expect((await state()).seen).toEqual(["mousedown 50,100", "mouseup 250,120", "Delete"]);
+      // A press that is held: down when they press, up when they let go, and not before.
+      await pool.takeoverInput(link, EZRA, { kind: "down", x: 60, y: 300 });
+      expect((await state()).seen.slice(3)).toEqual(["mousedown 60,300"]);
+      await pool.takeoverInput(link, EZRA, { kind: "move", x: 90, y: 310 });
+      await pool.takeoverInput(link, EZRA, { kind: "up", x: 90, y: 310 });
+      expect((await state()).seen.slice(3)).toEqual(["mousedown 60,300", "mouseup 90,310"]);
       pool.finishTakeover(link, EZRA);
       await waiting;
     } finally {

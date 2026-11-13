@@ -57,7 +57,7 @@
     const last = queue[queue.length - 1];
     if (last && last.kind === "type" && input.kind === "type" && last.text.length < 400) last.text += input.text;
     else if (last && last.kind === "scroll" && input.kind === "scroll") Object.assign(last, { dx: last.dx + input.dx, dy: last.dy + input.dy });
-    else if (last && last.kind === "view" && input.kind === "view") Object.assign(last, input);
+    else if (last && (last.kind === "view" || last.kind === "move") && input.kind === last.kind) Object.assign(last, input);
     else queue.push(input);
     if (sending) return;
     sending = true;
@@ -93,19 +93,37 @@
   const typesAt = (p) => fields.some((f) => p.x >= f.x && p.x <= f.x + f.w && p.y >= f.y && p.y <= f.y + f.h);
 
   // Taps, swipes and drags. A finger that moves scrolls; a mouse that moves with the button down drags.
+  // A press that stays where it is is held on the tab from then until it lifts, and moves with it.
+  const HOLD_MS = 250;
   let press;
+  const lift = (to) => {
+    clearTimeout(press.holding);
+    clearInterval(press.showing);
+    if (press.held) send({ kind: "up", x: to.x, y: to.y });
+  };
   img.addEventListener("pointerdown", (e) => {
     if (e.button) return;
     e.preventDefault();
     img.setPointerCapture(e.pointerId);
-    press = { id: e.pointerId, start: at(e), x: e.clientX, y: e.clientY, moved: false, touch: e.pointerType !== "mouse", speed: 0, when: e.timeStamp };
+    const p = (press = { id: e.pointerId, start: at(e), x: e.clientX, y: e.clientY, moved: false, held: false, touch: e.pointerType !== "mouse", speed: 0, when: e.timeStamp });
+    p.holding = setTimeout(() => {
+      p.held = true;
+      send({ kind: "down", x: p.start.x, y: p.start.y });
+      // What the tab does while it is held shows as it happens.
+      p.showing = setInterval(stir, 1000);
+    }, HOLD_MS);
   });
   img.addEventListener("pointermove", (e) => {
     if (!press || e.pointerId !== press.id) return;
+    if (press.held) {
+      const to = at(e);
+      return void send({ kind: "move", x: to.x, y: to.y });
+    }
     const dx = e.clientX - press.x;
     const dy = e.clientY - press.y;
     if (!press.moved && Math.hypot(dx, dy) < 8) return;
     press.moved = true;
+    clearTimeout(press.holding);
     if (!press.touch) return;
     const { scale } = at(e);
     press.speed = dy / Math.max(1, e.timeStamp - press.when);
@@ -116,8 +134,11 @@
     if (!press || e.pointerId !== press.id) return;
     const p = press;
     const to = at(e);
+    lift(to);
     press = undefined;
-    if (!p.moved) {
+    if (p.held) {
+      if (p.touch && typesAt(to)) keys.focus({ preventScroll: true });
+    } else if (!p.moved) {
       // A phone shows its keyboard only when asked inside the tap, so ask here when the tap is on a field.
       if (p.touch && typesAt(p.start)) keys.focus({ preventScroll: true });
       else if (p.touch) keys.blur();
@@ -126,7 +147,12 @@
     // A flick carries on a little after the finger lifts.
     else if (Math.abs(p.speed) > 0.4 && e.timeStamp - p.when < 80) send({ kind: "scroll", dx: 0, dy: -p.speed * 350 * to.scale, x: p.start.x, y: p.start.y });
   });
-  img.addEventListener("pointercancel", () => (press = undefined));
+  img.addEventListener("pointercancel", () => {
+    if (press) lift(press.start);
+    press = undefined;
+  });
+  // A phone that lifts a picture to drag it takes the press away.
+  img.addEventListener("dragstart", (e) => e.preventDefault());
   img.addEventListener("contextmenu", (e) => e.preventDefault());
   main.addEventListener(
     "wheel",

@@ -541,6 +541,8 @@ export function vaultPage(entries: VaultView[], csrf: string): string {
     form("api_key", "Add an API key", field("service", "Service", "required") + field("key", "Key", 'required type="password" autocomplete="off"'));
 }
 
+/** Changed with the page's script or styles: a phone keeps them for an hour, and would use the old ones on the new page. */
+const TAKEOVER_V = "2026-11-12b";
 /**
  * Kloru's browser tab, live, for the person to finish one step (a check, a code) by hand. The tab is
  * the page: they tap, swipe, scroll and type on it as on any site, with nothing beside it but Done
@@ -548,7 +550,7 @@ export function vaultPage(entries: VaultView[], csrf: string): string {
  */
 export function takeoverPage(token: string, csrf: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,interactive-widget=resizes-content">` +
-    `<title>Finish this step · Kloru</title><link rel="stylesheet" href="/static/takeover.css"><script src="/static/takeover.js" defer></script></head>` +
+    `<title>Finish this step · Kloru</title><link rel="stylesheet" href="/static/takeover.css?v=${TAKEOVER_V}"><script src="/static/takeover.js?v=${TAKEOVER_V}" defer></script></head>` +
     `<body data-token="${esc(token)}" data-csrf="${esc(csrf)}"><header><p id="reason">Loading Kloru's browser…</p><button id="done" type="button">Done</button></header>` +
     `<main><img id="screen" alt="Kloru's browser" draggable="false"><textarea id="keys" aria-label="Type into the page" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>` +
     `<p id="status" hidden></p></main></body></html>`;
