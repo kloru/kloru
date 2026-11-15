@@ -181,6 +181,10 @@ section.more ul.apps .muted { font-size: 0.92em; }
 .m-axis { fill: var(--soft); font: 10px var(--sans); }
 .m-models { fill: #8a5a3c; } .m-phone { fill: #3d6b4f; } .m-browser { fill: #4a6a8f; } .m-speech { fill: #b08a3e; } .m-hosting { fill: #9d968e; }
 @media (prefers-color-scheme: dark) { .m-models { fill: #c99a7a; } .m-phone { fill: #8fc2a1; } .m-browser { fill: #8fb0d8; } .m-speech { fill: #d9b56a; } .m-hosting { fill: #6f6a64; } }
+.t-chart { max-width: 100%; }
+.t-agent { fill: #8a5a3c; } .t-model { fill: #4a6a8f; } .t-tool { fill: #3d6b4f; } .t-decision { fill: #b08a3e; } .t-plumbing { fill: #9d968e; }
+.t-failed { fill: var(--error); }
+@media (prefers-color-scheme: dark) { .t-agent { fill: #c99a7a; } .t-model { fill: #8fb0d8; } .t-tool { fill: #8fc2a1; } .t-decision { fill: #d9b56a; } .t-plumbing { fill: #6f6a64; } }
 .m-legend { display: flex; flex-wrap: wrap; gap: 14px; font: 0.85rem var(--sans); color: var(--soft); margin: 0 0 8px; }
 .m-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .m-legend svg { width: 10px; height: 10px; }

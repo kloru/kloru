@@ -68,6 +68,7 @@ runs on that machine.
 |---|---|
 | `/data/instinct/repo` | the desk's records: calls and threads, requests, the ledger (a hash chain), pages, media |
 | `/data/instinct/repo/outbox` | one file per person: every message for them and where it stands |
+| `/data/instinct/repo/traces` | one file per request: each step's start, end, model and outcome (no words); drawn under Timing on the request's page, and sent to Langfuse when its keys are set |
 | `/data/instinct/repo/memory` | household memory: a git repo of markdown, `household/` plus one folder per person (`policy.md`, `messages.md`, `private/`) |
 | `/data/instinct/store` | mail and calendar synced from Composio, with full-text search |
 | `/data/instinct/secrets/vault.json` | the vault: AES-256-GCM, keyed by `KLORU_VAULT_KEY` |

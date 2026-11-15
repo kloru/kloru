@@ -27,6 +27,7 @@ import { clip, type Memory } from "./memory.js";
 import { PersonOutbox, localTime, whenIn, type FirstPassCheck, type FirstPassChoice, type Organizer, type OutboxPerson } from "./outbox.js";
 import type { OutboxItem, OutboxThread, OutboxWhy } from "./outbox-store.js";
 import { Repo } from "./repo.js";
+import { Traces, type Timed, type TraceSpan } from "./trace.js";
 import { REVIEW_ROUNDS, openReview, passReview, reviewOf, sendBackReview, waiveReview } from "./reviews.js";
 import { err, ok, type Result } from "./result.js";
 import { describeEntry, type Vault } from "./vault.js";
@@ -466,6 +467,7 @@ export function replaceSection(markdown: string, heading: string, body: string):
 
 export class Desk {
   readonly repo: Repo;
+  private readonly traces: Traces;
   private readonly host: WorkerHost;
   private readonly planner: Planner;
   private readonly retryMs: number;
@@ -551,6 +553,7 @@ export class Desk {
   constructor(o: DeskOptions) {
     this.clock = o.now ?? (() => new Date());
     this.repo = new Repo(o.root, o.now);
+    this.traces = new Traces(join(this.repo.dir, "traces"));
     this.host = o.host;
     this.planner = o.planner;
     this.retryMs = o.retryMs ?? 2000;
@@ -618,6 +621,7 @@ export class Desk {
       page: (phone, p) => this.outboxPage(phone, p),
       addNote: (phone, line) => (this.memory ? this.memory.addOutboxNote(phone, line) : err("no memory here")),
       isOwner: (phone) => this.isOwner(phone),
+      trace: (issue, t) => this.span(issue, t),
     });
   }
 
@@ -785,6 +789,9 @@ export class Desk {
       this.repo.saveIssue(issue, false);
     }
     this.note(issue, "talker", request, callId);
+    // From their words reaching Kloru to the request being filed; an automation has no words.
+    const heard = this.repo.turns(callId, 0).filter((t) => t.role === "caller").at(-1);
+    if (heard) this.span(issue.id, { step: "talker", kind: "agent", start: new Date(heard.at), outcome: "filed" });
     // The store shortcut reads every account and skips policy: it's the owner's alone.
     // The primary owner only: the fast path acts on his accounts without naming one.
     if (this.fastPath && (!this.ownerPhone || samePhone(issue.filedBy.phone, this.ownerPhone))) this.tryFastPath(issue);
@@ -796,15 +803,20 @@ export class Desk {
   private tryFastPath(issue: Issue): void {
     const id = issue.id;
     const started = Date.now();
+    const start = new Date();
     this.fastPending.add(id);
     const toPM = () => {
       if (!this.fastPending.delete(id)) return;
       this.trigger({ kind: "filed", issue: id });
     };
-    const timer = setTimeout(toPM, this.fastPathMs);
+    const timer = setTimeout(() => {
+      if (this.fastPending.has(id)) this.span(id, { step: "fast path", kind: "decision", start, outcome: "too slow, to the PM" });
+      toPM();
+    }, this.fastPathMs);
     void this.fastPath!(issue)
       .then((got) => {
         clearTimeout(timer);
+        if (this.fastPending.has(id)) this.span(id, { step: "fast path", kind: "decision", start, outcome: got?.changes?.length ? "change" : got?.answer ? "answer" : "file" });
         if (!got || !this.fastPending.has(id)) return toPM();
         if (got.changes?.length) {
           // A member's change goes through her worker, where policy weighs it; the fast path is the owner's.
@@ -821,6 +833,7 @@ export class Desk {
       })
       .catch((error) => {
         clearTimeout(timer);
+        if (this.fastPending.has(id)) this.span(id, { step: "fast path", kind: "decision", start, outcome: "failed", error: error instanceof Error ? error.message : String(error) });
         this.log(`desk: fast path failed on #${id}: ${error instanceof Error ? error.message : String(error)}`);
         toPM();
       });
@@ -1291,6 +1304,7 @@ export class Desk {
         const target = this.targetOf(issue, n.account);
         policies[n.account] = target ? this.policyOf(target) : "(nobody Kloru knows by that name)";
       }
+      const start = new Date();
       try {
         d = await this.decideAccess!({
           who: { name: this.nameOf(phone) ?? phone, role: this.isOwner(phone) ? "owner" : this.isMember?.(phone) ? "member" : "public", phone },
@@ -1303,8 +1317,11 @@ export class Desk {
           ...(issue.target ? { target: issue.target } : {}),
           needs: weighed,
         });
+        this.span(issueId, { step: "access review", kind: "decision", start, outcome: [...new Set(d.choices)].join(", ") });
       } catch (error) {
-        d = { choices: weighed.map(() => "ask_owner" as const), reason: `The review failed (${error instanceof Error ? error.message : String(error)}), so the person whose things it is decides.` };
+        const why = error instanceof Error ? error.message : String(error);
+        this.span(issueId, { step: "access review", kind: "decision", start, outcome: "failed", error: why });
+        d = { choices: weighed.map(() => "ask_owner" as const), reason: `The review failed (${why}), so the person whose things it is decides.` };
       }
     }
     const now = this.mustIssue(issueId);
@@ -1505,10 +1522,12 @@ export class Desk {
     this.since.set(issue.id, since);
     const report = (outcome: string, output?: string) => {
       const now = this.mustIssue(issue.id);
+      const end = new Date();
+      this.traces.append(issue.id, { step: role.name, kind: "agent", start, end, outcome: outcome === "ok" ? "done" : "failed", ...(outcome === "ok" || !output ? {} : { error: output }) });
       this.emit(issue, {
         name: `${role.name} #${issue.id}`,
         start,
-        end: new Date(),
+        end,
         input: now.spec ?? now.request,
         ...(output !== undefined ? { output } : {}),
         attributes: { issue: issue.id, role: role.name, outcome: outcome === "ok" ? "done" : "failed", status: now.status, kind: now.kind },
@@ -1611,6 +1630,7 @@ export class Desk {
     this.started.set(issueId, Date.now());
     let d: ResultDecision;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const start = new Date();
     try {
       const asked = this.decideResult!({
         request: issue.request,
@@ -1621,7 +1641,9 @@ export class Desk {
       });
       // The decider has its own timeout; this one holds whatever the decider does.
       d = await Promise.race([asked, new Promise<never>((_, no) => (timer = setTimeout(() => no(new Error(`no answer in ${this.resultGateMs} ms`)), this.resultGateMs)))]);
+      this.span(issueId, { step: "result gate", kind: "decision", start, outcome: d.check === "tried" ? "try the app" : "go on" });
     } catch (error) {
+      this.span(issueId, { step: "result gate", kind: "decision", start, outcome: "failed, try the app", error: error instanceof Error ? error.message : String(error) });
       this.log(`desk: #${issueId} result gate failed, trying the app: ${error instanceof Error ? error.message : String(error)}`);
       d = { check: "tried" };
     } finally {
@@ -1875,7 +1897,7 @@ export class Desk {
       // The draft, weighed against how they like messages: a clear miss goes back to its writer once.
       const once = `${issue.id}:worker`;
       if (this.checkDraft && !this.redrafted.has(once)) {
-        const why = await this.draftMiss(issue.filedBy.phone, issue.filedBy.call, issue.request, body, channel, "result");
+        const why = await this.draftMiss(issue.filedBy.phone, issue.filedBy.call, issue.request, body, channel, "result", issue.id);
         if (why) {
           this.redrafted.add(once);
           this.log(`desk: #${issue.id} worker draft → redraft: ${why}`);
@@ -2041,12 +2063,14 @@ export class Desk {
   }
 
   /** Why a draft misses how its reader likes messages, or undefined when it fits or can't be checked. */
-  private async draftMiss(phone: string, callId: string | undefined, request: string, draft: string, channel: NoticeChannel | undefined, kind: DraftCheck["kind"]): Promise<string | undefined> {
+  private async draftMiss(phone: string, callId: string | undefined, request: string, draft: string, channel: NoticeChannel | undefined, kind: DraftCheck["kind"], issueId?: number): Promise<string | undefined> {
     if (!this.checkDraft) return undefined;
+    const start = new Date();
     const turns = callId && this.repo.call(callId) ? this.repo.turns(callId, 0) : [];
     const ask = turns.filter((x) => x.role === "caller").at(-1)?.text ?? request;
     const thread = turns.slice(-60).map((x) => `${x.role === "caller" ? "Them" : "Kloru"}: ${x.text.slice(0, 300)}`);
     const v = await this.checkDraft({ channel: channel ?? this.channelsFor(phone)[0] ?? "imessage", kind, theirMessage: ask, draft, preferences: this.messagePreferences(phone), thread, canReact: false }).catch((e: unknown) => (this.log(`desk: draft check failed: ${e instanceof Error ? e.message : String(e)}`), undefined));
+    if (issueId !== undefined) this.span(issueId, { step: "draft check", kind: "decision", start, outcome: !v ? "failed" : v.fits ? "fits" : "redraft" });
     return v && !v.fits ? v.why : undefined;
   }
 
@@ -2076,7 +2100,7 @@ export class Desk {
   }
 
   private outboxDraft(item: OutboxItem, text: string, channel: NoticeChannel | undefined): Promise<string | undefined> {
-    return this.draftMiss(item.phone, item.from.call, this.outboxRequest(item), text, channel, item.from.agent === "worker" ? "result" : "after_call");
+    return this.draftMiss(item.phone, item.from.call, this.outboxRequest(item), text, channel, item.from.agent === "worker" ? "result" : "after_call", item.from.issue);
   }
 
   /** Hands an item's words to its channel: the thread it answers in, else Kloru's text or email. */
@@ -2247,6 +2271,7 @@ export class Desk {
   private async checkMessage(who: Asker, m: Pick<MessageCheck, "to" | "toCaller" | "from" | "action" | "subject" | "text" | "channels" | "replyingTo">): Promise<MessageDecision> {
     if (!this.decideMessage) return { action: "send" };
     const phone = who.phone;
+    const start = new Date();
     try {
       const d = await this.decideMessage({
         ...m,
@@ -2265,11 +2290,13 @@ export class Desk {
         ...this.replyChannel(who.call),
       });
       this.log(`desk: ${who.issue !== undefined ? `#${who.issue}` : who.call} message to ${m.toCaller ? "the caller" : m.to} → ${d.action}${d.channel ? ` by ${d.channel}` : ""}${d.p !== undefined ? ` (${d.p.toFixed(2)})` : ""}`);
+      if (who.issue !== undefined) this.span(who.issue, { step: "message check", kind: "decision", start, outcome: d.action });
       // A coin-flip drop loses something they may want: it is held instead.
       if (d.action === "drop" && d.p !== undefined && d.p < Desk.SURE_DROP) return { ...d, action: "hold" };
       return d;
     } catch (error) {
       const why = error instanceof Error ? error.message : String(error);
+      if (who.issue !== undefined) this.span(who.issue, { step: "message check", kind: "decision", start, outcome: "failed", error: why });
       this.log(`desk: ${who.issue !== undefined ? `#${who.issue}` : who.call} message check failed (${why}); ${m.toCaller ? "sending to the caller" : "holding"}`);
       return { action: m.toCaller ? "send" : "hold" };
     }
@@ -3139,6 +3166,7 @@ export class Desk {
       }
       if (!this.decideAction) continue;
       let d: ActionDecision;
+      const start = new Date();
       try {
         d = await this.decideAction({
           action: c.slug,
@@ -3152,8 +3180,10 @@ export class Desk {
           ownEmails: this.ownEmails?.(issue.filedBy.phone) ?? [],
           ...(this.isOwner(issue.filedBy.phone) || this.decideAccess ? {} : { ownerGuidelines: this.ownerGuidelinesFor(issue.filedBy.phone) }),
         });
+        this.span(issueId, { step: `action check ${c.slug}`, kind: "decision", start, outcome: d.decision });
       } catch (error) {
         const why = error instanceof Error ? error.message : String(error);
+        this.span(issueId, { step: `action check ${c.slug}`, kind: "decision", start, outcome: "failed", error: why });
         // For the owner a failed check goes ahead; for anyone else it fails closed: the owner decides.
         if (!this.isOwner(issue.filedBy.phone)) {
           this.log(`desk: #${issueId} could not weigh ${c.slug}, asking the owner: ${why}`);
@@ -3389,10 +3419,21 @@ export class Desk {
     this.queue = [];
     const start = new Date();
     const pmSpan = (ok: boolean, error?: string) => {
+      const end = new Date();
+      const ids = new Set(batch.flatMap((b) => (b.trigger.kind === "conflict" ? b.trigger.issues : [b.trigger.issue])));
+      for (const id of ids) {
+        if (!this.repo.issue(id)) continue;
+        const why = batch.filter((b) => (b.trigger.kind === "conflict" ? b.trigger.issues.includes(id) : b.trigger.issue === id)).map((b) => b.trigger.kind);
+        try {
+          this.traces.append(id, { step: "pm", kind: "agent", start, end, outcome: `${[...new Set(why)].join(", ")}: ${ok ? "ok" : "failed"}`, ...(error ? { error } : {}) });
+        } catch (e) {
+          this.log(`desk: trace dropped: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
       const first = batch.map((b) => b.trigger).map((t) => this.repo.issue(t.kind === "conflict" ? t.issues[0] : t.issue)).find(Boolean);
       if (!first) return;
       const triggers = batch.map((b) => (b.trigger.kind === "conflict" ? `conflict #${b.trigger.issues.join("/#")}` : `${b.trigger.kind} #${b.trigger.issue}`)).join(", ");
-      this.emit(first, { name: "pm", start, end: new Date(), attributes: { triggers, ok, ...(error ? { error } : {}) } });
+      this.emit(first, { name: "pm", start, end, attributes: { triggers, ok, ...(error ? { error } : {}) } });
     };
     try {
       await this.planner.handle(batch.map((b) => b.trigger), this);
@@ -3416,6 +3457,31 @@ export class Desk {
     }
     this.planning = false;
     void this.plan();
+  }
+
+  /**
+   * One timed step of a request: a line in its trace, and a span in Langfuse when that is on.
+   * Never throws; a step for an issue that isn't there is dropped.
+   */
+  span(issueId: number, t: Timed): void {
+    try {
+      const issue = this.repo.issue(issueId);
+      if (!issue) return;
+      const s = this.traces.append(issueId, t);
+      this.emit(issue, {
+        name: s.within ? `${s.within}: ${s.step}` : s.step,
+        start: t.start,
+        end: new Date(s.end),
+        attributes: { issue: issueId, kind: s.kind, ...(s.outcome ? { outcome: s.outcome } : {}), ...(s.model ? { model: s.model } : {}), ...(s.error ? { error: s.error } : {}) },
+      });
+    } catch (error) {
+      this.log(`desk: trace dropped: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** The request's steps so far, in the order they started. */
+  trace(issueId: number): TraceSpan[] {
+    return this.traces.read(issueId);
   }
 
   /** Send a span into the issue's call session; words only when the caller allows them. Never throws. */

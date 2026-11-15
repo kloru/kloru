@@ -49,6 +49,7 @@ async function api(key: string, path: string, body?: unknown, f: Fetch = fetch):
 export async function openSteel(o: { apiKey: string; dir: string; log: (m: string) => void; fetchImpl?: Fetch; throwaway?: { width: number; height: number }; connect?: (url: string) => Promise<Browser>; retryMs?: number }): Promise<SteelBrowser> {
   const file = join(o.dir, "steel.json");
   // A throwaway session (trying out an app) keeps no profile and needs no residential proxy.
+  const started = Date.now();
   const saved = !o.throwaway && existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as { profileId?: string }) : {};
   const base = { timeout: STEEL_SESSION_MS, solveCaptcha: false, persistProfile: !o.throwaway, dimensions: o.throwaway ?? { width: 1280, height: 900 }, blockAds: true };
   let created: { status: number; json: Record<string, unknown> } | undefined;
@@ -79,6 +80,7 @@ export async function openSteel(o: { apiKey: string; dir: string; log: (m: strin
     o.log(`browser: Steel session ${sessionId} never had a browser to reach: ${why.slice(0, 200)}`);
     throw new Error("Steel's browser didn't come up; try again in a minute");
   }
+  o.log(`browser: Steel session ${sessionId} ready in ${Date.now() - started} ms`);
   const ctx = browser.contexts()[0] ?? (await browser.newContext());
   const relay = await relayTo(o.apiKey, sessionId);
   return {

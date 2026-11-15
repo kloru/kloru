@@ -11,7 +11,7 @@
  * only when it passed DMARC (email is easy to forge, and these conversations act with their powers).
  */
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { luhnNumbers, mediaNote, type ConversationSend, type Desk, type Issue, type MediaItem, type Merge } from "@kloru/desk";
+import { luhnNumbers, mediaNote, type ConversationSend, type Desk, type Issue, type MediaItem, type Merge, type Timed } from "@kloru/desk";
 import { normalizePhone } from "@kloru/core";
 import type { Caller } from "./desk-routes.js";
 import type { TalkerTurn } from "./text-talker.js";
@@ -286,7 +286,12 @@ export class TextDesk {
 
   /** One message from Kloru, into their outbox; quiet when there's nothing new to say. */
   private async say(t: Thread, merges: Merge[] = [], replyingTo?: string, reactTo?: ReactTarget): Promise<ConversationSend | "quiet"> {
+    // Passing on a result is part of its request's trace; an answer to their own message isn't a request yet.
+    const about = [...new Set(merges.flatMap((m) => (m.issue !== undefined ? [m.issue] : [])))];
+    const mark = (step: string, kind: Timed["kind"], start: Date, outcome: string) => about.forEach((id) => this.o.desk.span(id, { step, kind, start, outcome }));
+    const shaping = new Date();
     const shape = await this.shapeFor(t, merges, replyingTo);
+    if (this.o.shape) mark("message shape", "decision", shaping, shape ? shape.form : "undecided");
     // A reaction goes on their message: the one this answers, or for a result, the one that asked.
     const target = reactTo ?? (merges.length ? t.reactTo : undefined);
     const reacted = { done: false, eyes: false };
@@ -325,7 +330,9 @@ export class TextDesk {
       ...(shape ? { shape } : {}),
       timezone: this.o.timezone,
     } satisfies TalkerTurn;
+    const writing = new Date();
     let reply = await this.o.talker(turn);
+    mark("talker", "agent", writing, reply ? "wrote" : "quiet");
     // 👀 on their new message with nothing filed (Nov 9): one more turn to file it, or say in words why not.
     if (reacted.eyes && !acted.done && !merges.length) {
       this.o.log(`text: ${t.callId} reacted on it but filed nothing; asking again`);
@@ -333,8 +340,11 @@ export class TextDesk {
       reply = await this.o.talker({ ...turn, tools: rest, redraft: { draft: reply || "(only the eyes reaction)", why: "You reacted eyes (on it) but filed nothing, so nothing will happen. file_issue what they asked, or if there's nothing to do, say so in words." } });
     }
     // The draft, weighed against how they like messages; a clear miss goes back once with the reason.
+    const checking = new Date();
     const why = reply ? await this.redraftReason(t, merges, replyingTo, shape, reply, !!turn.tools.react) : undefined;
+    if (reply && this.o.checkDraft) mark("draft check", "decision", checking, why ? "redraft" : "fits");
     if (why) {
+      const rewriting = new Date();
       const done = (x: string) => () => `${x} (already done for this message).`;
       reply = await this.o.talker({
         ...turn,
@@ -342,6 +352,7 @@ export class TextDesk {
         tools: { ...turn.tools, fileIssue: done("Filed"), updateIssue: done("Updated"), confirm: done("Confirmed"), remember: done("Noted"), remind: async () => done("Set")(), outboxCancel: done("Cancelled") },
         redraft: { draft: reply, why },
       });
+      mark("talker", "agent", rewriting, "rewrote");
     }
     const result = merges.some((m) => !m.progress);
     if (!reply) {

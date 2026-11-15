@@ -17,7 +17,7 @@ import { actionDecider } from "./action-decider.js";
 import { gmailNotifier } from "./notify.js";
 import { loadToolGuide } from "./tool-guide.js";
 import { appErrorsReader } from "./app-errors.js";
-import { AppServers, AppStore, Desk, MediaStore, Memory, Vault, type DraftCheck, vaultTools, type VaultKind, type MemberPlan, type Notice, type NoticeMedia, artifactTools, appTools, automationTools, deleteAutomation, type AutomationEvents, groceryTools, mediaTools, workerTools, TechnicalPM, OutboxOrganizer, memoryTools } from "@kloru/desk";
+import { AppServers, AppStore, Desk, MediaStore, Memory, Vault, type DraftCheck, type Timed, vaultTools, type VaultKind, type MemberPlan, type Notice, type NoticeMedia, artifactTools, appTools, automationTools, deleteAutomation, type AutomationEvents, groceryTools, mediaTools, workerTools, TechnicalPM, OutboxOrganizer, memoryTools } from "@kloru/desk";
 import { mediaIngest } from "./media-ingest.js";
 import { RuntimeWorkerHost } from "./desk-host.js";
 import { langfuseFromEnv, prefsAllowContent } from "./telemetry.js";
@@ -920,11 +920,15 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       // Simple changes from the fast path run straight through, as the account the item came from.
       ...(apps ? { execute: ((a: ComposioApps) => (slug: string, args: Record<string, unknown>, account?: string) => a.execute(slug, args, account ? { account } : {}))(apps) } : {}),
       root: state.path("repo"),
-      host: new RuntimeWorkerHost(runtime, (phone) => {
-        // Who a desk caller is, by their number, exactly as a text from it would resolve.
-        const p = resolvePrincipal({ channel: "sms", from: phone } as InboundMessage, config, contacts);
-        return p.kind === "owner" ? undefined : p;
-      }),
+      host: Object.assign(
+        new RuntimeWorkerHost(runtime, (phone) => {
+          // Who a desk caller is, by their number, exactly as a text from it would resolve.
+          const p = resolvePrincipal({ channel: "sms", from: phone } as InboundMessage, config, contacts);
+          return p.kind === "owner" ? undefined : p;
+        }),
+        // A worker's model turns and tool calls go in its request's trace.
+        { trace: (issue: number, t: Timed) => desk?.span(issue, t) },
+      ),
       planner: new TechnicalPM({
         model: pmModel,
         streamFn: opts.streamFn ?? (streamSimple as StreamFn),

@@ -161,3 +161,36 @@ describe("RuntimeWorkerHost: roles", () => {
     expect(convs.get("desk:issue:5:engineer")!.role.name).toBe("engineer");
   });
 });
+
+describe("RuntimeWorkerHost: timing", () => {
+  it("a run's model turns and tool calls go to the trace of its issue, and listening stops when the run ends", async () => {
+    const { runtime, convs } = fakeRuntime();
+    const host = new RuntimeWorkerHost(runtime);
+    const steps: Array<[number, string, string | undefined]> = [];
+    host.trace = (issue, t) => steps.push([issue, t.step, t.within]);
+    // The conversation exists before its first run, so the test can give its agent something to listen to.
+    const conv = runtime.worker("desk:issue:7:engineer", role) as unknown as FakeConv;
+    let listener: ((e: unknown) => void) | undefined;
+    Object.assign(conv.agent, { subscribe: (l: (e: unknown) => void) => ((listener = l), () => (listener = undefined)) });
+    const run = host.run(7, role, "look it up");
+    await tick();
+    listener!({ type: "turn_start" });
+    listener!({ type: "message_end", message: { role: "assistant", model: "terra", stopReason: "toolUse" } });
+    listener!({ type: "tool_execution_start", toolCallId: "a", toolName: "browser_run" });
+    listener!({ type: "tool_execution_end", toolCallId: "a", toolName: "browser_run" });
+    conv.release!();
+    await run;
+    expect(steps).toEqual([[7, "model", "engineer"], [7, "browser_run", "engineer"]]);
+    expect(listener).toBeUndefined();
+  });
+
+  it("an agent that can't be listened to still runs", async () => {
+    const { runtime, convs } = fakeRuntime();
+    const host = new RuntimeWorkerHost(runtime);
+    host.trace = () => undefined;
+    const run = host.run(8, role, "go");
+    await tick();
+    convs.get("desk:issue:8:engineer")!.release!();
+    expect(await run).toBe("done:go");
+  });
+});

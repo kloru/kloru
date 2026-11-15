@@ -1,5 +1,5 @@
 import type { RegisteredTool, StateDir } from "@kloru/core";
-import { Composio } from "@composio/core";
+import { Composio, type ComposioLogger } from "@composio/core";
 import { McpClient, StreamableHttpTransport } from "@earendil-works/pi-mcp";
 import { wrapMcpTools, type McpToolSource } from "./wrap.js";
 import { toolkitOfSlug } from "./capabilities.js";
@@ -222,7 +222,7 @@ export class ComposioApps {
     if (!opts.apiKey) throw new Error("ComposioApps needs an apiKey (COMPOSIO_API_KEY)");
     if (!opts.userId) throw new Error("ComposioApps needs a userId");
     this.opts = opts;
-    const create = opts.adapters?.createComposio ?? defaultCreateComposio;
+    const create = opts.adapters?.createComposio ?? ((key: string) => defaultCreateComposio(key, opts.logger));
     this.composio = create(opts.apiKey);
   }
 
@@ -619,9 +619,41 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function defaultCreateComposio(apiKey: string): ComposioClientLike {
+/** How long one of the SDK's warnings stays quiet after it was shown. */
+const SDK_WARNING_QUIET_MS = 60 * 60_000;
+
+/**
+ * The SDK's own log, through Kloru's. It warns on every listing of an account whose saved state it
+ * can't read ("Unsupported auth scheme in connected account state", with the whole ZodError):
+ * hundreds of lines an hour that say one thing. A warning is shown once an hour, as its first
+ * line, with how often it came since; errors always show; info and debug are the SDK's chatter.
+ */
+export function composioLogger(log: (m: string) => void, now: () => number = Date.now): ComposioLogger {
+  const shown = new Map<string, { at: number; quiet: number }>();
+  const text = (args: unknown[]) => args.map((a) => (typeof a === "string" ? a : a instanceof Error ? a.message : JSON.stringify(a))).join(" ");
+  // The SDK sends one string: a timestamp, the message, then each further argument on its own line, with colour codes.
+  const plain = (m: string) => m.replace(/\x1b\[[0-9;]*m/g, "").replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z - /, "");
+  const head = (m: string) => (plain(m).split("\n")[0] ?? "").slice(0, 200);
+  return {
+    error: (...args) => log(`composio sdk: ${plain(text(args)).slice(0, 600)}`),
+    warn: (...args) => {
+      const key = head(text(args));
+      const last = shown.get(key);
+      if (last && now() - last.at < SDK_WARNING_QUIET_MS) {
+        last.quiet++;
+        return;
+      }
+      log(`composio sdk: ${key}${last?.quiet ? ` (${last.quiet} more in the last hour)` : ""}`);
+      shown.set(key, { at: now(), quiet: 0 });
+    },
+    info: () => undefined,
+    debug: () => undefined,
+  };
+}
+
+function defaultCreateComposio(apiKey: string, log: (m: string) => void = (m) => console.warn(m)): ComposioClientLike {
   // The SDK's Session type is wider than ComposioSessionLike; the structural subset is all we call.
-  const composio = new Composio({ apiKey });
+  const composio = new Composio({ apiKey, logger: composioLogger(log) });
   // The raw API client is protected in the SDK's types; its list pages past 1,000 apps.
   const raw = (composio as unknown as { client: { toolkits: { list: NonNullable<ComposioClientLike["appList"]> } } }).client;
   return Object.assign(composio, { appList: (q: Parameters<NonNullable<ComposioClientLike["appList"]>>[0]) => raw.toolkits.list(q) });

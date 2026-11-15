@@ -10,6 +10,7 @@ import { randomBytes } from "node:crypto";
 import { moveItem, type OutboxState } from "./outbox-machine.js";
 import { OutboxStore, type OutboxChannel, type OutboxItem, type OutboxThread, type OutboxWhy } from "./outbox-store.js";
 import { err, ok, type Result } from "./result.js";
+import type { Timed } from "./trace.js";
 
 export interface OutboxSubmit {
   phone: string;
@@ -118,6 +119,8 @@ export interface OutboxDeps {
   page?: (phone: string, o: { page?: string; title: string; markdown: string; issue?: number }) => Result<string>;
   addNote?: (phone: string, line: string) => Result<string>;
   isOwner?: (phone: string) => boolean;
+  /** A timed step of the request an item came from (its trace). */
+  trace?: (issue: number, t: Timed) => void;
   /** Quiet time after an item is queued before the organizer runs; each new item restarts it. */
   settleMs?: number;
   /** The longest a burst of items waits for the organizer. */
@@ -200,18 +203,31 @@ export class PersonOutbox {
     if (!this.deps.firstPass) {
       choice = "send";
     } else {
+      const start = new Date();
       try {
         choice = await this.deps.firstPass(this.check(item, firing));
+        this.trace(item, { step: "outbox fast pass", kind: "decision", start, outcome: choice });
       } catch (e) {
         // Without a decision: a direct reply and a reminder at the time they chose still go; the rest waits.
         choice = item.why === "reply" || (firing && item.why === "reminder") ? "send" : "organizer";
         this.log(`outbox ${item.id}: first pass failed (${(e as Error).message}), ${choice}`);
+        this.trace(item, { step: "outbox fast pass", kind: "decision", start, outcome: `failed, ${choice}`, error: (e as Error).message });
       }
     }
     this.log(`outbox ${item.id}: first pass → ${choice}`);
     if (choice === "drop") this.finish(item, "dropped", "the first pass: they don't need this");
     else if (choice === "organizer") this.queue(item);
     else await this.trySend(item);
+  }
+
+  /** A step in the trace of the request the item came from; an item from no request has none. */
+  private trace(item: OutboxItem, t: Timed): void {
+    if (!item.from.issue || !this.deps.trace) return;
+    try {
+      this.deps.trace(item.from.issue, t);
+    } catch (e) {
+      this.log(`outbox ${item.id}: trace failed: ${(e as Error).message}`);
+    }
   }
 
   private check(item: OutboxItem, firing: boolean): FirstPassCheck {
@@ -255,6 +271,9 @@ export class PersonOutbox {
     } catch (e) {
       this.log(`outbox ${item.id}: ledger failed: ${(e as Error).message}`);
     }
+    // The whole wait, from the message being written to its end.
+    const written = new Date(item.at);
+    if (!Number.isNaN(written.getTime())) this.trace(item, { step: "outbox", kind: "plumbing", start: written, outcome: to });
     return true;
   }
 
@@ -305,11 +324,13 @@ export class PersonOutbox {
   private async handOver(item: OutboxItem, channel: OutboxChannel | undefined): Promise<Result<string>> {
     let went: string | false = false;
     let error = "the channel didn't take it";
+    const start = new Date();
     try {
       went = await this.deps.deliver(item, { text: item.text, ...(channel ? { channel } : {}), ...(item.subject ? { subject: item.subject } : {}) });
     } catch (e) {
       error = (e as Error).message;
     }
+    this.trace(item, { step: "send", kind: "plumbing", start, outcome: went || "not delivered", ...(went ? {} : { error }) });
     if (went) {
       item.sentOn = went;
       this.finish(item, "sent");
@@ -450,6 +471,16 @@ export class PersonOutbox {
     if (!this.deps.organizer) return this.sendWaiting(phone);
     const run = { open: true };
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const start = new Date();
+    // One organizer run serves every request with something waiting.
+    const ran = (outcome: string, error?: string) => {
+      const seen = new Set<number>();
+      for (const item of queued) {
+        if (!item.from.issue || seen.has(item.from.issue)) continue;
+        seen.add(item.from.issue);
+        this.trace(item, { step: "outbox organizer", kind: "agent", start, outcome, ...(error ? { error } : {}) });
+      }
+    };
     try {
       const view: OrganizerView = {
         phone,
@@ -468,12 +499,14 @@ export class PersonOutbox {
           timer.unref?.();
         }),
       ]);
+      ran("ok");
       this.store.setClock(phone, { failures: undefined });
       // Whatever it left queued without saying when to look again is looked at again in an hour.
       const clock = this.store.clock(phone);
       if (this.store.items(phone).some((i) => i.state === "queued") && !clock.wakeAt && !clock.selfWakeAt) this.wakeBy(phone, this.now().getTime() + 60 * MINUTE);
     } catch (e) {
       this.log(`outbox organizer for ${phone}: run ${failures + 1} failed: ${(e as Error).message}`);
+      ran("failed", (e as Error).message);
       if (failures + 1 >= 2) {
         this.store.setClock(phone, { failures: undefined });
         await this.sendWaiting(phone);

@@ -3,7 +3,7 @@
  * (`desk:issue:<n>:<role>`), so a follow-up continues the same session, new input can be
  * steered in mid-run, and an issue reassigned from ops to work never keeps ops' tools.
  */
-import type { WorkerHost } from "@kloru/desk";
+import { traceAgent, type Timed, type TracedAgent, type WorkerHost } from "@kloru/desk";
 import type { AgentRuntime, Principal, WorkerRole } from "@kloru/core";
 
 const keyOf = (issue: number, role: WorkerRole) => `desk:issue:${issue}:${role.name}`;
@@ -19,6 +19,9 @@ export class RuntimeWorkerHost implements WorkerHost {
   /** Each issue's person, so steer and stop reach the same conversation. */
   private readonly principals = new Map<number, Principal | undefined>();
 
+  /** Where a run's model turns and tool calls are timed (the desk's trace); set once the desk exists. */
+  trace?: (issue: number, t: Timed) => void;
+
   /** `principalFor`: who a phone number is (undefined: the owner). */
   constructor(
     private readonly runtime: Pick<AgentRuntime, "worker" | "retire">,
@@ -31,9 +34,26 @@ export class RuntimeWorkerHost implements WorkerHost {
     else this.sessions.delete(issue);
     this.principals.set(issue, phone ? this.principalFor(phone) : undefined);
     const conv = this.worker(issue, role);
-    const next = (this.chains.get(issue) ?? Promise.resolve()).catch(() => undefined).then(() => conv.run(prompt));
+    const next = (this.chains.get(issue) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+      const untrace = this.traced(issue, role, conv.agent);
+      try {
+        return await conv.run(prompt);
+      } finally {
+        untrace();
+      }
+    });
     this.chains.set(issue, next);
     return next;
+  }
+
+  /** Timing never breaks a run: with no trace, or an agent that can't be listened to, the run goes on untimed. */
+  private traced(issue: number, role: WorkerRole, agent: unknown): () => void {
+    if (!this.trace) return () => undefined;
+    try {
+      return traceAgent(agent as TracedAgent, role.name, (t) => this.trace?.(issue, t));
+    } catch {
+      return () => undefined;
+    }
   }
 
   private running(issue: number) {

@@ -11,6 +11,7 @@ import type { CloseStatus, Desk, Planner, Trigger } from "./desk.js";
 import { PERMISSIONS, toNeeds } from "./access.js";
 import { clip } from "./memory.js";
 import { err, type Result } from "./result.js";
+import { traceAgent } from "./trace.js";
 import { isClosed, type Deliverable, type Issue, type IssueTarget } from "./types.js";
 
 export const PM_RULES = `You are the technical PM on Kloru's desk. Kloru is an assistant for a family. On each phone call a
@@ -260,9 +261,16 @@ export class TechnicalPM implements Planner {
       const out = (e.result?.content ?? []).map((c: { text?: string }) => c.text ?? "").join(" ").slice(0, 200);
       this.o.log?.(`pm: ${e.toolName}${e.isError ? " (error)" : ""} → ${out}`);
     });
+    // Its model turns and tool calls, in the trace of every request the batch is about.
+    const about = [...new Set(triggers.flatMap((t) => (t.kind === "conflict" ? t.issues : [t.issue])))];
+    const untrace = traceAgent(agent, "pm", (t) => about.forEach((id) => desk.span(id, t)));
     const before = agent.state.messages.length;
-    await agent.prompt(snapshot(desk, triggers, desk.now(), only ? { only } : {}));
-    await agent.waitForIdle();
+    try {
+      await agent.prompt(snapshot(desk, triggers, desk.now(), only ? { only } : {}));
+      await agent.waitForIdle();
+    } finally {
+      untrace();
+    }
     const fresh = agent.state.messages.slice(before) as AgentMessage[];
     for (const m of fresh) if (m.role === "assistant" && m.usage) this.o.onReply?.({ model: m.model, usage: m.usage, timestamp: m.timestamp });
     const last = [...fresh].reverse().find((m) => m.role === "assistant");

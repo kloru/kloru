@@ -5,10 +5,11 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { CLOSED, Memory, Repo, describeWhen, readOutbox, type Artifact, type CallRecord, type Issue, type LedgerEntry, type OutboxItem } from "@kloru/desk";
+import { CLOSED, Memory, Repo, describeWhen, readOutbox, type Artifact, type CallRecord, type Issue, type LedgerEntry, type OutboxItem, readTrace } from "@kloru/desk";
 import { Store } from "@kloru/store";
 import { esc } from "./html.js";
 import { renderMarkdown } from "./markdown.js";
+import { traceSection } from "./trace-view.js";
 
 const when = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const clock = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit", second: "2-digit" });
@@ -110,6 +111,7 @@ export function issuePage(repo: Repo, issue: Issue): string {
     `<section><h2>Thread</h2>${thread ? `<ul class="rows">${thread}</ul>` : "<p>Nothing yet.</p>"}</section>` +
     `<section><h2>Results</h2>${prs ? `<ul class="rows">${prs}</ul>` : "<p>None.</p>"}</section>` +
     `<section><h2>Changes in the world</h2>${ledger ? `<ul class="rows">${ledger}</ul>` : "<p>None.</p>"}</section>` +
+    traceSection(readTrace(join(repo.dir, "traces"), issue.id)) +
     nav
   );
 }

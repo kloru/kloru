@@ -30,6 +30,7 @@ export {
   type CatalogToolkit,
   ACCOUNTS_STATE_FILE,
 } from "./composio.js";
+export { composioLogger } from "./composio.js";
 export { ComposioTriggers, WEBHOOK_STATE_FILE, type AppEvent, type TriggerTypeLike, type ComposioTriggersLike, type WebhookSubscriptionsLike } from "./triggers.js";
 export { appsGuidance, type AppsGuidanceOptions } from "./guidance.js";
 export { appsTools, describeStatus, type AppsLike, type AppsToolDeps } from "./tools.js";
