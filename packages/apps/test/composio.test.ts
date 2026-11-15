@@ -416,7 +416,7 @@ describe("ComposioApps.connectLink and connectedToolkits", () => {
     composio.client.connectedAccounts = { list, delete: async (id: string) => { deleted.push(id); } };
     const apps = new ComposioApps({ ...base, state: fakeState(), adapters: { createComposio: () => composio.client, connectMcp: fakeMcp().connectMcp } });
     expect(await apps.disconnect(" Gmail ")).toBe(2);
-    expect(list).toHaveBeenCalledWith({ userIds: ["maria"], toolkitSlugs: ["gmail"] });
+    expect(list).toHaveBeenCalledWith({ userIds: ["maria"], toolkitSlugs: ["gmail"], limit: 100 });
     expect(deleted).toEqual(["ca_1", "ca_2"]);
   });
 
@@ -710,6 +710,20 @@ describe("apps beyond Google", () => {
   it("an Outlook account is named by its address", async () => {
     const { apps } = setup();
     expect((await apps.accounts()).find((a) => a.id === "ca_outlook")).toMatchObject({ toolkit: "outlook", email: "ezra@outlook.example" });
+  });
+
+  it("accounts past the first page are still this family's", async () => {
+    // Newest first, ten a page: sign-ins that never finished fill page one, the calendar is on page two.
+    const stale = Array.from({ length: 10 }, (_, i) => ({ id: `ca_stale${i}`, status: "EXPIRED", toolkit: { slug: "twilio" }, createdAt: "2026-11-13T00:00:00Z" }));
+    const old = { id: "ca_notion_old", status: "ACTIVE", toolkit: { slug: "notion" }, createdAt: "2026-10-27T10:00:00Z" };
+    const deleted: string[] = [];
+    const list = vi.fn(async (q: { cursor?: string }) => (q.cursor === "p2" ? { items: [old], nextCursor: null } : { items: stale, nextCursor: "p2" }));
+    const client = { ...fakeComposio().client, connectedAccounts: { list, delete: async (id: string) => void deleted.push(id) }, tools: { execute: async () => ({ successful: true, data: {} }) } };
+    const apps = new ComposioApps({ ...base, toolkits: ["notion", "twilio"], mode: "router", state: fakeState({ "app-accounts.json": { ca_notion_old: "maria@example.com" } }), adapters: { createComposio: () => client as never, connectMcp: fakeMcp().connectMcp } });
+    expect((await apps.accounts()).find((a) => a.id === "ca_notion_old")).toMatchObject({ toolkit: "notion", status: "connected" });
+    expect(list).toHaveBeenCalledTimes(2);
+    await apps.disconnectAccount("ca_notion_old");
+    expect(deleted).toEqual(["ca_notion_old"]);
   });
 
   it("an action that names no account runs as that app's account", async () => {

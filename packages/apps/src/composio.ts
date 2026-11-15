@@ -11,6 +11,10 @@ export const APPS_STATE_FILE = "apps.json";
 export const ACCOUNTS_STATE_FILE = "app-accounts.json";
 /** Which family member each connected account belongs to (by account id); absent: the owner's. */
 export const ACCOUNT_PEOPLE_FILE = "app-account-people.json";
+/** Connected accounts are read a page at a time; the cap only stops a cursor that never ends. */
+const ACCOUNT_PAGE_SIZE = 100;
+const ACCOUNT_PAGES_MAX = 50;
+type ConnectedAccountRow = { id: string; status?: string; toolkit?: { slug?: string }; createdAt?: string };
 /** How many accounts of one app (Gmail, Calendar) a family can connect. */
 const MAX_ACCOUNTS_PER_TOOLKIT = 5;
 
@@ -161,7 +165,7 @@ export interface ComposioClientLike {
   };
   /** Connected accounts across sessions: listed for the Connections page, deleted to disconnect. */
   connectedAccounts?: {
-    list(query: { userIds: string[]; toolkitSlugs?: string[] }): Promise<{ items: Array<{ id: string; status?: string; toolkit?: { slug?: string }; createdAt?: string }> }>;
+    list(query: { userIds: string[]; toolkitSlugs?: string[]; limit?: number; cursor?: string }): Promise<{ items: Array<{ id: string; status?: string; toolkit?: { slug?: string }; createdAt?: string }>; nextCursor?: string | null }>;
     delete(id: string): Promise<unknown>;
   };
   /** The raw API's app list: the full catalog, page by page (the SDK's toolkits.get stops at 1,000). */
@@ -373,9 +377,32 @@ export class ComposioApps {
   async disconnect(toolkit: string): Promise<number> {
     const accounts = this.composio.connectedAccounts;
     if (!accounts) throw new Error("this Composio client cannot list connected accounts");
-    const res = await accounts.list({ userIds: [this.opts.userId], toolkitSlugs: [toolkit.trim().toLowerCase()] });
-    for (const item of res.items) await accounts.delete(item.id);
-    return res.items.length;
+    const items = await this.listAccounts([toolkit.trim().toLowerCase()]);
+    for (const item of items) await accounts.delete(item.id);
+    return items.length;
+  }
+
+  /**
+   * Every connected-account row this agent's user holds, page by page: the API gives ten at a
+   * time, newest first, and a sign-in that never finished is a row too.
+   */
+  private async listAccounts(toolkitSlugs?: string[]): Promise<ConnectedAccountRow[]> {
+    const api = this.composio.connectedAccounts;
+    if (!api) throw new Error("this Composio client cannot list connected accounts");
+    const items: ConnectedAccountRow[] = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < ACCOUNT_PAGES_MAX; page++) {
+      const res = await api.list({ userIds: [this.opts.userId], ...(toolkitSlugs ? { toolkitSlugs } : {}), limit: ACCOUNT_PAGE_SIZE, ...(cursor ? { cursor } : {}) });
+      for (const item of res.items) {
+        if (seen.has(item.id)) continue;
+        seen.add(item.id);
+        items.push(item);
+      }
+      if (!res.nextCursor || res.nextCursor === cursor || res.items.length === 0) break;
+      cursor = res.nextCursor;
+    }
+    return items;
   }
 
   /**
@@ -384,13 +411,11 @@ export class ComposioApps {
    * a sign-in that never finished doesn't. Addresses are looked up once and remembered.
    */
   async accounts(): Promise<AppAccount[]> {
-    const api = this.composio.connectedAccounts;
-    if (!api) throw new Error("this Composio client cannot list connected accounts");
-    const res = await api.list({ userIds: [this.opts.userId], ...(this.allToolkits ? {} : { toolkitSlugs: this.toolkitSlugs }) });
+    const items = await this.listAccounts(this.allToolkits ? undefined : this.toolkitSlugs);
     const emails = this.opts.state.readJson<Record<string, string>>(ACCOUNTS_STATE_FILE, {});
     const people = this.opts.state.readJson<Record<string, string>>(ACCOUNT_PEOPLE_FILE, {});
     let learned = false;
-    const rows = res.items
+    const rows = items
       .filter((a) => a.status === "ACTIVE" || a.status === "EXPIRED")
       .map((a) => ({ id: a.id, toolkit: (a.toolkit?.slug ?? "").toLowerCase(), active: a.status === "ACTIVE", at: a.createdAt ?? "" }))
       .sort((a, b) => a.toolkit.localeCompare(b.toolkit) || Number(b.active) - Number(a.active) || a.at.localeCompare(b.at));
@@ -467,8 +492,8 @@ export class ComposioApps {
   async disconnectAccount(id: string): Promise<void> {
     const api = this.composio.connectedAccounts;
     if (!api) throw new Error("this Composio client cannot list connected accounts");
-    const res = await api.list({ userIds: [this.opts.userId] });
-    if (!res.items.some((a) => a.id === id)) throw new Error(`${id} is not one of this family's accounts`);
+    const items = await this.listAccounts();
+    if (!items.some((a) => a.id === id)) throw new Error(`${id} is not one of this family's accounts`);
     await api.delete(id);
     this.knownAccounts = this.knownAccounts.filter((a) => a.id !== id);
   }
