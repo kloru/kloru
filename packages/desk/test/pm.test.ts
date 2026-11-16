@@ -7,7 +7,7 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { WorkerRole } from "@kloru/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { Desk, type WorkerHost } from "../src/desk.js";
-import { TechnicalPM, audiences, snapshot } from "../src/pm.js";
+import { TechnicalPM, audiences, batchEnds, snapshot } from "../src/pm.js";
 
 const regs: Array<ReturnType<typeof registerFauxProvider>> = [];
 afterEach(() => {
@@ -175,11 +175,39 @@ describe("snapshot: memory", () => {
   });
 });
 
+describe("TechnicalPM: a settled batch ends the run", () => {
+  it("after the assign there is no last model turn", async () => {
+    const { faux, desk } = setup();
+    let turns = 0;
+    const assign = toolTurn("assign", { issue: 1, kind: "work", goal: "g", done_when: "d", deliverable: "answer", spec: "s", resources: [] });
+    faux.setResponses([() => (turns++, assign), () => (turns++, fauxAssistantMessage("Assigned."))]);
+    const { call } = desk.startCall({ callSid: "CA1", phone: "+14155550190", channel: "voice" });
+    desk.fileIssue(call.id, "Check Wednesday");
+    await settle();
+    expect(desk.repo.issue(1)!.status).toBe("in_progress");
+    expect(turns).toBe(1);
+  });
+
+  it("each filed, pr or ops_finished issue needs its own settling action; any other trigger leaves the end to the model", () => {
+    const two = batchEnds([{ kind: "filed", issue: 1 }, { kind: "pr", issue: 2 }]);
+    expect(two("assign", { issue: 1 })).toBe(false);
+    expect(two("file_ops", {})).toBe(false);
+    expect(two("merge", { issue: 2 })).toBe(true);
+    // A merge doesn't settle a filed issue: the assign is still to come.
+    expect(batchEnds([{ kind: "filed", issue: 1 }])("merge", { issue: 1 })).toBe(false);
+    // Telling someone else isn't the filer's merge.
+    expect(batchEnds([{ kind: "pr", issue: 1 }])("merge", { issue: 1, call: "other" })).toBe(false);
+    expect(batchEnds([{ kind: "stuck", issue: 1, minutes: 30 }])("merge", { issue: 1 })).toBe(false);
+    expect(batchEnds([{ kind: "filed", issue: 1 }, { kind: "comment", issue: 2, call: "c", text: "t" }])("assign", { issue: 1 })).toBe(false);
+  });
+});
+
 describe("TechnicalPM: partial runs", () => {
   it("a run that fails after a successful action counts as handled, so nothing is done twice", async () => {
     const { faux, desk } = setup();
     faux.setResponses([
-      toolTurn("resolve", { issue: 1, text: "Dentist at 11:30." }),
+      // A merge doesn't settle a filed issue, so the run goes on to its next turn.
+      toolTurn("merge", { issue: 1, kind: "info", text: "Dentist at 11:30." }),
       fauxAssistantMessage("", { stopReason: "error", errorMessage: "upstream 500" }),
       fauxAssistantMessage("should not run"),
     ]);

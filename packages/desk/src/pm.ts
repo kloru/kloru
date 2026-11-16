@@ -192,7 +192,7 @@ export function snapshot(desk: Desk, triggers: Trigger[], now = new Date(), o: {
   ].filter(Boolean).join("\n\n");
 }
 
-function tool<P extends TSchema>(name: string, description: string, parameters: P, run: (args: any) => Result<unknown>, done?: () => void): AgentTool<P> {
+function tool<P extends TSchema>(name: string, description: string, parameters: P, run: (args: any) => Result<unknown>, done?: (name: string, args: any) => boolean | void): AgentTool<P> {
   return {
     name,
     label: name,
@@ -200,15 +200,41 @@ function tool<P extends TSchema>(name: string, description: string, parameters: 
     parameters,
     execute: async (_id, args) => {
       const r = run(args);
-      if (r.ok) done?.();
+      const finished = r.ok && done?.(name, args) === true;
       const text = r.ok ? "Done." : `Refused: ${r.error}`;
-      return { content: [{ type: "text", text }], details: undefined };
+      return { content: [{ type: "text", text }], details: undefined, ...(finished ? { terminate: true } : {}) };
     },
   };
 }
 
-/** The PM's tools over the desk's actions. `done` is told about every action that went through. */
-export function pmTools(desk: Desk, done?: () => void): AgentTool<any>[] {
+/** The one action that settles a trigger: after it the PM has nothing left to do for that issue. */
+const SETTLES: Partial<Record<Trigger["kind"], ReadonlySet<string>>> = {
+  filed: new Set(["assign", "resolve", "close", "ask_caller"]),
+  pr: new Set(["merge", "send_back", "ask_caller"]),
+  ops_finished: new Set(["merge"]),
+};
+
+/**
+ * Whether a batch is finished after each action. A batch of only filed, pr and ops_finished
+ * triggers is finished once each issue has had its settling action: the run ends there, with no
+ * last model turn to write a summary nobody reads. Any other trigger may need more, so the model says when.
+ */
+export function batchEnds(triggers: Trigger[]): (name: string, args: { issue?: number; call?: string }) => boolean {
+  const left = new Map<number, ReadonlySet<string>>();
+  for (const t of triggers) {
+    const settles = SETTLES[t.kind];
+    if (!settles || t.kind === "conflict" || left.has(t.issue)) return () => false;
+    left.set(t.issue, settles);
+  }
+  return (name, args) => {
+    // A merge into someone else's call tells them; the filer's is still to come.
+    if (args.issue !== undefined && args.call === undefined && left.get(args.issue)?.has(name)) left.delete(args.issue);
+    return left.size === 0;
+  };
+}
+
+/** The PM's tools over the desk's actions. `done` is told about every action that went through; true from it ends the run. */
+export function pmTools(desk: Desk, done?: (name: string, args: any) => boolean | void): AgentTool<any>[] {
   const t = <P extends TSchema>(name: string, description: string, parameters: P, run: (args: any) => Result<unknown>) => tool(name, description, parameters, run, done);
   return [
     t("assign", "Triage an issue: work (an engineer: finds the answer and does whatever the request needs) or ops (one exact change). Starts a worker.", Type.Object({ issue: num("issue number"), kind: Type.Union([Type.Literal("work"), Type.Literal("ops")]), ...TEMPLATE, spec: str("the details: exact dates, names, ids from earlier results"), resources: Type.Array(Type.String(), { description: 'resource keys like "calendar:2026-10-28"' }), needs: NEEDS, continues: Type.Optional(num("a finished issue from the same caller whose worker already has the context (a follow-up like 'email me those'); it continues there instead of starting over")) }), (a) => desk.assign(a.issue, a.kind, a.spec, a.resources, targetOf(a), { ...(a.continues !== undefined ? { continues: a.continues } : {}), ...(a.needs ? { needs: toNeeds(a.needs) } : {}) })),
@@ -247,7 +273,8 @@ export class TechnicalPM implements Planner {
 
   private async run(triggers: Trigger[], desk: Desk, only?: string): Promise<void> {
     let actions = 0;
-    const tools = pmTools(desk, () => actions++);
+    const ends = batchEnds(triggers);
+    const tools = pmTools(desk, (name, args) => (actions++, ends(name, args)));
     const system = createInitialSystemMessage(PM_RULES, tools.map(toToolDeclaration));
     const agent = new Agent({
       initialState: { systemPrompt: "", model: this.o.model, thinkingLevel: this.o.thinking ?? "low", tools, messages: system ? [system] : [] },
