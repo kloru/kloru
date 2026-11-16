@@ -195,6 +195,8 @@ describe("TechnicalPM: a settled batch ends the run", () => {
     expect(two("merge", { issue: 2 })).toBe(true);
     // A merge doesn't settle a filed issue: the assign is still to come.
     expect(batchEnds([{ kind: "filed", issue: 1 }])("merge", { issue: 1 })).toBe(false);
+    // The PM usually passes a finished result on with resolve.
+    expect(batchEnds([{ kind: "pr", issue: 1 }])("resolve", { issue: 1 })).toBe(true);
     // Telling someone else isn't the filer's merge.
     expect(batchEnds([{ kind: "pr", issue: 1 }])("merge", { issue: 1, call: "other" })).toBe(false);
     expect(batchEnds([{ kind: "stuck", issue: 1, minutes: 30 }])("merge", { issue: 1 })).toBe(false);

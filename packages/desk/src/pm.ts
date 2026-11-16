@@ -210,8 +210,8 @@ function tool<P extends TSchema>(name: string, description: string, parameters: 
 /** The one action that settles a trigger: after it the PM has nothing left to do for that issue. */
 const SETTLES: Partial<Record<Trigger["kind"], ReadonlySet<string>>> = {
   filed: new Set(["assign", "resolve", "close", "ask_caller"]),
-  pr: new Set(["merge", "send_back", "ask_caller"]),
-  ops_finished: new Set(["merge"]),
+  pr: new Set(["resolve", "merge", "send_back", "ask_caller", "close"]),
+  ops_finished: new Set(["resolve", "merge", "close"]),
 };
 
 /**
