@@ -226,7 +226,7 @@ class Outcome:
 
 def replay_config(cfg: Config) -> Config:
     """Nothing leaves the machine: no Langfuse, call log, transcripts or GitHub issues."""
-    return replace(cfg, langfuse=None, call_log_path=None, transcripts_dir=None, prefs_path=None, desk_enabled=True)
+    return replace(cfg, langfuse=None, call_log_path=None, transcripts_dir=None, prefs_path=None, models_path=None, desk_enabled=True)
 
 
 async def replay(script: Script, cfg: Config, llm, speed: float = 1.0, max_s: float = 240.0, caller: str | None = None) -> Outcome:

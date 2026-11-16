@@ -4,10 +4,10 @@
  * agent that drafted the message sends it. Its criteria are guidelines it weighs, not rules in code.
  */
 import type { MessageCheck, MessageDecision, NoticeChannel } from "@kloru/desk";
+import { modelOf } from "./models.js";
 
 const URL = "https://openrouter.ai/api/alpha/decisions";
-// Measured 2026-10-31: ~0.35 s and $0.00003 a decision; dropped #111's "I've emailed you" at 0.92.
-const MODEL = "typesafe/jev-1.14";
+// Jev 1.14, measured 2026-10-31: ~0.35 s and $0.00003 a decision; dropped #111's "I've emailed you" at 0.92.
 
 const ACTIONS = {
   send: "Send it now: they'd want it and don't have it yet (new results, even on a page they already have), or they asked for it.",
@@ -64,7 +64,7 @@ export function comsDecider(o: { apiKey: string; fetchImpl?: typeof fetch; model
       method: "POST",
       headers: { Authorization: `Bearer ${o.apiKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(o.timeoutMs ?? 3000),
-      body: JSON.stringify({ model: o.model ?? MODEL, provider: { zdr: true }, state, questions }),
+      body: JSON.stringify({ model: o.model ?? modelOf("message-check"), provider: { zdr: true }, state, questions }),
     });
     if (!res.ok) throw new Error(`decision model ${res.status}`);
     const data = (await res.json()) as { answers?: Record<string, { type?: string; choice?: string; probabilities?: Record<string, number> }> };

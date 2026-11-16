@@ -75,6 +75,7 @@ runs on that machine.
 | `/data/instinct/browser` | each person's browser profile (or their Steel profile id) |
 | `/data/kloru/apps.db` | what people entered into apps Kloru made (the website's; the agent only reads script errors from it) |
 | `/data/instinct/metrics` | hourly OpenRouter usage and time-saved estimates |
+| `/data/instinct/models.json` | which model does each job, where an owner picked one under Admin → Models (`models.ts`); read at each run and each call |
 
 ## Packages
 
@@ -93,6 +94,8 @@ runs on that machine.
 | `voice/` | phone calls (Python, Pipecat) |
 
 Decisions with a fixed set of answers (access, message shape, draft fit, send/hold/drop, time
-saved) go to Jev, a small structured decision model, never to a general model. Words people read
+saved) go to Jev, a small structured decision model, never to a general model. An owner can pick another
+decision model for any of them, and another model for each talker and worker, under Admin →
+Models: the choices are what OpenRouter offers now through a provider that keeps no data. Words people read
 or hear are written by the talkers and workers. Prompts stay short and say the goal; each
 person's own guidelines and preferences set the details.

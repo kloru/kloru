@@ -5,8 +5,8 @@
  */
 import type { Issue } from "@kloru/desk";
 import { chatCompletion } from "./openrouter.js";
+import { modelOf } from "./models.js";
 
-const MODEL = "google/gemini-3.5-flash-lite";
 const SCHEMA = { type: "object", additionalProperties: false, required: ["changes"], properties: { changes: { type: "boolean" } } };
 const PROMPT =
   "Kloru is working on the caller's request while they talk on the phone. Does what they just said change, narrow, " +
@@ -15,7 +15,7 @@ const PROMPT =
 export function steerFilter(o: { apiKey: string; fetchImpl?: typeof fetch; model?: string }): (issue: Issue, text: string) => Promise<boolean> {
   return async (issue, text) => {
     const content = await chatCompletion({ apiKey: o.apiKey, ...(o.fetchImpl ? { fetchImpl: o.fetchImpl } : {}) }, {
-        model: o.model ?? MODEL,
+        model: o.model ?? modelOf("steer"),
         messages: [
           { role: "system", content: PROMPT },
           { role: "user", content: `Request: ${issue.request}${issue.spec ? `\nAs assigned: ${issue.spec}` : ""}\nThe caller just said: ${text}` },

@@ -4,10 +4,10 @@
  * guidelines it weighs, not rules in code. The desk tries the app when this is unsure, slow or broken.
  */
 import type { ResultCheck, ResultDecision } from "@kloru/desk";
+import { modelOf } from "./models.js";
 
 const URL = "https://openrouter.ai/api/alpha/decisions";
-// Measured 2026-11-10 on 16 invented cases, three runs each: ~0.18 s a decision; every miss was an extra check.
-const MODEL = "typesafe/jev-1.14";
+// Jev 1.14, measured 2026-11-10 on 16 invented cases, three runs each: ~0.18 s a decision; every miss was an extra check.
 /** How sure "none" has to be before an app goes on untried. */
 const SURE = 0.6;
 
@@ -37,7 +37,7 @@ export function resultGate(o: { apiKey: string; fetchImpl?: typeof fetch; model?
       method: "POST",
       headers: { Authorization: `Bearer ${o.apiKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(o.timeoutMs ?? 3000),
-      body: JSON.stringify({ model: o.model ?? MODEL, provider: { zdr: true }, state, questions }),
+      body: JSON.stringify({ model: o.model ?? modelOf("result-gate"), provider: { zdr: true }, state, questions }),
     });
     if (!res.ok) throw new Error(`decision model ${res.status}`);
     const data = (await res.json()) as { answers?: Record<string, { type?: string; choice?: string; probabilities?: Record<string, number> }> };

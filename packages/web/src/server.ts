@@ -23,6 +23,7 @@ import { dirname, join } from "node:path";
 import { AgentError, type AgentClient } from "./agent-client.js";
 import { type Banner, esc, layout } from "./html.js";
 import { metricsPage, type MetricsView } from "./metrics-page.js";
+import { modelsPage, type ModelsView } from "./models-page.js";
 import { setupDone, startPage, type SetupStatus } from "./start-page.js";
 import { policyPage, takeoverPage, vaultPage, type VaultView,
   type ApprovalView,
@@ -765,6 +766,11 @@ export function createConsole(o: ConsoleOptions): http.Server {
         const report = client ? await client.call<MetricsView>("metrics.get", { days: 30 }).catch(() => undefined) : undefined;
         return report ? page(ctx, 200, "Metrics", metricsPage(report), undefined, "/admin") : page(ctx, 502, "Metrics", messageBody("Metrics aren't available", "Kloru isn't reachable right now. Try again in a minute."), undefined, "/admin");
       }
+      if (path === "/admin/models") {
+        if (!isAdmin(ctx.user)) return page(ctx, 403, "Admin", messageBody("Admins only", "This page is for Kloru admins."));
+        const view = await o.clientFor(ctx.user)?.call<ModelsView>("models.get").catch(() => undefined);
+        return view ? page(ctx, 200, "Models", modelsPage(view, ctx.csrf!), banner, "/admin") : page(ctx, 502, "Models", messageBody("Models aren't available", "Kloru isn't reachable right now. Try again in a minute."), undefined, "/admin");
+      }
       if (path === "/admin") {
         if (!isAdmin(ctx.user)) return page(ctx, 403, "Admin", messageBody("Admins only", "This page is for Kloru admins."));
         return page(ctx, 200, "Admin", adminPage(await o.store.users(), await o.store.invites(), ctx.csrf!, o.callLogPath ? readCalls(o.callLogPath) : undefined, !!o.transcriptsDir, !!o.deskDir, o.version), banner, "/admin");
@@ -859,6 +865,19 @@ export function createConsole(o: ConsoleOptions): http.Server {
         if (!o.revokedArtifactsPath || !ARTIFACT_ID.test(id)) return page(ctx, 400, "Desk", messageBody("Can't take that down", "That isn't a page."));
         revokeArtifact(o.revokedArtifactsPath, id);
         return redirect(res, 303, "/admin/desk");
+      }
+      case "/admin/models": {
+        if (!isAdmin(ctx.user)) return page(ctx, 403, "Admin", messageBody("Admins only", "This page is for Kloru admins."));
+        const client = o.clientFor(ctx.user);
+        if (!client) return page(ctx, 503, "Models", messageBody("Kloru isn't reachable", "Try again in a minute."), undefined, "/admin");
+        try {
+          await client.call("models.set", { role: form.get("role") ?? "", model: form.get("reset") ? "" : form.get("model") ?? "", by: ctx.user.name ?? familyNow(ctx.user.phone)?.name ?? ctx.user.phone });
+          return redirect(res, 303, "/admin/models?done=saved");
+        } catch (err) {
+          // The agent says why a pick was refused (not offered, keeps data, can't do the job).
+          const view = await client.call<ModelsView>("models.get").catch(() => undefined);
+          return view ? page(ctx, 200, "Models", modelsPage(view, ctx.csrf!), agentBanner(err), "/admin") : page(ctx, 502, "Models", messageBody("Models aren't available", "Kloru isn't reachable right now. Try again in a minute."), undefined, "/admin");
+        }
       }
       case "/admin/invite":
       case "/admin/uninvite": {

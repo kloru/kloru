@@ -37,6 +37,8 @@ class Config:
     call_log_path: str | None
     transcripts_dir: str | None
     prefs_path: str | None
+    # models.json, where the website keeps the model picked for each job; read at each call.
+    models_path: str | None
     desk_enabled: bool
     langfuse: tuple[str, str, str] | None
     judge_model: str
@@ -76,6 +78,7 @@ def load_config(env: Mapping[str, str]) -> Config:
         call_log_path=env.get("CALL_LOG_PATH", "").strip() or None,
         transcripts_dir=env.get("TRANSCRIPTS_DIR", "").strip() or None,
         prefs_path=env.get("VOICE_PREFS_PATH", "").strip() or None,
+        models_path=env.get("KLORU_MODELS_PATH", "").strip() or None,
         # The desk (issues, PM, engineers, ops) instead of one-sentence tasks. Off: today's path.
         desk_enabled=env.get("VOICE_DESK", "off").strip().lower() in ("on", "true", "1", "yes"),
         langfuse=_langfuse(env),

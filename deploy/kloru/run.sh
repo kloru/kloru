@@ -21,7 +21,7 @@ KLORU_VOICE_PREFS=/data/voice/prefs.json INSTINCT_DATA_DIR=/data/instinct INSTIN
 pids+=($!)
 
 # The voice service has its own OpenRouter key (kloru-voice); the agent keeps OPENROUTER_API_KEY (kloru-agent).
-(cd /app/voice && CALL_LOG_PATH=/data/voice/calls.jsonl TRANSCRIPTS_DIR=/data/voice/transcripts VOICE_PREFS_PATH=/data/voice/prefs.json OPENROUTER_API_KEY="${VOICE_OPENROUTER_API_KEY:-${OPENROUTER_API_KEY:-}}" exec python -m voice.main) &
+(cd /app/voice && CALL_LOG_PATH=/data/voice/calls.jsonl TRANSCRIPTS_DIR=/data/voice/transcripts VOICE_PREFS_PATH=/data/voice/prefs.json KLORU_MODELS_PATH=/data/instinct/models.json OPENROUTER_API_KEY="${VOICE_OPENROUTER_API_KEY:-${OPENROUTER_API_KEY:-}}" exec python -m voice.main) &
 pids+=($!)
 
 KLORU_CALL_LOG=/data/voice/calls.jsonl KLORU_TRANSCRIPTS=/data/voice/transcripts KLORU_DESK_DIR=/data/instinct/repo KLORU_ALERTS=/data/voice/alerts.jsonl KLORU_VOICE_PREFS=/data/voice/prefs.json KLORU_DATA_DIR=/data/kloru KLORU_BIND=127.0.0.1 KLORU_PORT=8790 node packages/web/dist/main.js &

@@ -11,12 +11,10 @@
  */
 import type { ActionCheck, ActionDecision } from "@kloru/desk";
 import { chatCompletion } from "./openrouter.js";
+import { modelOf } from "./models.js";
 
-// Measured 2026-10-29 on the live eval: Flash 15/15 every run (~3 s); Flash Lite 13-14/15 (~1.2 s).
-const MODEL = "google/gemini-3.5-flash";
-
+// The second look, measured 2026-10-29 on the live eval: Gemini 3.5 Flash 15/15 every run (~3 s); Flash Lite 13-14/15 (~1.2 s).
 const FAST_URL = "https://openrouter.ai/api/alpha/decisions";
-const FAST_MODEL = "typesafe/jev-1.14";
 /** A "do" Jev is less sure of than this is weighed again by the writing model: a wrong "do" can't be taken back. */
 const SURE_DO = 0.8;
 
@@ -63,7 +61,7 @@ export function actionDecider(o: { apiKey: string; fetchImpl?: typeof fetch; mod
       }
     }
     const content = await chatCompletion({ apiKey: o.apiKey, ...(o.fetchImpl ? { fetchImpl: o.fetchImpl } : {}), timeoutMs: o.timeoutMs ?? 8000 }, {
-        model: o.model ?? MODEL,
+        model: o.model ?? modelOf("action-second-look"),
         messages: [
           { role: "system", content: DECIDE_PROMPT },
           { role: "user", content: describe(c) },
@@ -99,7 +97,7 @@ async function fastDo(o: { apiKey: string; fetchImpl?: typeof fetch; fastModel?:
     method: "POST",
     headers: { Authorization: `Bearer ${o.apiKey}`, "Content-Type": "application/json" },
     signal: AbortSignal.timeout(o.fastTimeoutMs ?? 3000),
-    body: JSON.stringify({ model: o.fastModel ?? FAST_MODEL, provider: { zdr: true }, state, questions }),
+    body: JSON.stringify({ model: o.fastModel ?? modelOf("action-check"), provider: { zdr: true }, state, questions }),
   });
   if (!res.ok) throw new Error(`decision model ${res.status}`);
   const data = (await res.json()) as { answers?: Record<string, { type?: string; choice?: string; probabilities?: Record<string, number> }> };

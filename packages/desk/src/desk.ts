@@ -23,6 +23,7 @@ import type { AppStore } from "./app-store.js";
 import { checkApp } from "./apps.js";
 import { OWNER_ONLY, PERMISSION_OF, PLUMBING, PUBLIC_NEEDS, PUBLIC_PLUMBING_NO, READ_ONLY, SURE, accessLine, describeNeed, hasNeed, type AccessCheck, type AccessDecision, type AccessReview, type Need } from "./access.js";
 import { mediaNote, type MediaItem, type MediaStore } from "./media.js";
+import { pickModel, type ModelChoice } from "./model-choice.js";
 import { clip, type Memory } from "./memory.js";
 import { PersonOutbox, localTime, whenIn, type FirstPassCheck, type FirstPassChoice, type Organizer, type OutboxPerson } from "./outbox.js";
 import type { OutboxItem, OutboxThread, OutboxWhy } from "./outbox-store.js";
@@ -207,13 +208,13 @@ export interface DeskOptions {
   log?: (m: string) => void;
   telemetry?: DeskTelemetry;
   /** A smarter model for engineers (reading, research, drafting). Default: the agent's model. */
-  engineerModel?: Model<any>;
+  engineerModel?: ModelChoice;
   /** A smarter model for the engineer when the work is an app (a whole program to write and debug); default: engineerModel. */
-  appEngineerModel?: Model<any>;
+  appEngineerModel?: ModelChoice;
   /** QA tries each app an engineer made or changed (it needs app_test, so a browser) and sends real bugs back before the PM sees the result. */
   qa?: boolean;
   /** QA's model; default: the app engineer's. */
-  qaModel?: Model<any>;
+  qaModel?: ModelChoice;
   /** The result gate: whether a changed app needs trying before the PM reviews the result. Without it, or when it fails, every changed app is tried. */
   decideResult?: (c: ResultCheck) => Promise<ResultDecision>;
   /** How long the desk waits for `decideResult` before it has the app tried. Default 10 s. */
@@ -490,10 +491,8 @@ export class Desk {
   private readonly inflight = new Map<number, number>();
   private readonly telemetry: DeskTelemetry | undefined;
   private readonly contentAllowed: (phone: string) => boolean;
-  private readonly engineerModel: Model<any> | undefined;
-  private readonly appEngineerModel: Model<any> | undefined;
+  private readonly models: { engineer?: ModelChoice; appEngineer?: ModelChoice; qa?: ModelChoice };
   private readonly qa: boolean;
-  private readonly qaModel: Model<any> | undefined;
   /** Issues whose app QA is trying now, with what arrived for the engineer meanwhile. */
   private readonly qaRunning = new Map<number, string[]>();
   private readonly decideResult: ((c: ResultCheck) => Promise<ResultDecision>) | undefined;
@@ -561,10 +560,8 @@ export class Desk {
     this.log = o.log ?? (() => {});
     this.telemetry = o.telemetry;
     this.contentAllowed = o.contentAllowed ?? (() => false);
-    this.engineerModel = o.engineerModel;
-    this.appEngineerModel = o.appEngineerModel ?? o.engineerModel;
+    this.models = { ...(o.engineerModel ? { engineer: o.engineerModel } : {}), ...(o.appEngineerModel ? { appEngineer: o.appEngineerModel } : {}), ...(o.qaModel ? { qa: o.qaModel } : {}) };
     this.qa = o.qa ?? false;
-    this.qaModel = o.qaModel ?? this.appEngineerModel;
     this.decideResult = o.decideResult;
     this.resultGateMs = o.resultGateMs ?? 10_000;
     this.memory = o.memory;
@@ -3281,6 +3278,19 @@ export class Desk {
       (own.length ? `\nThe caller's own email: ${own.join(", ")}.` : "") +
       (theirs ? `\n\nThe caller's guidelines (these win):\n${theirs}` : "")
     );
+  }
+
+  // Read as each worker starts: a model picked on the website takes effect on the next run.
+  private get engineerModel(): Model<any> | undefined {
+    return pickModel(this.models.engineer);
+  }
+
+  private get appEngineerModel(): Model<any> | undefined {
+    return pickModel(this.models.appEngineer) ?? this.engineerModel;
+  }
+
+  private get qaModel(): Model<any> | undefined {
+    return pickModel(this.models.qa) ?? this.appEngineerModel;
   }
 
   private memoryRole(issueId: number): WorkerRole {

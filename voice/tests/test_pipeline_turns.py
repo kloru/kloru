@@ -36,7 +36,7 @@ class Scripted(VoiceLLM):
 
 
 async def play(script):
-    cfg = type("C", (), {"voice_model": "m", "voice_reasoning_effort": "minimal"})()
+    cfg = type("C", (), {"voice_model": "m", "voice_reasoning_effort": "minimal", "models_path": None})()
     llm = Scripted(script, api_key="x", settings=llm_settings(cfg, "sys"))
     holder = {}
 

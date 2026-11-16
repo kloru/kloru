@@ -144,7 +144,7 @@ def test_prompt_speaks_before_calling_start_task_and_checks_every_calendar():
 def test_llm_settings_turn_reasoning_down():
     s = llm_settings(CFG, "prompt")
     assert s.model == CFG.voice_model and s.system_instruction == "prompt"
-    assert s.extra == {"extra_body": {"reasoning": {"effort": "minimal"}}}
+    assert s.extra == {"extra_body": {"reasoning": {"effort": "minimal"}, "provider": {"zdr": True}}}
     assert llm_settings(replace(CFG, voice_reasoning_effort="low"), "p").extra["extra_body"]["reasoning"]["effort"] == "low"
 
 

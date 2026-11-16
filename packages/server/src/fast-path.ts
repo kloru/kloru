@@ -15,13 +15,11 @@
 import type { FastAnswer, FastChange, Issue } from "@kloru/desk";
 import { chatCompletion } from "./openrouter.js";
 import { formatItem, freshness, zoned, type Item, type Store } from "@kloru/store";
+import { modelOf } from "./models.js";
 
-// Measured 2026-10-29: Flash Lite decides in ~1.3 s and writes in ~1.1 s (Luna ~3.0 and ~1.6). Flash decides
+// Measured 2026-10-29 on Gemini 3.5: Flash Lite decides in ~1.3 s and writes in ~1.1 s (Luna ~3.0 and ~1.6). Flash decides
 // ~0.5 s slower but found both copies of a trip that Lite missed half the time (live test), so it plans.
-const DECISION_MODEL = "google/gemini-3.5-flash";
-const WRITER_MODEL = "google/gemini-3.5-flash-lite";
 // A change is worth a second more: Flash Lite missed one of two matching events and added events nobody asked for.
-const CHANGE_MODEL = "google/gemini-3.5-flash";
 
 interface Lookup {
   type: "calendar" | "search";
@@ -142,7 +140,7 @@ export function storeFastPath(o: FastPathOptions): (issue: Issue) => Promise<Fas
     const tasks = issue.filedBy?.phone ? (o.tasks?.(issue.filedBy.phone) ?? []) : [];
     const earlier = tasks.length ? `\n\nKloru's earlier tasks for them (newest first):\n${tasks.map((x) => `- ${x}`).join("\n")}` : "";
     const raw = await chat(o, {
-      model: o.decisionModel ?? DECISION_MODEL,
+      model: o.decisionModel ?? modelOf("fast-path-plan"),
       messages: [
         { role: "system", content: `${PLAN_PROMPT}\nNow: ${today} (${o.timezone}).` },
         { role: "user", content: `${issue.request}${earlier}` },
@@ -185,7 +183,7 @@ export function storeFastPath(o: FastPathOptions): (issue: Issue) => Promise<Fas
     if (plan.decision === "change") return change(o, issue, [...items.values()].slice(0, 40), today, `From the store (${fresh.text})`);
     const lines = [...[...items.values()].slice(0, 40).map((i) => formatItem(i, o.timezone)), ...tasks.map((x) => `- Earlier task ${x}`)];
     const answer = await chat(o, {
-      model: o.writerModel ?? WRITER_MODEL,
+      model: o.writerModel ?? modelOf("fast-path-writer"),
       messages: [
         { role: "system", content: `${WRITE_PROMPT}\nNow: ${today} (${o.timezone}).` },
         { role: "user", content: `Question: ${issue.request}\n\nItems:\n${lines.join("\n") || "(none)"}` },
@@ -212,7 +210,7 @@ interface Picked {
 async function change(o: FastPathOptions, issue: Issue, found: Item[], today: string, source: string): Promise<FastAnswer | undefined> {
   const lines = found.map((i, n) => `[${n + 1}] ${formatItem(i, o.timezone).replace(/^- /, "")}`);
   const raw = await chat(o, {
-    model: o.changeModel ?? CHANGE_MODEL,
+    model: o.changeModel ?? modelOf("fast-path-change"),
     messages: [
       { role: "system", content: `${CHANGE_PROMPT}\nNow: ${today} (${o.timezone}).` },
       { role: "user", content: `Request: ${issue.request}\n\nItems:\n${lines.join("\n") || "(none)"}` },

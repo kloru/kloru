@@ -5,9 +5,9 @@
  * (packages/desk/src/access.ts).
  */
 import { describeNeed, type AccessCheck, type AccessChoice, type AccessDecision } from "@kloru/desk";
+import { modelOf } from "./models.js";
 
 const URL = "https://openrouter.ai/api/alpha/decisions";
-const MODEL = "typesafe/jev-1.14";
 
 const CHOICES: Record<AccessChoice, string> = {
   allow: "Allow: their policy gives this person this, or doesn't mention it (anything it doesn't mention is open to the family).",
@@ -41,7 +41,7 @@ export function accessDecider(o: { apiKey: string; fetchImpl?: typeof fetch; mod
       method: "POST",
       headers: { Authorization: `Bearer ${o.apiKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(o.timeoutMs ?? 3000),
-      body: JSON.stringify({ model: o.model ?? MODEL, provider: { zdr: true }, state, questions }),
+      body: JSON.stringify({ model: o.model ?? modelOf("access"), provider: { zdr: true }, state, questions }),
     });
     if (!res.ok) throw new Error(`decision model ${res.status}`);
     const data = (await res.json()) as { answers?: Record<string, { type?: string; choice?: string; probabilities?: Record<string, number> }> };

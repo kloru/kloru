@@ -20,6 +20,7 @@ from loguru import logger
 from pipecat.observers.speaking_observer import SpeechEvent, SpeechEventKind as K
 
 from voice.config import Config
+from voice.models import chosen
 
 LangfuseKeys = tuple[str, str, str]  # base_url, public key, secret key
 
@@ -215,7 +216,7 @@ async def judge_call(cfg: Config, lines: list[str], client: httpx.AsyncClient | 
         res = await client.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={"Authorization": f"Bearer {cfg.openrouter_api_key}"},
-            json={"model": cfg.judge_model, "provider": {"zdr": True}, "messages": [{"role": "system", "content": JUDGE_PROMPT}, {"role": "user", "content": "\n".join(lines)}], "max_tokens": 2000, "response_format": {"type": "json_object"}},
+            json={"model": chosen(cfg.models_path, "call-judge", cfg.judge_model), "provider": {"zdr": True}, "messages": [{"role": "system", "content": JUDGE_PROMPT}, {"role": "user", "content": "\n".join(lines)}], "max_tokens": 2000, "response_format": {"type": "json_object"}},
             timeout=60,
         )
         res.raise_for_status()

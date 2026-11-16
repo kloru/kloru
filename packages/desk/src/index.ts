@@ -5,6 +5,7 @@ export { REVIEW_ROUNDS, canReview, openReview, passReview, reviewOf, sendBackRev
 export { andThen, err, map, ok, type Result } from "./result.js";
 export { Traces, readTrace, toSpan, traceAgent, type Timed, type TraceKind, type TraceSpan, type TracedAgent } from "./trace.js";
 export { Desk, DeskConflict, describeWhen, describeEvent, EVENT_HEADING, type DeskSpan, type DeskTelemetry, type CloseStatus, type Notice, type NoticeChannel, type NoticeMedia, type ConversationSend, type DraftCheck, type MessageCheck, type MessageDecision, type ResultCheck, type ResultDecision, type FastAnswer, type FastChange, type ExecuteApp, type DeskOptions, type ActionCheck, type ActionDecision, type Planner, type Trigger, type WorkerHost } from "./desk.js";
+export type { ModelChoice } from "./model-choice.js";
 export { PM_RULES, TechnicalPM, pmTools, snapshot, type TechnicalPMOptions } from "./pm.js";
 export { Memory, parseFile, type MemoryFile, type MemoryOwner } from "./memory.js";
 export { MEMORY_READ_TOOLS, MEMORY_WRITE_TOOLS, memoryTools } from "./memory-tools.js";

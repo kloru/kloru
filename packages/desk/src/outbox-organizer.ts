@@ -6,6 +6,7 @@
  */
 import { Agent, type AgentMessage, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core";
 import { createInitialSystemMessage, toToolDeclaration, type Model } from "@earendil-works/pi-ai";
+import { pickModel } from "./model-choice.js";
 import { Type } from "typebox";
 import { clip } from "./memory.js";
 import { localTime, whenIn, type Organizer, type OrganizerActions, type OrganizerView } from "./outbox.js";
@@ -101,7 +102,7 @@ export function organizerTools(view: OrganizerView, act: OrganizerActions, timez
 }
 
 export interface OutboxOrganizerOptions {
-  model: Model<any>;
+  model: Model<any> | (() => Model<any>);
   streamFn: StreamFn;
   getApiKey?: (provider: string) => string | undefined | Promise<string | undefined>;
   thinking?: "off" | "minimal" | "low" | "medium" | "high";
@@ -119,7 +120,7 @@ export class OutboxOrganizer implements Organizer {
     const tools = organizerTools(view, act, timezone, () => actions++);
     const system = createInitialSystemMessage(ORGANIZER_RULES, tools.map(toToolDeclaration));
     const agent = new Agent({
-      initialState: { systemPrompt: "", model: this.o.model, thinkingLevel: this.o.thinking ?? "low", tools, messages: system ? [system] : [] },
+      initialState: { systemPrompt: "", model: pickModel(this.o.model)!, thinkingLevel: this.o.thinking ?? "low", tools, messages: system ? [system] : [] },
       streamFn: this.o.streamFn,
       ...(this.o.getApiKey ? { getApiKey: this.o.getApiKey } : {}),
       toolExecution: "sequential",

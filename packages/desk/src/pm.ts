@@ -6,6 +6,7 @@
  */
 import { Agent, type AgentMessage, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core";
 import { createInitialSystemMessage, toToolDeclaration, type Model } from "@earendil-works/pi-ai";
+import { pickModel } from "./model-choice.js";
 import { Type, type TSchema } from "typebox";
 import type { CloseStatus, Desk, Planner, Trigger } from "./desk.js";
 import { PERMISSIONS, toNeeds } from "./access.js";
@@ -249,7 +250,7 @@ export function pmTools(desk: Desk, done?: (name: string, args: any) => boolean 
 }
 
 export interface TechnicalPMOptions {
-  model: Model<any>;
+  model: Model<any> | (() => Model<any>);
   streamFn: StreamFn;
   getApiKey?: (provider: string) => string | undefined | Promise<string | undefined>;
   thinking?: "off" | "minimal" | "low" | "medium" | "high";
@@ -277,7 +278,7 @@ export class TechnicalPM implements Planner {
     const tools = pmTools(desk, (name, args) => (actions++, ends(name, args)));
     const system = createInitialSystemMessage(PM_RULES, tools.map(toToolDeclaration));
     const agent = new Agent({
-      initialState: { systemPrompt: "", model: this.o.model, thinkingLevel: this.o.thinking ?? "low", tools, messages: system ? [system] : [] },
+      initialState: { systemPrompt: "", model: pickModel(this.o.model)!, thinkingLevel: this.o.thinking ?? "low", tools, messages: system ? [system] : [] },
       streamFn: this.o.streamFn,
       ...(this.o.getApiKey ? { getApiKey: this.o.getApiKey } : {}),
       toolExecution: "sequential",

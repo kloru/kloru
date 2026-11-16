@@ -1303,6 +1303,71 @@ describe("admin metrics (2026-11-03)", () => {
   });
 });
 
+describe("Admin → Models", () => {
+  const view = (pm = "google/gemini-3.5-flash", by?: string) => ({
+    roles: [
+      { id: "pm", label: "PM", what: "Triages each request.", group: "The desk", kind: "tools", model: pm, default: "google/gemini-3.5-flash", ...(by ? { by, at: "2026-11-16T12:00:00.000Z" } : {}) },
+      { id: "access", label: "Access review", what: "Weighs a request.", group: "Decisions", kind: "decision", model: "typesafe/jev-1.14", default: "typesafe/jev-1.14" },
+    ],
+    catalog: {
+      ok: true,
+      value: [
+        { id: "google/gemini-3.8-flash", name: "Google: Gemini 3.8 Flash", in: 0.83, out: 4.13, since: "2026-09-02", kinds: ["text", "tools", "json"] },
+        { id: "google/gemini-3.5-flash", name: "Google: Gemini 3.5 Flash", in: 1.5, out: 9, since: "2026-05-19", kinds: ["text", "tools", "json"] },
+        { id: "typesafe/jev-1.14", name: "TypeSafe: Jev 1.14", in: 0.042, out: 0, since: "2026-10-14", kinds: ["decision"] },
+      ],
+    },
+  });
+
+  it("shows each job's model with when it was listed and its price, and offers only models that can do the job", async () => {
+    const client = new FakeClient({ "models.get": () => view() });
+    const c = await start({ client });
+    const admin = await c.signedIn();
+    const html = await (await c.get("/admin/models", admin.cookie)).text();
+    expect(html).toContain('name="model" list="models-tools" value="google/gemini-3.5-flash"');
+    expect(html).toContain("Listed 2026-05-19 · $1.50 in, $9.00 out per million tokens. The default.");
+    expect(html).toMatch(/<datalist id="models-decision"><option value="typesafe\/jev-1.14"[^>]*><\/datalist>/);
+    expect(html).toMatch(/<datalist id="models-tools"><option value="google\/gemini-3.8-flash" label="Google: Gemini 3.8 Flash · \$0.83 in, \$4.13 out · 2026-09-02">/);
+    expect(html).not.toContain("Back to the default");
+    expect(await (await c.get("/admin", admin.cookie)).text()).toContain('href="/admin/models"');
+  });
+
+  it("a pick goes to the agent with who made it; what the agent refuses is shown, and reset puts the default back", async () => {
+    let pm = "google/gemini-3.5-flash";
+    const client = new FakeClient({
+      "models.get": () => view(pm, pm === "google/gemini-3.5-flash" ? undefined : "Jordan"),
+      "models.set": (a) => {
+        if (a.model === "typesafe/jev-1.14") throw new AgentError(400, "PM needs a model that writes text and calls tools; typesafe/jev-1.14 doesn't.");
+        pm = String(a.model) || "google/gemini-3.5-flash";
+        return {};
+      },
+    });
+    const c = await start({ client });
+    const admin = await c.signedIn();
+    const ok = await c.post("/admin/models", { role: "pm", model: "google/gemini-3.8-flash", csrf: admin.csrf }, admin.cookie);
+    expect([ok.status, ok.headers.get("location")]).toEqual([303, "/admin/models?done=saved"]);
+    expect(client.calls.find(([op]) => op === "models.set")![1]).toEqual({ role: "pm", model: "google/gemini-3.8-flash", by: expect.any(String) });
+    const html = await (await c.get("/admin/models?done=saved", admin.cookie)).text();
+    expect(html).toContain("Picked by Jordan on 2026-11-16.");
+    expect(html).toContain("Back to the default (google/gemini-3.5-flash)");
+    const refused = await (await c.post("/admin/models", { role: "pm", model: "typesafe/jev-1.14", csrf: admin.csrf }, admin.cookie)).text();
+    expect(refused).toContain("PM needs a model that writes text and calls tools");
+    await c.post("/admin/models", { role: "pm", model: "google/gemini-3.8-flash", reset: "1", csrf: admin.csrf }, admin.cookie);
+    expect(client.calls.at(-1)![1]).toMatchObject({ role: "pm", model: "" });
+  });
+
+  it("is the owners' alone, and says so when OpenRouter's list can't be read", async () => {
+    const client = new FakeClient({ "models.get": () => ({ ...view(), catalog: { ok: false, error: "OpenRouter's model list couldn't be read (OpenRouter 503)" } }) });
+    const c = await start({ client });
+    expect(await (await c.get("/admin/models", (await c.signedIn()).cookie)).text()).toContain("Nothing can be changed until it can.");
+    await c.store.invite("+14155550100", ADMIN);
+    const sam = await c.signedIn("+14155550100");
+    expect((await c.get("/admin/models", sam.cookie)).status).toBe(403);
+    expect((await c.post("/admin/models", { role: "pm", model: "google/gemini-3.8-flash", csrf: sam.csrf }, sam.cookie)).status).toBe(403);
+    expect(client.calls.some(([op]) => op === "models.set")).toBe(false);
+  });
+});
+
 describe("Get started (2026-11-03)", () => {
   const fresh = { apps: [], family: 0, texting: { number: "+14155550199", handle: "jordan-kloru" }, vault: 0, policy: false, conversations: 0 };
   it("a new owner gets the checklist; each step links to the page that does it", async () => {

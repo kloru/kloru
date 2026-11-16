@@ -59,6 +59,7 @@ import { accessDecider } from "./access-decider.js";
 import { browserTools, findChromium, type BrowserPool, type TakeoverInput } from "./browser-tools.js";
 import { scriptTool } from "./script-tool.js";
 import { Metrics } from "./metrics.js";
+import { Models, isRole, modelOf, useModels, type RoleId } from "./models.js";
 import { REDRAFT, draftChecker, feedbackDecider, shapeDecider } from "./message-shape.js";
 import { textTalker } from "./text-talker.js";
 import { CALL_ORIGINATIONS, InkboxA2A, InkboxChannel, InkboxInboundHydrator, InkboxProvisioner, messagingTools, sendFileTool, voiceInstructions } from "@kloru/inkbox";
@@ -262,6 +263,34 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
 
   const model = opts.model ?? resolveModel(config.model.primary, env);
   const modelSpec = `${model.provider}/${model.id}`;
+  // Which model does each job: picked on the website (Admin → Models), else the environment's, else models.ts.
+  const envModel = (spec: string | undefined) => spec?.trim().replace(/^openrouter\//, "") || undefined;
+  const mainId = envModel(modelSpec)!;
+  const engineerId = envModel(env.KLORU_ENGINEER_MODEL) ?? mainId;
+  const appEngineerId = envModel(env.KLORU_APP_ENGINEER_MODEL) ?? engineerId;
+  const pmId = envModel(env.KLORU_PM_MODEL) ?? mainId;
+  const models = new Models(state, {
+    defaults: {
+      pm: pmId,
+      organizer: pmId,
+      engineer: engineerId,
+      "app-engineer": appEngineerId,
+      qa: envModel(env.KLORU_QA_MODEL) ?? appEngineerId,
+      ...(envModel(env.VOICE_MODEL) ? { voice: envModel(env.VOICE_MODEL)! } : {}),
+      ...(envModel(env.KLORU_JUDGE_MODEL) ? { "call-judge": envModel(env.KLORU_JUDGE_MODEL)! } : {}),
+      ...(envModel(env.IMAGE_MODEL) ? { image: envModel(env.IMAGE_MODEL)! } : {}),
+    },
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+  });
+  useModels(models);
+  // An agent's model as each run starts: the one picked for the job (through OpenRouter), else what it has always run on.
+  const pickedModels = new Map<string, Model<any>>();
+  const picked = (role: RoleId, fallback: Model<any>) => (): Model<any> => {
+    const id = models.chosen(role);
+    if (!id) return fallback;
+    if (!pickedModels.has(id)) pickedModels.set(id, resolveModel(`openrouter/${id}`, env));
+    return pickedModels.get(id)!;
+  };
 
   const inkbox = inkboxSettings(env, config);
   const a2a = inkbox ? new InkboxA2A({
@@ -318,7 +347,9 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       // The shell never sees the image key.
       ...(() => {
         const images = imagesFrom(env);
-        return images ? { images } : {};
+        if (!images) return {};
+        // Through OpenRouter the image model is the one picked on the website, read at each drawing.
+        return { images: images.baseUrl?.includes("openrouter.ai") ? { apiKey: images.apiKey, baseUrl: images.baseUrl, get model() { return modelOf("image"); } } : images };
       })(),
       ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
       ...(env.BRAVE_SEARCH_API_KEY ? { searchApiKey: env.BRAVE_SEARCH_API_KEY } : {}),
@@ -719,6 +750,15 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
         },
         conversations: (phone: string) => desk?.repo.callsFor(phone).length ?? 0,
         metrics: { report: (days?: number) => (metrics ? metrics.report(days) : Promise.reject(new Error("metrics aren't running yet"))) },
+        // Picking needs OpenRouter: every pick runs through it.
+        ...(env.OPENROUTER_API_KEY?.trim()
+          ? {
+              models: {
+                get: async () => ({ roles: models.list(), catalog: await models.catalog() }),
+                set: (role: string, model: string, by: string) => (isRole(role) ? models.set(role, model, by) : Promise.resolve({ ok: false as const, error: "no such job" })),
+              },
+            }
+          : {}),
         appServers: { wake: (id: string, test: boolean) => appServers?.ensure(id, test) ?? Promise.resolve({ ok: false as const, error: "this agent runs no app servers" }) },
         family: (phone: string) => {
           const who = familyCallers(config.owner, contacts)(phone);
@@ -930,7 +970,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
         { trace: (issue: number, t: Timed) => desk?.span(issue, t) },
       ),
       planner: new TechnicalPM({
-        model: pmModel,
+        model: picked("pm", pmModel),
         streamFn: opts.streamFn ?? (streamSimple as StreamFn),
         getApiKey: (provider: string) => apiKeyFor(provider, env),
         log,
@@ -947,9 +987,9 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       log,
       ...(langfuse ? { telemetry: langfuse.telemetry } : {}),
       contentAllowed: prefsAllowContent(env.KLORU_VOICE_PREFS?.trim()),
-      ...(engineerModel ? { engineerModel } : {}),
-      ...(appEngineerModel ? { appEngineerModel } : {}),
-      ...(qaModel ? { qaModel } : {}),
+      engineerModel: picked("engineer", engineerModel ?? model),
+      appEngineerModel: picked("app-engineer", appEngineerModel ?? engineerModel ?? model),
+      qaModel: picked("qa", qaModel ?? appEngineerModel ?? engineerModel ?? model),
       qa: qaOn,
       // The result gate (Jev): a small change to an app goes on without a QA run; unsure or broken means it's tried.
       ...(fastKey && qaOn && env.KLORU_RESULT_GATE?.trim().toLowerCase() !== "off" ? { decideResult: resultGate({ apiKey: fastKey }) } : {}),
@@ -964,7 +1004,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       // Each person's outbox: a fast pass (Jev) on every message for them, and an organizer agent for what waits.
       ...(fastKey && env.KLORU_COMS?.trim() !== "off" ? { firstPass: outboxDecider({ apiKey: fastKey, log }) } : {}),
       organizer: new OutboxOrganizer({
-        model: pmModel,
+        model: picked("organizer", pmModel),
         streamFn: opts.streamFn ?? (streamSimple as StreamFn),
         getApiKey: (provider: string) => apiKeyFor(provider, env),
         log,

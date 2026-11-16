@@ -3,8 +3,9 @@
  * the automation's condition, in the person's words? Jev answers run or skip; a full run (the PM and
  * a worker) happens only on run. Unsure, slow or failing: run, so nothing they asked for is missed.
  */
+import { modelOf } from "./models.js";
+
 const URL = "https://openrouter.ai/api/alpha/decisions";
-const MODEL = "typesafe/jev-1.14";
 
 const CHOICES = {
   run: "Run it: this event is what the automation waits for, or it might be.",
@@ -36,7 +37,7 @@ export function eventGate(o: { apiKey: string; fetchImpl?: typeof fetch; model?:
       headers: { Authorization: `Bearer ${o.apiKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(o.timeoutMs ?? 5000),
       body: JSON.stringify({
-        model: o.model ?? MODEL,
+        model: o.model ?? modelOf("event-gate"),
         provider: { zdr: true },
         state: {
           automation: g.automation,

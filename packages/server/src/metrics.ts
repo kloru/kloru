@@ -13,10 +13,10 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MetricsDb, type Price } from "./metrics-db.js";
+import { modelOf } from "./models.js";
 import type { Issue, LedgerEntry } from "@kloru/desk";
 
 const DECISIONS = "https://openrouter.ai/api/alpha/decisions";
-const JEV = "typesafe/jev-1.14";
 const FINISHED = new Set(["done", "resolved", "merged"]);
 const HOUR = 3_600_000;
 const MODELS = "https://openrouter.ai/api/v1/models";
@@ -254,7 +254,7 @@ export class Metrics {
       method: "POST",
       headers: { Authorization: `Bearer ${this.o.decisionKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(10_000),
-      body: JSON.stringify({ model: JEV, provider: { zdr: true }, state: { request, result: result.slice(0, 1500), actions_done: actions }, questions: { minutes: { type: "choice", instructions: "How long would this have taken the person to do themselves, by hand?", criteria } } }),
+      body: JSON.stringify({ model: modelOf("time-saved"), provider: { zdr: true }, state: { request, result: result.slice(0, 1500), actions_done: actions }, questions: { minutes: { type: "choice", instructions: "How long would this have taken the person to do themselves, by hand?", criteria } } }),
     });
     if (!r.ok) throw new Error(`decision model ${r.status}`);
     const d = (await r.json()) as { answers?: { minutes?: { choice?: string } } };

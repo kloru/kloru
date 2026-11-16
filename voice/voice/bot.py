@@ -34,6 +34,7 @@ from voice.checks import CallFacts, ErrorTally, Failure, alert, check_scores, ru
 from voice.config import Config
 from voice.desk import DeskClient, merge_message
 from voice.keepalive import KeepAlive
+from voice.models import chosen
 from voice.quiet import QUIET, QuietFilter, RepeatFilter
 from voice.observability import LangfuseClient, call_metrics, judge_call, style_metrics
 from voice.instinct import ask_instinct
@@ -92,7 +93,7 @@ def system_prompt(now: datetime, desk: bool = False) -> str:
 def llm_settings(cfg: Config, prompt: str) -> OpenRouterLLMService.Settings:
     # Luna reasons before speaking unless told not to; at minimal effort the first word comes ~1.5 s sooner.
     return OpenRouterLLMService.Settings(
-        model=cfg.voice_model,
+        model=chosen(cfg.models_path, "voice", cfg.voice_model),
         system_instruction=prompt,
         # Zero-data-retention providers only: calls carry family data.
         extra={"extra_body": {"reasoning": {"effort": cfg.voice_reasoning_effort}, "provider": {"zdr": True}}},

@@ -3,8 +3,9 @@
  * concise", "text me, don't email"), as a yes/no on Jev (decision-models skill). Yes: it goes into
  * their guidelines at once, which every agent is given.
  */
+import { modelOf } from "./models.js";
+
 const URL = "https://openrouter.ai/api/alpha/decisions";
-const MODEL = "typesafe/jev-1.14";
 
 export function guidelineCheck(o: { apiKey: string; fetchImpl?: typeof fetch; model?: string; timeoutMs?: number }): (text: string) => Promise<boolean> {
   return async (text) => {
@@ -13,7 +14,7 @@ export function guidelineCheck(o: { apiKey: string; fetchImpl?: typeof fetch; mo
       headers: { Authorization: `Bearer ${o.apiKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(o.timeoutMs ?? 3000),
       body: JSON.stringify({
-        model: o.model ?? MODEL,
+        model: o.model ?? modelOf("guideline"),
         provider: { zdr: true },
         state: { what_they_said: text },
         questions: {

@@ -5,9 +5,9 @@
  * it weighs, not rules in code; when it isn't sure, the organizer gets it.
  */
 import type { FirstPassCheck, FirstPassChoice, OutboxItem } from "@kloru/desk";
+import { modelOf } from "./models.js";
 
 const URL = "https://openrouter.ai/api/alpha/decisions";
-const MODEL = "typesafe/jev-1.14";
 
 export const FIRST_PASS = {
   send: "Send it now, as written: they are waiting for exactly this (the answer to what they just wrote, a question the work is stopped on, a reminder at the time they chose, a result they asked for moments ago in a conversation they're still in, even new results on a page they already have), they don't have it yet, it is short, and nothing else waiting or still being worked on for them belongs with it.",
@@ -72,7 +72,7 @@ export function outboxDecider(o: { apiKey: string; fetchImpl?: typeof fetch; mod
       method: "POST",
       headers: { Authorization: `Bearer ${o.apiKey}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(o.timeoutMs ?? 3000),
-      body: JSON.stringify({ model: o.model ?? MODEL, provider: { zdr: true }, state, questions }),
+      body: JSON.stringify({ model: o.model ?? modelOf("outbox-pass"), provider: { zdr: true }, state, questions }),
     });
     if (!res.ok) throw new Error(`decision model ${res.status}`);
     const data = (await res.json()) as { answers?: Record<string, { type?: string; choice?: string; probabilities?: Record<string, number> }> };

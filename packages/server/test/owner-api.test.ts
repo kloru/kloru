@@ -27,6 +27,20 @@ describe("owner API", () => {
     expect((await call("nope.op")).status).toBe(404);
   });
 
+  it("reads which model does each job; a pick is audited with who made it, and a refused one says why", async () => {
+    const set = vi.fn(async (role: string, model: string) => (model === "nope/nope" ? { ok: false as const, error: "OpenRouter doesn't offer nope/nope through a provider that keeps no data." } : { ok: true as const, value: { id: role, model } }));
+    const { call, state } = setup({ models: { get: async () => ({ roles: [{ id: "pm" }], catalog: { ok: true, value: [] } }), set } });
+    expect((await call("models.get")).result).toEqual({ roles: [{ id: "pm" }], catalog: { ok: true, value: [] } });
+    expect((await call("models.set", { role: "pm", model: "google/gemini-3.8-flash", by: "Evan" })).result).toEqual({ id: "pm", model: "google/gemini-3.8-flash" });
+    expect(set).toHaveBeenCalledWith("pm", "google/gemini-3.8-flash", "Evan");
+    expect(readFileSync(state.path("audit.jsonl"), "utf8")).toContain('"action":"model_set","role":"pm","model":"google/gemini-3.8-flash","by":"Evan"');
+    const refused = await call("models.set", { role: "pm", model: "nope/nope", by: "Evan" });
+    expect(refused.status).toBe(400);
+    expect(JSON.stringify(refused)).toContain("OpenRouter doesn't offer nope/nope");
+    expect(readFileSync(state.path("audit.jsonl"), "utf8")).not.toContain("nope/nope");
+    expect((await setup().call("models.get")).status).toBe(404);
+  });
+
   it("returns status", async () => {
     expect((await setup().call("status.get")).result).toEqual({ ok: true });
   });

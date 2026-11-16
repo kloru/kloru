@@ -35,7 +35,7 @@ class Scripted(VoiceLLM):
 
 
 def scripted(**kw) -> Scripted:
-    cfg = type("C", (), {"voice_model": "m", "voice_reasoning_effort": "minimal"})()
+    cfg = type("C", (), {"voice_model": "m", "voice_reasoning_effort": "minimal", "models_path": None})()
     return Scripted(api_key="x", settings=llm_settings(cfg, "sys"), **kw)
 
 

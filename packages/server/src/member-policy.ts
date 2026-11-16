@@ -7,8 +7,7 @@
 import type { MemberPlan } from "@kloru/desk";
 import { normalizePhone, type Capability } from "@kloru/core";
 import { chatCompletion } from "./openrouter.js";
-
-const MODEL = "google/gemini-3.5-flash";
+import { modelOf } from "./models.js";
 
 /** What a member may be given, in the owner's terms. Shells, trust, memory, schedules, invites and calls stay the owner's. */
 const PLAIN: Partial<Record<Capability, string>> = {
@@ -141,7 +140,7 @@ export function memberPolicy(o: { apiKey: string; members: () => string; /** Whe
       `Already in the family:\n${o.members() || "nobody yet"}`,
     ].join("\n\n");
     const content = await chatCompletion({ apiKey: o.apiKey, ...(o.fetchImpl ? { fetchImpl: o.fetchImpl } : {}), timeoutMs: o.timeoutMs ?? 10_000 }, {
-      model: o.model ?? MODEL,
+      model: o.model ?? modelOf("member-policy"),
       reasoning: { effort: "minimal" },
       messages: [
         { role: "system", content: MEMBER_PROMPT },

@@ -76,6 +76,11 @@ export interface OwnerApiDeps {
   conversations?: (phone: string) => number;
   /** The admin metrics: cost a day, what got done, time saved, who uses it (metrics.ts). */
   metrics?: { report(days?: number): Promise<unknown> };
+  /** Which model does each job (models.ts): read by any owner, and changed by one, checked against OpenRouter's list. */
+  models?: {
+    get(): Promise<unknown>;
+    set(role: string, model: string, by: string): Promise<{ ok: true; value: unknown } | { ok: false; error: string }>;
+  };
   now?: () => Date;
   log?: (message: string) => void;
 }
@@ -142,6 +147,16 @@ export function createOwnerApi(deps: OwnerApiDeps): OwnerApi {
   const ops: Record<string, (args: Record<string, unknown>) => Promise<OwnerApiResult> | OwnerApiResult> = {
     "status.get": () => ok(deps.status()),
     "metrics.get": async (a) => (deps.metrics ? ok(await deps.metrics.report(Math.min(Math.max(Number(a.days) || 30, 1), 90))) : fail(404, "metrics aren't kept here")),
+    "models.get": async () => (deps.models ? ok(await deps.models.get()) : fail(404, "models can't be picked here")),
+    "models.set": async (a) => {
+      if (!deps.models) return fail(404, "models can't be picked here");
+      const role = String(a.role ?? "");
+      const model = String(a.model ?? "").trim();
+      if (model.length > 200) return fail(400, "that isn't a model id");
+      const r = await deps.models.set(role, model, String(a.by ?? "an owner"));
+      if (r.ok) deps.audit.append({ kind: "policy", principal: "console", detail: { action: "model_set", role, model: model || "(default)", by: String(a.by ?? "") } });
+      return r.ok ? ok(r.value) : fail(400, r.error);
+    },
     "family.lookup": (a) => ok(deps.family?.(String(a.phone ?? "")) ?? null),
     "appserver.wake": async (a) => {
       if (!deps.appServers) return fail(404, "this agent runs no app servers");
