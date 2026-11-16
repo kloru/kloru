@@ -11,10 +11,21 @@ benchmarks alone. Use OpenRouter's public data to shortlist, then Kloru's own ca
 Decisions with a fixed set of answers go to Jev, not a general model (the `decision-models` skill).
 Kloru never uses Anthropic models.
 
-**Only the newest version of a model.** Every candidate, including the one a role runs on today, is
-the latest version of its line (Gemini 3.8 Flash, not 3.5 Flash). Find them by release date:
-`GET /api/v1/models` sorted by `created`, newest per family. When a newer version of a role's model
-ships, bench it against the current one; an older version never wins a tie.
+**Only the latest generation** (Evan, 2026-11-16). Every job runs on its vendor's newest line: today
+Gemini 4, GPT-6 / 6.1, Jev 1.14. Gemini 3.x is a past generation, so no job runs on it and it is never
+a candidate, whatever it scores.
+- Find the newest by date, not by name: `GET /api/v1/models?output_modalities=all` sorted by
+  `created`, newest per vendor line, and listed in `GET /api/v1/endpoints/zdr`. Admin → Models shows
+  the same list.
+- When a vendor ships a new generation, bench it for every job on the old one in the same week.
+- When the newest of a line is too slow or wrong for a job, take another latest-generation model
+  (a smaller one of the line, or another vendor's newest; see step 4 on new vendors). Never go back
+  a version. A newer minor version is not always faster: 3.8 Flash was twice as slow as 3.5 Flash
+  on short calls because it can't skip thinking.
+- Check how little a model can think before timing it: `reasoning.supported_efforts` on its
+  listing. GPT-6 takes `none`; Gemini 4 has no `minimal` or `none` and thinks least at `low`
+  (`minimal` is taken as `low`; `none` is a 400, as it is for most vendors). Short schema-shaped calls use
+  `leastThinking(model)` (`packages/server/src/openrouter.ts`); add a line there for a new vendor.
 
 **Zero data retention everywhere** (Evan, 2026-11-09). Every model call carries family data, so every
 one asks OpenRouter for `provider: { zdr: true }`:
@@ -79,6 +90,12 @@ The data says what a model can do in general. Only our cases say whether it does
 - **Other engineers and ops:** no live suite runs a real worker model on other work yet
   (`pm.live.test.ts` fakes the workers). Write a case before choosing one; `KLORU_ENGINEER_MODEL`.
 - **Voice:** `voice.bench` (see the `prompt-editing` skill), with the model set in its config.
+- **Fast path, steering, family member setup, the action check's second look:** in `packages/server`,
+  `TRY_MODELS="steer=<id>,fast-path-plan=<id>" npx vitest run test/<x>.live.test.ts` with
+  `fast-path`, `steer-filter`, `member-policy` or `action-decider`. `TRY_MODELS` sets any job in
+  `models.ts` by its id for that run. Run candidates one after another: side by side they hit rate
+  limits and time out, which reads as a slow model.
+- **Images:** one `POST /api/v1/images/generations` with `provider: { zdr: true }`, and look at it.
 - **Quick check and other Jev decisions:** not this skill (`decision-models`).
 
 Run the current model in the same session. A difference smaller than one run in five is noise.
@@ -97,33 +114,39 @@ today's on data handling. Say what data it would see and where.
 
 In the commit: the role, the candidates, the data table with its `as_of` date and source citation
 (Artificial Analysis and OpenRouter via OpenRouter), the bench results, and why the winner won.
-Point the role's model constant or env var at the winner, and keep the bench case.
+Point the job's default in `packages/server/src/models.ts` (`ROLES`) or its env var at the winner,
+and keep the bench case. An owner's pick under Admin → Models wins over both.
 
 ## What we know (update this as roles change)
 
-- **Texting model** (`packages/server/src/text-talker.ts`, `MODEL`): **Gemini 3.8 Flash since 2026-11-09.**
-  Of the newest models (ZDR only): Gemini 3.8 Flash 24/24 core cases, 20/20 honest status, 4/4 full
-  suites; DeepSeek V4.1 Flash fastest (~1–4 s) and 20/20 status, but email results too long 3/4;
-  GPT-6.1 Terra and Gemini 3.5 Flash dropped a suite case; GLM-5.3 18/20 status; GLM-5.3 FlashX,
-  MiniMax M3.1 Flash and Muse Spark failed to file. Gemini 4 Argon too slow (6 s first token).
-  History: Gemini 3.5 Flash, minimal
-  reasoning, since 2026-10-30, chosen for speed without a comparison. On 2026-11-09 it skipped filing
-  2/5 with Evan's real context. After the prompt fix, Flash, gpt-6-luna, Gemini 3.8 Flash and GLM-5.3
-  all passed 15/15. Flash Lite failed; GLM-5.3-flash and DeepSeek V4 Flash missed some. Calls go to
-  zero-data-retention providers only (`provider: { zdr: true }`, 11-09).
-  GLM-5.3 led on the data (agentic 53 vs 26, first token 0.3 s vs 1.5 s, a tenth of the price) and
-  filed 16/16, but said the delay on "is it done yet?" only 14/20 (3 with no words) vs Flash ~19/20.
-  Not switched: honest status matters more. Retry it after tuning the status line for it.
-- **PM** (`KLORU_PM_MODEL`): Gemini 3.5 Flash since 2026-10-30, an old version: bench 3.8 Flash. Luna passed the same 8 of 9 cases
-  in about twice the time.
-- **Fast path and action decider:** Gemini 3.5 Flash, an old version: bench 3.8 Flash. Flash Lite missed items (10-29); Flash with
-  thinking turned on took up to 16 s.
-- **Engineers, ops, voice:** gpt-6-luna. Terra and Flash scored worse on voice.
+Every job is on a latest-generation model since 2026-11-16. Benches below are from that day, ZDR
+providers only, least thinking unless said.
+
+- **Texting:** **Gemini 4 Hydrogen.** Full suite twice: Hydrogen 24/24 in 25 s; Gemini 3.8 Flash
+  24/24 in 59–85 s; Luna 20/24. `talker-bench` 5 runs a case: Hydrogen 15/15, medians 1.6–2.6 s;
+  3.8 Flash 15/15, 4.8–7.7 s. Earlier (11-09): DeepSeek V4.1 Flash fast but wrote email results
+  too long; GLM-5.3 said the delay on "is it done yet?" only 14/20; GLM-5.3 FlashX, MiniMax M3.1
+  Flash and Muse Spark failed to file; Gemini 4 Argon 6 s to first token.
+- **PM** (`KLORU_PM_MODEL`; the outbox organizer runs on it too): **Gemini 4 Hydrogen.** Suite of
+  25 twice, three models side by side: Hydrogen 24 and 23 in 255 s; Gemini 3.5 Flash 23 and 22 in
+  330–520 s; Luna 19 and 20. Hydrogen leaves an unanswered question open without a note, which the
+  case now accepts.
+- **Fast path plan and change, action check's second look:** **Gemini 4 Hydrogen.** Fast path 18/18
+  (3.5 Flash 17/18; Luna 13/18, wrong answers). Second look 69/69 at least thinking, 52 s a run
+  against 64–68 s on 3.5 Flash; at its default thinking 5 of 69 ran past the 8 s limit. Hydrogen is
+  0.5–1 s slower than 3.5 Flash on some fast-path changes.
+- **Fast path answer, steering, family member setup:** **GPT-6 Luna with no thinking** (~1.4 s a
+  call; at `minimal` it still thinks, ~2.5 s). Steering 36/36 (3.5 Flash Lite 33/36), member setup
+  15/15 in 7 s (3.5 Flash 13/15 in 16 s), answers as good as Hydrogen's at a fifteenth of the price.
+  MiniMax M3.1 Flash was wrong on all of them.
+- **Images:** **Gemini Nano Banana 2.1** (one try: 14 s, $0.034; 3.1 Flash Image 10 s, $0.067).
+- **Engineers, ops, voice:** GPT-6 Luna. Terra and Flash scored worse on voice. Voice sends
+  `minimal`; `none` is not benched there yet.
+- **Call judge:** GPT-6.1 Terra. **Decisions:** Jev 1.14 (`decision-models`).
 - **App engineer and QA** (`KLORU_APP_ENGINEER_MODEL`): **GPT-6.1 Terra since 2026-11-10** (Evan asked
   for a smarter model for apps). Bench, ZDR, thinking medium, make / fix / chores: Terra 4/4, 5/5, 5/5
-  (62–81 s, ~$0.07 a run); Luna 5/5, 5/5, 4/5 (96–111 s, ~$0.005; one chart came up empty). On pass rate
-  that is within noise: the `app_data` tool and the web-apps skill fixed what made Luna's apps
-  broken. Terra won on time, same vendor and provider (Azure). GLM-5.3 0/3 on fix (ticks didn't
-  stay) and needed a QA round on every chart; Gemini 4 Carbon passed but took 3–9 min a run;
-  GPT-6.1 Sol's ZDR provider refused every call (capacity). QA on Terra passed every usable chart
-  first time (~$0.05 a look); on Luna it caught the planted bug in one smoke run. Not benched 5×.
+  (62–81 s, ~$0.07 a run); Luna 5/5, 5/5, 4/5 (96–111 s, ~$0.005; one chart came up empty). GLM-5.3
+  0/3 on fix; Gemini 4 Carbon passed but took 3–9 min a run; GPT-6.1 Sol's ZDR provider refused
+  every call (capacity).
+- **Tried and not used:** Gemini 3.8 Flash (2x slower than 3.5 at short calls, and now a past
+  generation); no Gemini 4 Lite or GPT-6.1 Luna exists yet: bench them when they do.

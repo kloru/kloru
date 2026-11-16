@@ -25,11 +25,11 @@ const JEV = "typesafe/jev-1.14";
 
 export const ROLES = {
   voice: { label: "Phone calls", what: "Talks on a call and files what's asked.", group: "Talking", kind: "tools", model: "openai/gpt-6-luna" },
-  texting: { label: "Texting", what: "Answers in a text thread, files requests and writes the results.", group: "Talking", kind: "tools", model: "google/gemini-3.8-flash" },
-  "fast-path-plan": { label: "Fast path: plan", what: "Says whether a text can be answered at once from synced mail and calendar.", group: "Talking", kind: "json", model: "google/gemini-3.5-flash" },
-  "fast-path-writer": { label: "Fast path: answer", what: "Writes that answer.", group: "Talking", kind: "text", model: "google/gemini-3.5-flash-lite" },
-  "fast-path-change": { label: "Fast path: change", what: "Works out one exact calendar change from a text.", group: "Talking", kind: "json", model: "google/gemini-3.5-flash" },
-  steer: { label: "Steering", what: "Says whether a new text changes a request already being worked on.", group: "Talking", kind: "json", model: "google/gemini-3.5-flash-lite" },
+  texting: { label: "Texting", what: "Answers in a text thread, files requests and writes the results.", group: "Talking", kind: "tools", model: "google/gemini-4-hydrogen" },
+  "fast-path-plan": { label: "Fast path: plan", what: "Says whether a text can be answered at once from synced mail and calendar.", group: "Talking", kind: "json", model: "google/gemini-4-hydrogen" },
+  "fast-path-writer": { label: "Fast path: answer", what: "Writes that answer.", group: "Talking", kind: "text", model: "openai/gpt-6-luna" },
+  "fast-path-change": { label: "Fast path: change", what: "Works out one exact calendar change from a text.", group: "Talking", kind: "json", model: "google/gemini-4-hydrogen" },
+  steer: { label: "Steering", what: "Says whether a new text changes a request already being worked on.", group: "Talking", kind: "json", model: "openai/gpt-6-luna" },
 
   pm: { label: "PM", what: "Triages each request, assigns it and reviews the result.", group: "The desk", kind: "tools", model: "openai/gpt-6-luna" },
   engineer: { label: "Engineers", what: "Do the work: read, research, act. Memory and the scout run on it too.", group: "The desk", kind: "tools", model: "openai/gpt-6-luna" },
@@ -39,7 +39,7 @@ export const ROLES = {
 
   access: { label: "Access review", what: "Weighs a family member's request against each owner's policy.", group: "Decisions", kind: "decision", model: JEV },
   "action-check": { label: "Action check", what: "Says whether a change a worker is about to make is clearly fine.", group: "Decisions", kind: "decision", model: JEV },
-  "action-second-look": { label: "Action check: second look", what: "Weighs an action the first check wasn't sure of.", group: "Decisions", kind: "json", model: "google/gemini-3.5-flash" },
+  "action-second-look": { label: "Action check: second look", what: "Weighs an action the first check wasn't sure of.", group: "Decisions", kind: "json", model: "google/gemini-4-hydrogen" },
   "message-check": { label: "Message check", what: "Send, hold or drop a message leaving a connected account.", group: "Decisions", kind: "decision", model: JEV },
   "outbox-pass": { label: "Outbox fast pass", what: "Send a message now, drop it, or leave it for the organizer.", group: "Decisions", kind: "decision", model: JEV },
   "message-shape": { label: "Message shape", what: "A reaction, one line or the whole answer.", group: "Decisions", kind: "decision", model: JEV },
@@ -50,9 +50,9 @@ export const ROLES = {
   guideline: { label: "Guideline check", what: "Whether something to remember is about how Kloru should work.", group: "Decisions", kind: "decision", model: JEV },
   "time-saved": { label: "Time saved", what: "Estimates how long a finished request would have taken by hand.", group: "Decisions", kind: "decision", model: JEV },
 
-  "member-policy": { label: "Family member setup", what: "Turns what an owner says about a family member into their standing.", group: "Other", kind: "json", model: "google/gemini-3.5-flash" },
+  "member-policy": { label: "Family member setup", what: "Turns what an owner says about a family member into their standing.", group: "Other", kind: "json", model: "openai/gpt-6-luna" },
   "call-judge": { label: "Call judge", what: "Scores each finished call for the health dashboard.", group: "Other", kind: "text", model: "openai/gpt-6.1-terra" },
-  image: { label: "Images", what: "Draws the images Kloru makes.", group: "Other", kind: "image", model: "google/gemini-3.1-flash-image" },
+  image: { label: "Images", what: "Draws the images Kloru makes.", group: "Other", kind: "image", model: "google/gemini-nano-banana-2.1" },
 } as const satisfies Record<string, Role>;
 
 export type RoleId = keyof typeof ROLES;
@@ -222,7 +222,10 @@ export function useModels(models: Models | undefined): void {
   current = models;
 }
 
+/** A bench tries other models: TRY_MODELS="steer=openai/gpt-6-luna,texting=…" (the model-selection skill). */
+const tried = (): Partial<Record<string, string>> => Object.fromEntries((process.env.TRY_MODELS ?? "").split(",").map((p) => p.trim().split("=")).filter((p) => p.length === 2));
+
 /** The model a job runs on now. */
 export function modelOf(role: RoleId): string {
-  return current?.of(role) ?? ROLES[role].model;
+  return current?.of(role) ?? tried()[role] ?? ROLES[role].model;
 }

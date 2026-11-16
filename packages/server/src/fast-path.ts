@@ -13,13 +13,12 @@
  * don't answer it. Declining is always safe: the PM takes over, as before.
  */
 import type { FastAnswer, FastChange, Issue } from "@kloru/desk";
-import { chatCompletion } from "./openrouter.js";
+import { chatCompletion, leastThinking } from "./openrouter.js";
 import { formatItem, freshness, zoned, type Item, type Store } from "@kloru/store";
 import { modelOf } from "./models.js";
 
-// Measured 2026-10-29 on Gemini 3.5: Flash Lite decides in ~1.3 s and writes in ~1.1 s (Luna ~3.0 and ~1.6). Flash decides
-// ~0.5 s slower but found both copies of a trip that Lite missed half the time (live test), so it plans.
-// A change is worth a second more: Flash Lite missed one of two matching events and added events nobody asked for.
+// Measured 2026-11-16 on the live test: Gemini 4 Hydrogen plans and works out changes 18/18; Luna without thinking
+// got 5 of 18 wrong at those, but writes the answer as well as Hydrogen for less, so it writes.
 
 interface Lookup {
   type: "calendar" | "search";
@@ -126,8 +125,8 @@ export interface FastPathOptions {
 }
 
 async function chat(o: FastPathOptions, body: Record<string, unknown>): Promise<string> {
-  // Thinking costs seconds here (Flash took 9 to 16 s on a change with it); these are short, schema-shaped calls.
-  return chatCompletion({ apiKey: o.apiKey, ...(o.fetchImpl ? { fetchImpl: o.fetchImpl } : {}) }, { ...(/^(openai|google)\//.test(String(body.model)) ? { reasoning: { effort: "minimal" } } : {}), ...body });
+  // Thinking costs seconds here (Gemini 3.5 Flash took 9 to 16 s on a change with it); these are short, schema-shaped calls.
+  return chatCompletion({ apiKey: o.apiKey, ...(o.fetchImpl ? { fetchImpl: o.fetchImpl } : {}) }, { ...leastThinking(String(body.model)), ...body });
 }
 
 export function storeFastPath(o: FastPathOptions): (issue: Issue) => Promise<FastAnswer | undefined> {

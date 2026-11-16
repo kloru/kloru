@@ -3,8 +3,8 @@ import { imagesFrom, OPENROUTER_IMAGES } from "../src/boot.js";
 
 describe("where image_generate draws", () => {
   it("with only the OpenRouter key, OpenRouter's images endpoint and Gemini 3.1 Flash Image", () => {
-    expect(imagesFrom({ OPENROUTER_API_KEY: "or" })).toEqual({ apiKey: "or", baseUrl: "https://openrouter.ai/api/v1", model: "google/gemini-3.1-flash-image" });
-    expect(OPENROUTER_IMAGES.model).toBe("google/gemini-3.1-flash-image");
+    expect(imagesFrom({ OPENROUTER_API_KEY: "or" })).toEqual({ apiKey: "or", baseUrl: "https://openrouter.ai/api/v1", model: "google/gemini-nano-banana-2.1" });
+    expect(OPENROUTER_IMAGES.model).toBe("google/gemini-nano-banana-2.1");
   });
 
   it("IMAGE_MODEL picks another OpenRouter model", () => {

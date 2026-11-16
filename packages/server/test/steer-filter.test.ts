@@ -16,7 +16,7 @@ describe("does this caller line change the work?", () => {
     const filter = steerFilter({ apiKey: "k", fetchImpl: m.fetchImpl });
     expect(await filter({ request: "Weather in Portland today", spec: "Look up today's forecast" } as never, "I'll just wait.")).toBe(false);
     const body = m.bodies[0]!;
-    expect(body.model).toBe("google/gemini-3.5-flash-lite");
+    expect(body.model).toBe("openai/gpt-6-luna");
     expect(body.response_format).toMatchObject({ type: "json_schema", json_schema: { strict: true } });
     expect(JSON.stringify(body.messages)).toContain("Weather in Portland today");
     expect(JSON.stringify(body.messages)).toContain("I'll just wait.");

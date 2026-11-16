@@ -30,7 +30,7 @@ kill_timeout = "30s"
   INSTINCT_AGENT_NAME = "Kloru"
   # The models: the agent and voice on OpenAI's Luna, the PM on Gemini Flash (all through OpenRouter).
   INSTINCT_MODEL = "openrouter/openai/gpt-6-luna"
-  KLORU_PM_MODEL = "openrouter/google/gemini-3.5-flash"
+  KLORU_PM_MODEL = "openrouter/google/gemini-4-hydrogen"
   VOICE_MODEL = "openai/gpt-6-luna"
   # Who runs this Kloru, for the privacy and terms pages and their contact address.
   KLORU_OPERATOR = "{operator}"

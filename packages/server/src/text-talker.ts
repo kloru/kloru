@@ -3,7 +3,7 @@
  * reads the brief and the thread, files and updates desk issues through tools, and writes one
  * message. A fast model (never Anthropic); the prompt stays short (prompt-editing skill).
  */
-import { chatMessage, type ToolCall } from "./openrouter.js";
+import { chatMessage, leastThinking, type ToolCall } from "./openrouter.js";
 import { modelOf } from "./models.js";
 
 const MAX_ROUNDS = 4;
@@ -96,10 +96,11 @@ export function textTalker(o: { apiKey: string; model?: string; fetchImpl?: type
       ...(t.event ? [{ role: "user", content: `(A result came in for you to pass on.)\n${t.event}` }] : []),
       ...(t.redraft ? [{ role: "user", content: `(Before it was sent, your draft went back.) Your draft: "${t.redraft.draft}"\n${t.redraft.why} Write the message again; react and reply [quiet] if a reaction says it all.` }] : []),
     ];
+    const model = o.model ?? modelOf("texting");
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const reply = await chatMessage(
         { apiKey: o.apiKey, ...(o.fetchImpl ? { fetchImpl: o.fetchImpl } : {}), timeoutMs: 30_000 },
-        { model: o.model ?? modelOf("texting"), reasoning: { effort: "minimal" }, messages, tools: t.tools.react ? [...TOOLS, REACT] : TOOLS },
+        { model, ...leastThinking(model), messages, tools: t.tools.react ? [...TOOLS, REACT] : TOOLS },
       );
       const calls = reply.tool_calls ?? [];
       if (!calls.length) return quiet(reply.content ?? "");

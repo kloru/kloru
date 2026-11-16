@@ -11,6 +11,17 @@ export interface ChatOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/**
+ * The least thinking a model takes, for short schema-shaped calls where it only costs seconds
+ * (each model's efforts are on its OpenRouter listing). GPT-6 can skip it; Gemini thinks least at
+ * "minimal", or at its own lowest where it has no such setting.
+ */
+export function leastThinking(model: string): { reasoning?: { effort: string } } {
+  if (/^openai\/gpt-6/.test(model)) return { reasoning: { effort: "none" } };
+  if (/^(openai|google)\//.test(model)) return { reasoning: { effort: "minimal" } };
+  return {};
+}
+
 const RETRYABLE = (status: number) => status === 429 || status >= 500;
 
 export async function chatCompletion(o: ChatOptions, body: Record<string, unknown>): Promise<string> {

@@ -4,7 +4,7 @@
  * the weather engineer, its last message replied to that, and the forecast never reached the caller.
  */
 import type { Issue } from "@kloru/desk";
-import { chatCompletion } from "./openrouter.js";
+import { chatCompletion, leastThinking } from "./openrouter.js";
 import { modelOf } from "./models.js";
 
 const SCHEMA = { type: "object", additionalProperties: false, required: ["changes"], properties: { changes: { type: "boolean" } } };
@@ -14,8 +14,10 @@ const PROMPT =
 
 export function steerFilter(o: { apiKey: string; fetchImpl?: typeof fetch; model?: string }): (issue: Issue, text: string) => Promise<boolean> {
   return async (issue, text) => {
+    const model = o.model ?? modelOf("steer");
     const content = await chatCompletion({ apiKey: o.apiKey, ...(o.fetchImpl ? { fetchImpl: o.fetchImpl } : {}) }, {
-        model: o.model ?? modelOf("steer"),
+        model,
+        ...leastThinking(model),
         messages: [
           { role: "system", content: PROMPT },
           { role: "user", content: `Request: ${issue.request}${issue.spec ? `\nAs assigned: ${issue.spec}` : ""}\nThe caller just said: ${text}` },

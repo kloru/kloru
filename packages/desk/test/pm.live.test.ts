@@ -35,7 +35,7 @@ class Host implements WorkerHost {
 
 function setup(clock?: () => Date, notify?: (n: Notice) => Promise<boolean>, firstPass?: DeskOptions["firstPass"]) {
   const host = new Host();
-  const model = resolveModel(process.env.KLORU_PM_MODEL ?? "openrouter/google/gemini-3.5-flash", process.env);
+  const model = resolveModel(process.env.KLORU_PM_MODEL ?? "openrouter/google/gemini-4-hydrogen", process.env);
   const logs: string[] = [];
   const pm = new TechnicalPM({ model, streamFn: streamSimple as unknown as StreamFn, getApiKey: () => key, thinking: "minimal", log: (m) => logs.push(m) });
   const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "pm-live-")), host, planner: pm, ...(clock ? { now: clock } : {}), ...(notify ? { notify, notifyDelayMs: 50, notifyWaitMs: 2000 } : {}), ...(firstPass ? { firstPass, organizer: new OutboxOrganizer({ model, streamFn: streamSimple as unknown as StreamFn, getApiKey: () => key, thinking: "minimal", log: (m) => logs.push(m) }), ownEmails: () => ["ezra@personal.example.com"] } : {}), log: (m: string) => (logs.push(m), process.env.SHOW && console.log("LOG", m)) });
@@ -89,7 +89,7 @@ describe.skipIf(!key)("PM on real-call situations", () => {
   for (const [name, phone, said, filed, expected] of MEMBER_CASES) {
     it(`needs: ${name}`, async () => {
       const host = new Host();
-      const model = resolveModel(process.env.KLORU_PM_MODEL ?? "openrouter/google/gemini-3.5-flash", process.env);
+      const model = resolveModel(process.env.KLORU_PM_MODEL ?? "openrouter/google/gemini-4-hydrogen", process.env);
       const logs: string[] = [];
       const pm = new TechnicalPM({ model, streamFn: streamSimple as unknown as StreamFn, getApiKey: () => key, thinking: "minimal", log: (m) => logs.push(m) });
       const names: Record<string, string> = { "+14155550190": "Ezra", "+14155550191": "Cleo", "+14155550123": "Jordan" };
@@ -115,7 +115,7 @@ describe.skipIf(!key)("PM on real-call situations", () => {
     const memory = new Memory(join(root, "memory"), { owner: { name: "Ezra Vega", phones: ["+14155550190"], timezone: "America/Los_Angeles" } });
     memory.init();
     memory.ensureOperator("Cleo Hale", ["+14155550191"]);
-    const model = resolveModel(process.env.KLORU_PM_MODEL ?? "openrouter/google/gemini-3.5-flash", process.env);
+    const model = resolveModel(process.env.KLORU_PM_MODEL ?? "openrouter/google/gemini-4-hydrogen", process.env);
     const pm = new TechnicalPM({ model, streamFn: streamSimple as unknown as StreamFn, getApiKey: () => key, thinking: "minimal", log: () => {} });
     const desk = new Desk({ root, host: new Host(), planner: pm, ownerPhone: "+14155550190", coOwner: (p) => p === "+14155550191", nameOf: (p) => (p === "+14155550191" ? "Cleo" : "Ezra"), memory, decideAccess: async (c) => ({ choices: c.needs.map(() => "allow" as const), p: c.needs.map(() => 0.9) }), log: () => {} });
     const { call } = desk.startCall({ callSid: "CA-pol", phone: "+14155550190", channel: "voice" });
@@ -276,7 +276,7 @@ describe.skipIf(!key)("PM on real-call situations", () => {
     host.finishers.clear();
     const before = desk.repo.issue(1)!.thread.length;
     desk.sweep(new Date(Date.now() + 7 * 60 * 60_000)); // no answer all day
-    const acted = () => host.finishers.has(1) || isClosedStatus(desk.repo.issue(1)!.status) || desk.repo.issue(1)!.thread.slice(before).some((e) => e.by === "pm");
+    const acted = () => host.finishers.has(1) || isClosedStatus(desk.repo.issue(1)!.status) || desk.repo.issue(1)!.thread.slice(before).some((e) => e.by === "pm") || logs.some((l) => l.startsWith("pm: Left #1"));
     await until(acted);
     await new Promise((r) => setTimeout(r, 3000));
     if (process.env.SHOW) console.log(sent, logs.filter((l) => l.startsWith("pm")), JSON.stringify(desk.repo.issue(1)!.thread.map((t) => `${t.by}: ${t.text}`), null, 1));

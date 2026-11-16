@@ -38,7 +38,7 @@ async function run(view: OrganizerView): Promise<Act[]> {
     note: () => "Saved.",
     ask: async () => (acts.push({ tool: "ask" }), "Asked."),
   };
-  const model = resolveModel(process.env.KLORU_PM_MODEL ?? "openrouter/google/gemini-3.5-flash", process.env);
+  const model = resolveModel(process.env.KLORU_PM_MODEL ?? "openrouter/google/gemini-4-hydrogen", process.env);
   const logs: string[] = [];
   await new OutboxOrganizer({ model, streamFn: streamSimple as unknown as StreamFn, getApiKey: () => key, timezone: TZ, log: (m) => logs.push(m) }).organize(view, act);
   if (process.env.SHOW) console.log(JSON.stringify(acts, null, 1), logs.join("\n"));

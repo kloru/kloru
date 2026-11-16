@@ -1,12 +1,12 @@
 /**
  * The owner says who's in the family and what they may do ("Add my wife Cleo, she should be able
- * to do and see everything"); a structured decision model (decision-models skill; Flash until a Jev
+ * to do and see everything"); a structured decision model (decision-models skill; Luna until a Jev
  * key) maps the words to a tier and grants. Code keeps out what no member may hold and writes the read-back (what they
  * are now, what they'd become, what they'd lose), and the owner's yes saves it with the words, which every later decision reads.
  */
 import type { MemberPlan } from "@kloru/desk";
 import { normalizePhone, type Capability } from "@kloru/core";
-import { chatCompletion } from "./openrouter.js";
+import { chatCompletion, leastThinking } from "./openrouter.js";
 import { modelOf } from "./models.js";
 
 /** What a member may be given, in the owner's terms. Shells, trust, memory, schedules, invites and calls stay the owner's. */
@@ -139,9 +139,10 @@ export function memberPolicy(o: { apiKey: string; members: () => string; /** Whe
       `Capabilities:\n${Object.entries(PLAIN).map(([c, plain]) => `${c}: ${plain}`).join("\n")}`,
       `Already in the family:\n${o.members() || "nobody yet"}`,
     ].join("\n\n");
+    const model = o.model ?? modelOf("member-policy");
     const content = await chatCompletion({ apiKey: o.apiKey, ...(o.fetchImpl ? { fetchImpl: o.fetchImpl } : {}), timeoutMs: o.timeoutMs ?? 10_000 }, {
-      model: o.model ?? modelOf("member-policy"),
-      reasoning: { effort: "minimal" },
+      model,
+      ...leastThinking(model),
       messages: [
         { role: "system", content: MEMBER_PROMPT },
         { role: "user", content: user },

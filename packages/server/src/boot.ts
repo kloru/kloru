@@ -85,7 +85,7 @@ import { createSkillCatalog, formatSkillsIndex, loadSkillTool, ownerSkillsDir, r
 const SKILLS_REFRESH_MS = 30_000;
 
 /** OpenRouter's images endpoint, and the model it draws with unless IMAGE_MODEL says otherwise. */
-export const OPENROUTER_IMAGES = { baseUrl: "https://openrouter.ai/api/v1", model: "google/gemini-3.1-flash-image" };
+export const OPENROUTER_IMAGES = { baseUrl: "https://openrouter.ai/api/v1", model: "google/gemini-nano-banana-2.1" };
 
 /**
  * Where image_generate draws: a dedicated IMAGE_API_KEY, else an OpenAI key (either can point at any
