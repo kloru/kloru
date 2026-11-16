@@ -3,8 +3,14 @@ import { actionDecider } from "../src/action-decider.js";
 
 const check = { action: "GMAIL_SEND_EMAIL", args: { recipient_email: "dan@work.example.com", body: "I'm interviewing at Acme" }, request: "Send Dan my update", call: "Caller: Send Dan my update", guidelines: "Emails to me need no yes.", known: "Dan is Ezra's manager.", ownEmails: ["ezra@work.example.com"] };
 
-function fakeFetch(content: unknown, seen: unknown[] = []): typeof fetch {
-  return (async (_url: string, init: RequestInit) => {
+/** The writing model's answer; the fast look (Jev) says `fast`, or is down when there's none. */
+function fakeFetch(content: unknown, seen: unknown[] = [], fast?: { choice: string; p: number }, fastSeen: unknown[] = []): typeof fetch {
+  return (async (url: string, init: RequestInit) => {
+    if (String(url).includes("/decisions")) {
+      fastSeen.push(JSON.parse(String(init.body)));
+      if (!fast) return new Response("down", { status: 503 });
+      return new Response(JSON.stringify({ answers: { decision: { type: "choice", choice: fast.choice, probabilities: { [fast.choice]: fast.p } } } }), { status: 200 });
+    }
     seen.push(JSON.parse(String(init.body)));
     return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }), { status: 200 });
   }) as typeof fetch;
@@ -33,5 +39,31 @@ describe("the action decider", () => {
 
   it("an answer without a decision is an error, so the worker's own judgment stands", async () => {
     await expect(actionDecider({ apiKey: "k", fetchImpl: fakeFetch({ reason: "?" }) })(check)).rejects.toThrow(/no decision/);
+  });
+
+  const written = { reaches: "his manager", reversible: false, worst_case: "", asked_for: false, decision: "ask", reason: "his boss", ask: "Send it?", fix: "" };
+
+  it("a do the fast look is sure of goes ahead, and the writing model isn't asked", async () => {
+    const seen: any[] = [];
+    const fastSeen: any[] = [];
+    const d = await actionDecider({ apiKey: "k", fetchImpl: fakeFetch(written, seen, { choice: "do", p: 0.93 }, fastSeen) })(check);
+    expect(d.decision).toBe("do");
+    expect(seen).toEqual([]);
+    expect(fastSeen[0].state.action.name).toBe("GMAIL_SEND_EMAIL");
+    expect(Object.keys(fastSeen[0].questions.decision.criteria)).toEqual(["do", "ask", "revise"]);
+  });
+
+  it("a do it isn't sure of, or anything else, is the writing model's to decide and word", async () => {
+    for (const fast of [{ choice: "do", p: 0.7 }, { choice: "ask", p: 0.95 }]) {
+      const d = await actionDecider({ apiKey: "k", fetchImpl: fakeFetch(written, [], fast) })(check);
+      expect(d).toEqual({ decision: "ask", reason: "his boss", ask: "Send it?" });
+    }
+  });
+
+  it("someone who isn't the owner is never waved through by the fast look", async () => {
+    const fastSeen: any[] = [];
+    const d = await actionDecider({ apiKey: "k", fetchImpl: fakeFetch({ ...written, decision: "ask_owner" }, [], { choice: "do", p: 0.99 }, fastSeen) })({ ...check, ownerGuidelines: "" });
+    expect(d.decision).toBe("ask_owner");
+    expect(fastSeen).toEqual([]);
   });
 });

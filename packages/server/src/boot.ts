@@ -869,7 +869,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       media,
       ...(fastKey ? { steerFilter: steerFilter({ apiKey: fastKey }) } : {}),
       // Every change is weighed before it happens: do, ask the caller, or revise (decision-models skill).
-      ...(fastKey && env.KLORU_DECIDE?.trim() !== "off" ? { decideAction: actionDecider({ apiKey: fastKey }) } : {}),
+      ...(fastKey && env.KLORU_DECIDE?.trim() !== "off" ? { decideAction: actionDecider({ apiKey: fastKey, log }) } : {}),
       ...(fastKey ? { setMember: memberPolicy({ apiKey: fastKey, members: () => familyMembers(contacts, policy), standing: (phone) => standingOf(phone, contacts, policy) }) } : {}),
       applyMember: (plan: MemberPlan) => {
         const c = saveMember(plan, contacts, policy);

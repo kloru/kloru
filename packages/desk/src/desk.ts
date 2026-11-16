@@ -3157,6 +3157,36 @@ export class Desk {
     const yes = issue.confirmation;
     if (yes?.confirmedBy && ((this.isOwner(issue.filedBy.phone) && (!yes.by || samePhone(yes.confirmedBy, issue.filedBy.phone))) || this.ownerSaidYesTo(issue, { tool: toolName, argsHash: hashArgs(args) }, false))) return undefined;
     const calls = (innerCalls(toolName, args) ?? [{ slug: toolName.slice(4).toUpperCase(), args: (args ?? {}) as Record<string, unknown> }]).filter((c) => !isReadSlug(c.slug));
+    // A batch's changes are weighed side by side (four events took four checks in a row); what each answer leads to still happens in order.
+    const decide = this.decideAction;
+    const weighed = new Map(
+      calls
+        .filter((c) => decide && !(this.decideMessage && isMessageSlug(c.slug)))
+        .map((c) => {
+          const start = new Date();
+          const step = `action check ${c.slug}`;
+          const check = decide!({
+            action: c.slug,
+            args: c.args,
+            request: issue.request,
+            ...(issue.target ? { target: issue.target } : {}),
+            ...(issue.spec ? { spec: issue.spec } : {}),
+            call: this.repo.turns(issue.filedBy.call, 0).slice(-16).map((t) => `${t.role === "caller" ? "Caller" : "Kloru"}: ${t.text}`).join("\n"),
+            guidelines: this.guidelines?.(issue.filedBy.phone)?.trim() ?? "",
+            known: this.brief(issue.filedBy.phone),
+            ownEmails: this.ownEmails?.(issue.filedBy.phone) ?? [],
+            ...(this.isOwner(issue.filedBy.phone) || this.decideAccess ? {} : { ownerGuidelines: this.ownerGuidelinesFor(issue.filedBy.phone) }),
+          }).then(
+            (d): Result<ActionDecision> => (this.span(issueId, { step, kind: "decision", start, outcome: d.decision }), ok(d)),
+            (error: unknown): Result<ActionDecision> => {
+              const why = error instanceof Error ? error.message : String(error);
+              this.span(issueId, { step, kind: "decision", start, outcome: "failed", error: why });
+              return err(why);
+            },
+          );
+          return [c, check] as const;
+        }),
+    );
     for (const c of calls) {
       // Messages go through coms: one check for every message, with what they were already sent.
       if (this.decideMessage && isMessageSlug(c.slug)) {
@@ -3164,26 +3194,10 @@ export class Desk {
         if (refused) return refused;
         continue;
       }
-      if (!this.decideAction) continue;
-      let d: ActionDecision;
-      const start = new Date();
-      try {
-        d = await this.decideAction({
-          action: c.slug,
-          args: c.args,
-          request: issue.request,
-          ...(issue.target ? { target: issue.target } : {}),
-          ...(issue.spec ? { spec: issue.spec } : {}),
-          call: this.repo.turns(issue.filedBy.call, 0).slice(-16).map((t) => `${t.role === "caller" ? "Caller" : "Kloru"}: ${t.text}`).join("\n"),
-          guidelines: this.guidelines?.(issue.filedBy.phone)?.trim() ?? "",
-          known: this.brief(issue.filedBy.phone),
-          ownEmails: this.ownEmails?.(issue.filedBy.phone) ?? [],
-          ...(this.isOwner(issue.filedBy.phone) || this.decideAccess ? {} : { ownerGuidelines: this.ownerGuidelinesFor(issue.filedBy.phone) }),
-        });
-        this.span(issueId, { step: `action check ${c.slug}`, kind: "decision", start, outcome: d.decision });
-      } catch (error) {
-        const why = error instanceof Error ? error.message : String(error);
-        this.span(issueId, { step: `action check ${c.slug}`, kind: "decision", start, outcome: "failed", error: why });
+      const check = await weighed.get(c);
+      if (!check) continue;
+      if (!check.ok) {
+        const why = check.error;
         // For the owner a failed check goes ahead; for anyone else it fails closed: the owner decides.
         if (!this.isOwner(issue.filedBy.phone)) {
           this.log(`desk: #${issueId} could not weigh ${c.slug}, asking the owner: ${why}`);
@@ -3193,6 +3207,7 @@ export class Desk {
         this.log(`desk: #${issueId} could not weigh ${c.slug}, going ahead: ${why}`);
         continue;
       }
+      let d = check.value;
       this.log(`desk: #${issueId} ${c.slug} → ${d.decision}: ${d.reason}`);
       if (d.decision === "revise") {
         this.note(issue, "system", `Revise before ${c.slug.toLowerCase().replace(/_/g, " ")}: ${d.fix ?? d.reason}`);

@@ -59,6 +59,22 @@ describe("every change is weighed before it happens", () => {
     expect(c.guidelines).toContain("Emails to me need no yes.");
   });
 
+  it("a batch's changes are weighed side by side, and the first no still stops it", async () => {
+    let open = 0;
+    let most = 0;
+    const { role, checks } = setup(async (c) => {
+      most = Math.max(most, ++open);
+      await new Promise((r) => setTimeout(r, 20));
+      open--;
+      return c.args.summary === "B" ? { decision: "revise", reason: "wrong day", fix: "Move B to Friday" } : { decision: "do", reason: "asked" };
+    });
+    const event = (summary: string) => ({ tool_slug: "GOOGLECALENDAR_CREATE_EVENT", arguments: { summary } });
+    const r = await role.guard!("app_composio_multi_execute_tool", { tools: [event("A"), event("B"), event("C")] });
+    expect(checks).toHaveLength(3);
+    expect(most).toBe(3);
+    expect(r).toMatchObject({ block: true, reason: expect.stringContaining("Move B to Friday") });
+  });
+
   it("ask: nothing happens yet, and the caller hears the one question", async () => {
     const { desk, call, issue, role } = setup(async () => ({ decision: "ask", reason: "a job search reaching his boss", ask: "Send your boss the update that mentions Acme?" }));
     const r = await role.guard!("app_gmail_send_email", send);
