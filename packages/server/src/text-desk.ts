@@ -85,7 +85,7 @@ export interface TextDeskOptions {
   idleMs?: number;
   /** Message ids already handled, kept across restarts (a provider may redeliver after a deploy). */
   seenFile?: string;
-  /** How long to wait for more results before telling them as one message. */
+  /** How long to wait for more results before telling them as one message, while more of theirs is being worked on. */
   burstMs?: number;
   timezone: string;
   log: (m: string) => void;
@@ -259,7 +259,12 @@ export class TextDesk {
       after = Math.max(after, t.seq);
       const first = await this.o.desk.waitInbox(t.callId, after, 60_000);
       if (!first.length) continue;
-      await new Promise((r) => setTimeout(r, this.burstMs).unref?.());
+      // More can only land while something of theirs is still being worked on; with nothing running, this is all of it.
+      if (this.working(t)) {
+        const start = new Date();
+        await new Promise((r) => setTimeout(r, this.burstMs).unref?.());
+        for (const id of new Set(first.flatMap((m) => (m.issue !== undefined ? [m.issue] : [])))) this.o.desk.span(id, { step: "wait for more results", kind: "plumbing", start, outcome: "ok" });
+      }
       // Read in turn with their messages: a reply that already carried these leaves nothing to send.
       let last = t.seq;
       const run = t.chain.then(async () => {
@@ -436,6 +441,11 @@ export class TextDesk {
       .filter((i) => !i.purpose && samePhone(i.filedBy.phone, t.phone))
       .slice(-8)
       .map((i) => `issue ${i.id}, ${progress(i, now)}: ${i.request.slice(0, 160)}`);
+  }
+
+  /** Whether any request of theirs is still being worked on (one waiting on their answer isn't). */
+  private working(t: Thread): boolean {
+    return this.o.desk.openIssues().some((i) => !i.purpose && samePhone(i.filedBy.phone, t.phone) && i.status !== "needs_info" && i.status !== "needs_confirmation");
   }
 
   private pending(t: Thread): string[] {

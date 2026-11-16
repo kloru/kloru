@@ -22,7 +22,7 @@ const settle = async (ms = 40) => {
   while (Date.now() < end) await new Promise((r) => setTimeout(r, 5));
 };
 
-function setup(o: { reply?: (t: TalkerTurn) => string; talker?: (t: TalkerTurn) => Promise<string>; idleMs?: number; ingest?: TextDeskOptions["ingest"]; pass?: (c: FirstPassCheck) => FirstPassChoice | Promise<FirstPassChoice>; react?: (conversation: string, message: string, reaction: string) => Promise<boolean>; shape?: TextDeskOptions["shape"]; feedback?: TextDeskOptions["feedback"]; checkDraft?: TextDeskOptions["checkDraft"] } = {}) {
+function setup(o: { reply?: (t: TalkerTurn) => string; talker?: (t: TalkerTurn) => Promise<string>; idleMs?: number; burstMs?: number; ingest?: TextDeskOptions["ingest"]; pass?: (c: FirstPassCheck) => FirstPassChoice | Promise<FirstPassChoice>; react?: (conversation: string, message: string, reaction: string) => Promise<boolean>; shape?: TextDeskOptions["shape"]; feedback?: TextDeskOptions["feedback"]; checkDraft?: TextDeskOptions["checkDraft"] } = {}) {
   const planner: Planner = { handle: async () => {} };
   const passes: FirstPassCheck[] = [];
   const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "textdesk-")), host: new Host(), planner, notify: async () => true, firstPass: async (c) => (passes.push(c), (o.pass ?? (() => "send"))(c)) });
@@ -44,7 +44,7 @@ function setup(o: { reply?: (t: TalkerTurn) => string; talker?: (t: TalkerTurn) 
       ...(o.react ? { react: o.react } : {}),
     },
     idleMs: o.idleMs ?? 10_000,
-    burstMs: 10,
+    burstMs: o.burstMs ?? 10,
     ...(o.ingest ? { ingest: o.ingest } : {}),
     ...(o.shape ? { shape: o.shape } : {}),
     ...(o.feedback ? { feedback: o.feedback } : {}),
@@ -137,6 +137,22 @@ describe("texts and emails become desk conversations", () => {
     expect(turns.at(-1)!.event).toContain("Tomorrow: drop-off at 8.");
     expect(sent.at(-1)).toBe(`imessage ${EZRA}: Here's what I found.`);
     expect(desk.repo.undelivered(call.id)).toEqual([]);
+  });
+
+  it("with nothing else being worked on, a result goes at once; with more running, it waits for the burst", async () => {
+    const { desk, text, sent } = setup({ burstMs: 400 });
+    await text.receive(imsg("m1", "What's on tomorrow?"));
+    desk.resolve(1, "Tomorrow: drop-off at 8.");
+    await settle(120);
+    const results = () => sent.filter((m) => m.endsWith("Here's what I found.")).length;
+    expect(results()).toBe(1);
+    await text.receive(imsg("m2", "And Friday?"));
+    await text.receive(imsg("m3", "And Saturday?"));
+    desk.resolve(2, "Friday: nothing.");
+    await settle(120);
+    expect(results()).toBe(1);
+    await settle(450);
+    expect(results()).toBe(2);
   });
 
   it("quiet for the idle time ends the conversation once; the next text starts a new one", async () => {
