@@ -27,8 +27,10 @@ runs on that machine.
 
 ## A request, end to end
 
-1. **Someone asks.** By phone, the voice model listens and files a request. By text, the texting
-   model reacts 👀 (or answers if something needs clarifying) and files it.
+1. **Someone asks.** By phone, the voice model listens and files a request. By text, their message
+   gets 👀 the moment it arrives (sent in code, before any model runs), and the texting model files
+   it or answers. The 👀 stays only if work is now running for that message; otherwise it comes off
+   when the turn ends, or a 👍 takes its place.
 2. **The PM triages.** It writes the goal and what "done" means, lists what the work needs
    (whose mail, whose calendar, spending), and assigns an engineer (find out, do) or ops (one
    exact change).

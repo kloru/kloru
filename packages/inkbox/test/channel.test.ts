@@ -165,7 +165,7 @@ describe("InkboxChannel routing", () => {
     await ch.typing("sms:+1415");
     await ch.markRead("imessage:conv_1");
     await ch.markRead("email:x");
-    await ch.react("imessage:conv_1", "msg_1", "love");
+    expect(await ch.react("imessage:conv_1", "msg_1", "love")).toBe("r_1");
     expect(sends("/api/v1/imessage/typing")).toHaveLength(1);
     expect(sends("/api/v1/imessage/typing")[0]?.body).toEqual({ conversation_id: "conv_1" });
     expect(sends("/api/v1/imessage/mark-read")).toHaveLength(1);
@@ -184,6 +184,16 @@ describe("InkboxChannel routing", () => {
     await expect(ch.typing("imessage:conv_1")).rejects.toThrow();
     fail = false;
     await expect(ch.typing("imessage:conv_1")).resolves.toBeUndefined();
+  });
+
+  it("a tapback on a message from Inkbox's own webhook is one call, and can be taken back by its id", async () => {
+    fake = fakeFetch({ ...sdkRoutes(), "DELETE /api/v1/imessage/reactions/r_1": { status: 204, body: undefined } });
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const ch = channel();
+    const id = await ch.react("imessage:conv_1", "msg_1", "eyes", { fromWebhook: true });
+    expect(fake.calls.filter((c) => c.method === "GET" && c.path.includes("/imessage/messages/"))).toHaveLength(0);
+    await ch.unreact(id);
+    expect(fake.calls.filter((c) => c.method === "DELETE").map((c) => c.path)).toEqual(["/api/v1/imessage/reactions/r_1"]);
   });
 
   it("does not react to a message from a different conversation", async () => {

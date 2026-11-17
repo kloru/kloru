@@ -42,6 +42,15 @@ export interface ReactTarget {
   message: string;
 }
 
+/** The 👀 sent the moment their text arrived, and whether it stays once the turn is over. */
+interface Receipt {
+  to: ReactTarget;
+  /** The reaction's id (so it can be taken back), true when sent without one, false when it didn't go. */
+  sent: Promise<string | boolean>;
+  /** eyes: work is running for this message, so it stays. like: a 👍 took its place. */
+  kept?: Reaction;
+}
+
 export interface EmailThreading {
   inReplyTo?: string;
   references?: string[];
@@ -79,8 +88,10 @@ export interface TextDeskOptions {
   send: {
     imessage?: (to: string, text: string) => Promise<boolean>;
     email?: (to: string, subject: string, text: string, threading: EmailThreading) => Promise<boolean>;
-    /** A tapback on their message: how a text says "on it" without another message. */
-    react?: (conversation: string, message: string, reaction: Reaction) => Promise<boolean>;
+    /** A tapback on their message: how a text says "on it" without another message. Resolves to the reaction's id when it can be taken back. */
+    react?: (conversation: string, message: string, reaction: Reaction) => Promise<string | boolean>;
+    /** Take a tapback back, by the id react gave. */
+    unreact?: (reaction: string) => Promise<boolean>;
   };
   idleMs?: number;
   /** Message ids already handled, kept across restarts (a provider may redeliver after a deploy). */
@@ -141,9 +152,11 @@ export class TextDesk {
       this.o.log(`text: ignored a ${m.channel} message from someone who isn't family`);
       return;
     }
+    // 👀 as soon as the text is known to be family's: before attachments, the thread's turn or any model.
+    const seen = m.channel === "imessage" && m.reactTo && this.o.send.react ? this.receipt(m.reactTo) : undefined;
     const notes = await this.keep(m.attachments ?? [], phone);
     const raw = [m.text.trim(), ...notes].filter(Boolean).join("\n");
-    if (!raw) return;
+    if (!raw) return void (seen && this.takeBack(seen));
     // A card number sent by text or email never reaches the transcript, a model or memory.
     const cards = luhnNumbers(raw);
     const words = cards.length
@@ -155,7 +168,7 @@ export class TextDesk {
       if (m.subject) t.subject = m.subject;
     }
     this.touch(t);
-    const run = t.chain.then(() => this.answer(t, words, m.channel === "imessage" ? m.reactTo : undefined));
+    const run = t.chain.then(() => this.answer(t, words, m.channel === "imessage" ? m.reactTo : undefined, seen));
     t.chain = run.catch(() => undefined);
     try {
       await run;
@@ -164,8 +177,24 @@ export class TextDesk {
       this.o.log(`text: couldn't answer in ${t.callId}: ${error instanceof Error ? error.message : String(error)}`);
       await this.send(t, "Sorry, I couldn't work on that just now. Could you send it again?", [], words).catch(() => "failed");
     } finally {
+      // Work running for it: the 👀 stays, and is recorded. Anything else and it comes off.
+      if (seen?.kept === "eyes") void seen.sent.then((ok) => this.recordReaction(t, seen.to, "eyes", !!ok));
+      else if (seen && !seen.kept) void this.takeBack(seen);
       if (fresh) void this.pump(t.key, t);
     }
+  }
+
+  /** 👀 on their text, sent without waiting on anything. One that fails is only logged: a text for every text would be noise. */
+  private receipt(to: ReactTarget): Receipt {
+    const sent = this.o.send.react!(to.conversation, to.message, "eyes").catch((e: Error) => (this.o.log(`text: 👀 on ${to.message} failed: ${e.message}`), false));
+    return { to, sent };
+  }
+
+  /** The 👀 comes off: the turn is over and nothing is running for that message. */
+  private async takeBack(seen: Receipt): Promise<void> {
+    const id = await seen.sent;
+    if (typeof id !== "string" || !this.o.send.unreact) return;
+    await this.o.send.unreact(id).catch((e: Error) => this.o.log(`text: taking 👀 off ${seen.to.message} failed: ${e.message}`));
   }
 
   /** Shutdown: open conversations end properly (memory update), so a deploy doesn't cut them off. */
@@ -228,7 +257,7 @@ export class TextDesk {
    * Their message, answered with whatever was waiting for them (an ask, a result) in
    * view: it's part of this answer, so it isn't sent again a moment later.
    */
-  private async answer(t: Thread, text: string, reactTo?: ReactTarget): Promise<void> {
+  private async answer(t: Thread, text: string, reactTo?: ReactTarget, seen?: Receipt): Promise<void> {
     this.o.desk.addTurn(t.callId, { role: "caller", text });
     // How they answered the last result teaches how they like messages; it never holds up the reply.
     if (t.lastSent && this.o.feedback) {
@@ -242,7 +271,7 @@ export class TextDesk {
     t.lastAsk = text;
     if (reactTo) t.reactTo = reactTo;
     const carried = this.o.desk.repo.inbox(t.callId, t.seq);
-    await this.say(t, carried, text, reactTo);
+    await this.say(t, carried, text, reactTo, seen);
     // Said, queued or dropped, the outbox has it now.
     if (carried.length) {
       t.seq = carried.at(-1)!.seq;
@@ -290,7 +319,7 @@ export class TextDesk {
   }
 
   /** One message from Kloru, into their outbox; quiet when there's nothing new to say. */
-  private async say(t: Thread, merges: Merge[] = [], replyingTo?: string, reactTo?: ReactTarget): Promise<ConversationSend | "quiet"> {
+  private async say(t: Thread, merges: Merge[] = [], replyingTo?: string, reactTo?: ReactTarget, seen?: Receipt): Promise<ConversationSend | "quiet"> {
     // Passing on a result is part of its request's trace; an answer to their own message isn't a request yet.
     const about = [...new Set(merges.flatMap((m) => (m.issue !== undefined ? [m.issue] : [])))];
     const mark = (step: string, kind: Timed["kind"], start: Date, outcome: string) => about.forEach((id) => this.o.desk.span(id, { step, kind, start, outcome }));
@@ -299,9 +328,9 @@ export class TextDesk {
     if (this.o.shape) mark("message shape", "decision", shaping, shape ? shape.form : "undecided");
     // A reaction goes on their message: the one this answers, or for a result, the one that asked.
     const target = reactTo ?? (merges.length ? t.reactTo : undefined);
-    const reacted = { done: false, eyes: false };
-    // Whether the turn put anything on the desk: an "on it" with nothing filed promises work no one will do.
-    const acted = { done: false };
+    const reacted = { done: false };
+    // Whether the turn left work running on the desk: that is what keeps the 👀 on their message.
+    const working = { on: false };
     const turn = {
       brief: t.brief,
       channel: t.channel,
@@ -311,26 +340,25 @@ export class TextDesk {
       pending: this.pending(t),
       open: this.openFor(t),
       tools: {
-        fileIssue: (request) => ((acted.done = true), `Filed #${this.o.desk.fileIssue(t.callId, request).id}.`),
-        updateIssue: (issue, text) => ((acted.done = true), this.o.desk.comment(issue, t.callId, text), "Updated."),
+        fileIssue: (request) => ((working.on = true), `Filed #${this.o.desk.fileIssue(t.callId, request).id}.`),
+        updateIssue: (issue, text) => ((working.on = true), this.o.desk.comment(issue, t.callId, text), "Updated."),
         confirm: (issue, draft) => {
-          acted.done = true;
           // A yes has to be in their own words: never in a message that carries a forward.
           const last = this.o.desk.repo.turns(t.callId, 0).filter((x) => x.role === "caller").at(-1)?.text ?? "";
           if (last.includes(FORWARDED_LABEL)) return "Not confirmed: a yes has to come in their own words, not in a forwarded message. Ask them.";
           this.o.desk.confirm(issue, t.callId, draft);
+          working.on = true;
           return "Confirmed; it's running.";
         },
         // How they want Kloru to work goes into their guidelines now; other facts wait for the end-of-call memory.
         remember: (text) => (void this.o.desk.rememberNow(t.callId, text).catch((e: Error) => this.o.log(`text: remember failed: ${e.message}`)), "Noted."),
         remind: async (text, at) => {
-          acted.done = true;
           const r = await this.o.desk.remind(t.phone, text, at, { agent: "talker", call: t.callId });
           return r.ok ? `Set for ${at}.` : r.error;
         },
         outboxList: () => this.o.desk.outboxList(t.phone).join("\n") || "Nothing is waiting to be sent to them.",
         outboxCancel: (id) => ((r) => (r.ok ? "Cancelled; it won't be sent." : r.error))(this.o.desk.outboxCancel(id, t.phone)),
-        ...(target && this.o.send.react ? { react: (r: Reaction) => ((reacted.done = true), (reacted.eyes ||= r === "eyes"), void this.react(t, target, r, replyingTo ?? t.lastAsk ?? ""), "Reacted.") } : {}),
+        ...(target && this.o.send.react ? { react: () => ((reacted.done = true), void this.like(t, target, replyingTo ?? t.lastAsk ?? ""), "Reacted.") } : {}),
       },
       ...(shape ? { shape } : {}),
       timezone: this.o.timezone,
@@ -338,12 +366,6 @@ export class TextDesk {
     const writing = new Date();
     let reply = await this.o.talker(turn);
     mark("talker", "agent", writing, reply ? "wrote" : "quiet");
-    // 👀 on their new message with nothing filed (Nov 9): one more turn to file it, or say in words why not.
-    if (reacted.eyes && !acted.done && !merges.length) {
-      this.o.log(`text: ${t.callId} reacted on it but filed nothing; asking again`);
-      const { react: _sent, ...rest } = turn.tools;
-      reply = await this.o.talker({ ...turn, tools: rest, redraft: { draft: reply || "(only the eyes reaction)", why: "You reacted eyes (on it) but filed nothing, so nothing will happen. file_issue what they asked, or if there's nothing to do, say so in words." } });
-    }
     // The draft, weighed against how they like messages; a clear miss goes back once with the reason.
     const checking = new Date();
     const why = reply ? await this.redraftReason(t, merges, replyingTo, shape, reply, !!turn.tools.react) : undefined;
@@ -359,6 +381,9 @@ export class TextDesk {
       });
       mark("talker", "agent", rewriting, "rewrote");
     }
+    if (seen) seen.kept = reacted.done ? "like" : working.on ? "eyes" : undefined;
+    // Work filed with no words, and the 👀 didn't go: a few words, so they aren't left with nothing.
+    if (!reply && seen?.kept === "eyes" && !(await seen.sent)) reply = "On it.";
     const result = merges.some((m) => !m.progress);
     if (!reply) {
       if (result && reacted.done && shape) t.lastSent = { asked: t.lastAsk ?? "", text: "(a reaction on their message)", shape };
@@ -422,15 +447,17 @@ export class TextDesk {
     return r;
   }
 
-  /**
-   * A tapback on their message, recorded in the ledger like any message. It carries no words, so
-   * there's nothing for the outbox to weigh. One that fails becomes a short text instead.
-   */
-  private async react(t: Thread, to: ReactTarget, reaction: Reaction, replyingTo: string): Promise<void> {
-    const ok = await this.o.send.react!(to.conversation, to.message, reaction).catch((e: Error) => (this.o.log(`text: reaction in ${t.callId} failed: ${e.message}`), false));
-    this.o.desk.repo.appendLedger({ issue: 0, call: t.callId, phone: t.phone, tool: "react", slug: "REACTION", args: { message: to.message, reaction }, ok, result: ok ? "sent" : "failed", decision: "send" });
+  /** A 👍 on their message. It carries no words, so there's nothing for the outbox to weigh. One that fails becomes a short text instead. */
+  private async like(t: Thread, to: ReactTarget, replyingTo: string): Promise<void> {
+    const ok = !!(await this.o.send.react!(to.conversation, to.message, "like").catch((e: Error) => (this.o.log(`text: reaction in ${t.callId} failed: ${e.message}`), false)));
+    this.recordReaction(t, to, "like", ok);
     // Not a turn: the talker reads its turns as its own messages and would write the marker out.
-    if (!ok) await this.send(t, reaction === "like" ? "Done." : "On it.", [], replyingTo);
+    if (!ok) await this.send(t, "Done.", [], replyingTo);
+  }
+
+  /** A tapback that stayed on their message, in the ledger like any message. */
+  private recordReaction(t: Thread, to: ReactTarget, reaction: Reaction, ok: boolean): void {
+    this.o.desk.repo.appendLedger({ issue: 0, call: t.callId, phone: t.phone, tool: "react", slug: "REACTION", args: { message: to.message, reaction }, ok, result: ok ? "sent" : "failed", decision: "send" });
   }
 
   /** Their own requests still being worked on, newest last, each with how it's going so a status question gets a true answer. */

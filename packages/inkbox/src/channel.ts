@@ -328,13 +328,25 @@ export class InkboxChannel implements Outbox {
     await identity.sendIMessageTyping(key.id);
   }
 
-  async react(conversationKey: string, messageId: string, reaction: string): Promise<void> {
+  /**
+   * A tapback on one of their messages; returns the reaction's id, which unreact takes back.
+   * fromWebhook: both ids came from Inkbox's own event, so the message isn't looked up first.
+   */
+  async react(conversationKey: string, messageId: string, reaction: string, o: { fromWebhook?: boolean } = {}): Promise<string> {
     const key = parseConversationKey(conversationKey);
     if (key.channel !== "imessage") throw new Error("tapbacks are only available on iMessage conversations");
     const identity = await this.identity();
-    const target = await identity.getIMessage(messageId);
-    if (target.conversationId !== key.id) throw new Error("The reaction target must belong to the current conversation");
-    await identity.sendIMessageReaction({ messageId, reaction });
+    if (!o.fromWebhook) {
+      const target = await identity.getIMessage(messageId);
+      if (target.conversationId !== key.id) throw new Error("The reaction target must belong to the current conversation");
+    }
+    return (await identity.sendIMessageReaction({ messageId, reaction })).id;
+  }
+
+  /** Take back a tapback Kloru sent. */
+  async unreact(reactionId: string): Promise<void> {
+    const identity = await this.identity();
+    await identity.removeIMessageReaction(reactionId);
   }
 
   /**
