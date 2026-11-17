@@ -24,9 +24,10 @@ const CASES = {
     turn: { brief: REAL, channel: "imessage", thread: [{ role: "caller", text: "Everytime I get an email can you mark it as read? If it requires an action or is from someone important like my wife, leave it unread and text me a quick summary" }], shape: { form: "emoji", link: false }, pending: ["issue 515, draft d1: May I read your personal Gmail (ezra.vega@gmail.example) for the daily spam cleanup too?"], open: ["issue 515, waiting for their yes, 15 h: Every day, clean spam out of my inboxes"], timezone: "America/Los_Angeles" },
     ok: (calls, reply) => calls.some((c) => c.startsWith("file")),
   },
-  request_files_eyes: {
+  // The 👀 is sent in code when their text arrives; the talker files and adds nothing.
+  request_files_quiet: {
     turn: { brief: BRIEF, channel: "imessage", thread: [{ role: "caller", text: "What's on my calendar tomorrow?" }], timezone: "America/Los_Angeles" },
-    ok: (calls, reply) => calls.some((c) => c.startsWith("file")) && calls.includes("react eyes") && !reply.trim(),
+    ok: (calls, reply) => calls.some((c) => c.startsWith("file")) && !calls.includes("react") && !reply.trim(),
   },
   status_honest: {
     turn: { brief: BRIEF, channel: "imessage", thread: [{ role: "caller", text: "Research how divorce probability changes with jobs where you travel 4+ months a year" }, { role: "caller", text: "Is it done yet?" }], open: ["issue 493, in progress for 13 h, its worker got stuck 26 times: Research how divorce probability changes with jobs where you travel 4+ months a year"], timezone: "America/Los_Angeles" },
@@ -41,7 +42,7 @@ function tools() {
     updateIssue: (n) => (calls.push(`update ${n}`), "Updated."),
     confirm: () => (calls.push("confirm"), "Confirmed; it's running."),
     remember: () => (calls.push("remember"), "Noted."),
-    react: (r) => (calls.push(`react ${r}`), "Reacted."),
+    react: () => (calls.push("react"), "Reacted."),
   } };
 }
 const med = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };

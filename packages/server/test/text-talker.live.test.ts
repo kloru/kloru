@@ -18,7 +18,7 @@ function tools() {
     remind: (x, at) => (calls.push(`remind ${at}: ${x}`), `Set for ${at}.`),
     outboxList: () => "Nothing is waiting to be sent to them.",
     outboxCancel: (id) => (calls.push(`cancel ${id}`), "Cancelled; it won't be sent."),
-    react: (r) => (calls.push(`react ${r}`), "Reacted."),
+    react: () => (calls.push("react"), "Reacted."),
   };
   return { t, calls };
 }
@@ -27,12 +27,13 @@ describe.skipIf(!key)("the text talker, live", () => {
   // TEXT_MODEL tries another model (the model-selection skill); unset, production's.
   const talk = textTalker({ apiKey: key ?? "", ...(process.env.TEXT_MODEL ? { model: process.env.TEXT_MODEL } : {}) });
 
-  it("a request in a text is filed and acknowledged with eyes, no words", async () => {
+  // The 👀 on their text is sent in code when it arrives, so the talker files and adds nothing.
+  it("a request in a text is filed, with no words and no thumbs up", async () => {
     const { t, calls } = tools();
     const reply = await talk({ brief: BRIEF, channel: "imessage", thread: [{ role: "caller", text: "What's on my calendar tomorrow?" }], tools: t, timezone: "America/Los_Angeles" });
     console.log(reply, calls);
     expect(calls.some((c) => c.startsWith("file:"))).toBe(true);
-    expect(calls).toContain("react eyes");
+    expect(calls).not.toContain("react");
     expect(reply).toBe("");
   }, 60_000);
 
@@ -57,7 +58,7 @@ describe.skipIf(!key)("the text talker, live", () => {
   }, 60_000);
 
   // Nov 9: with the reply shape at emoji, a new request got 👀 and was never filed.
-  it("a new request with an emoji reply shape is still filed, then acknowledged with eyes", async () => {
+  it("a new request with an emoji reply shape is still filed, with no words", async () => {
     const { t, calls } = tools();
     const text = "Everytime I get an email can you mark it as read? If it requires an action or is from someone important like my wife, leave it unread and text me a quick summary";
     // As on Nov 9: his guidelines mention email alerts, and the spam cleanup (#515) waits on his yes.
@@ -72,16 +73,15 @@ Recent tasks (newest first; what each found):
     const reply = await talk({ brief, channel: "imessage", thread: [{ role: "caller", text }], tools: t, shape: { form: "emoji", link: false }, pending: ["issue 515, draft d1: May I read your personal Gmail (ezra.vega@gmail.example) for the daily spam cleanup too?"], open: ["issue 515, waiting for their yes, 15 h: Every day, clean spam out of my inboxes"], timezone: "America/Los_Angeles" });
     console.log(reply, calls);
     expect(calls.some((c) => c.startsWith("file:"))).toBe(true);
-    expect(calls).toContain("react eyes");
+    expect(reply).toBe("");
   }, 60_000);
 
-  it("asked again after an 'on it' with nothing filed, it files", async () => {
+  it("a thanks gets a thumbs up and no words", async () => {
     const { t, calls } = tools();
-    const { react: _r, ...noReact } = t;
-    const text = "Everytime I get an email can you mark it as read? If it requires an action or is from someone important like my wife, leave it unread and text me a quick summary";
-    const reply = await talk({ brief: BRIEF, channel: "imessage", thread: [{ role: "caller", text }], tools: noReact, shape: { form: "emoji", link: false }, redraft: { draft: "(only the eyes reaction)", why: "You reacted eyes (on it) but filed nothing, so nothing will happen. file_issue what they asked, or if there's nothing to do, say so in words." }, timezone: "America/Los_Angeles" });
+    const reply = await talk({ brief: BRIEF, channel: "imessage", thread: [{ role: "caller", text: "What's on my calendar tomorrow?" }, { role: "kloru", text: "Dentist at 3, then Nora's recital at 6." }, { role: "caller", text: "Thanks!" }], tools: t, shape: { form: "emoji", link: false }, timezone: "America/Los_Angeles" });
     console.log(reply, calls);
-    expect(calls.some((c) => c.startsWith("file:"))).toBe(true);
+    expect(calls).toEqual(["react"]);
+    expect(reply).toBe("");
   }, 60_000);
 
   // Nov 9, 08:11: the GitHub sign-in link came back from the desk; the reply offered to email it instead,

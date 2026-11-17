@@ -22,7 +22,7 @@ const settle = async (ms = 40) => {
   while (Date.now() < end) await new Promise((r) => setTimeout(r, 5));
 };
 
-function setup(o: { reply?: (t: TalkerTurn) => string; talker?: (t: TalkerTurn) => Promise<string>; idleMs?: number; burstMs?: number; ingest?: TextDeskOptions["ingest"]; pass?: (c: FirstPassCheck) => FirstPassChoice | Promise<FirstPassChoice>; react?: (conversation: string, message: string, reaction: string) => Promise<boolean>; shape?: TextDeskOptions["shape"]; feedback?: TextDeskOptions["feedback"]; checkDraft?: TextDeskOptions["checkDraft"] } = {}) {
+function setup(o: { reply?: (t: TalkerTurn) => string; talker?: (t: TalkerTurn) => Promise<string>; idleMs?: number; burstMs?: number; ingest?: TextDeskOptions["ingest"]; pass?: (c: FirstPassCheck) => FirstPassChoice | Promise<FirstPassChoice>; react?: (conversation: string, message: string, reaction: string) => Promise<string | boolean>; unreact?: (reaction: string) => Promise<boolean>; shape?: TextDeskOptions["shape"]; feedback?: TextDeskOptions["feedback"]; checkDraft?: TextDeskOptions["checkDraft"] } = {}) {
   const planner: Planner = { handle: async () => {} };
   const passes: FirstPassCheck[] = [];
   const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "textdesk-")), host: new Host(), planner, notify: async () => true, firstPass: async (c) => (passes.push(c), (o.pass ?? (() => "send"))(c)) });
@@ -42,6 +42,7 @@ function setup(o: { reply?: (t: TalkerTurn) => string; talker?: (t: TalkerTurn) 
       imessage: async (to, body) => (sent.push(`imessage ${to}: ${body}`), true),
       email: async (to, subject, body, thread) => (sent.push(`email ${to} [${subject}] re ${thread.inReplyTo}: ${body}`), true),
       ...(o.react ? { react: o.react } : {}),
+      ...(o.unreact ? { unreact: o.unreact } : {}),
     },
     idleMs: o.idleMs ?? 10_000,
     burstMs: o.burstMs ?? 10,
@@ -410,24 +411,42 @@ describe("the talker's outbox tools", () => {
   });
 });
 
-describe("a text that starts work gets a reaction, not a message", () => {
-  const onIt = (t: TalkerTurn) => (t.event ? "Done: spam is cleared every morning at 7." : t.tools.react ? (t.tools.react("eyes"), "") : "On it.");
+describe("their text gets 👀 the moment it arrives, and keeps it only while work runs for it", () => {
+  // Files the request (setup does) and says nothing: the 👀 is the acknowledgement.
+  const quietly = (t: TalkerTurn) => (t.event ? "Done: spam is cleared every morning at 7." : "");
   const reactTo = { conversation: "imessage:conv1", message: "msg1" };
+  /** A fake Inkbox: every tapback sent and taken back, in order. */
+  const tapbacks = () => {
+    const log: string[] = [];
+    return { log, react: async (c: string, m: string, r: string) => (log.push(`${c} ${m} ${r}`), `r_${log.length}`), unreact: async (id: string) => (log.push(`off ${id}`), true) };
+  };
 
-  it("the talker can react to their message; it's recorded and nothing else is sent", async () => {
-    const reacted: string[] = [];
-    const { desk, text, sent } = setup({ reply: onIt, react: async (c, m, r) => (reacted.push(`${c} ${m} ${r}`), true) });
+  it("👀 goes before the attachments are kept and before any model runs", async () => {
+    const order: string[] = [];
+    const { text } = setup({
+      react: async () => (order.push("eyes"), "r_1"),
+      ingest: async () => (order.push("attachment"), undefined),
+      shape: async () => (order.push("shape"), undefined),
+      reply: () => (order.push("talker"), ""),
+    });
+    await text.receive({ ...imsg("m1", "Delete sales spam every morning"), reactTo, attachments: [{ url: "https://files.example.com/a.jpg" }] });
+    expect(order).toEqual(["eyes", "attachment", "shape", "talker"]);
+  });
+
+  it("a request that's filed keeps its 👀; it's recorded and nothing else is sent", async () => {
+    const t = tapbacks();
+    const { desk, text, sent } = setup({ reply: quietly, ...t });
     await text.receive({ ...imsg("m1", "Delete sales spam every morning"), reactTo });
     await settle();
     const call = desk.repo.liveCallFor(EZRA)!;
-    expect(reacted).toEqual(["imessage:conv1 msg1 eyes"]);
+    expect(t.log).toEqual(["imessage:conv1 msg1 eyes"]);
     expect(sent).toEqual([]);
     expect(desk.repo.ledger().filter((e) => e.call === call.id).map((e) => `${e.tool} ${e.ok}`)).toEqual(["react true"]);
-    expect(desk.repo.turns(call.id, 0).map((t) => t.text)).toEqual(["Delete sales spam every morning"]);
+    expect(desk.repo.turns(call.id, 0).map((x) => x.text)).toEqual(["Delete sales spam every morning"]);
   });
 
   it("the result is then the one message", async () => {
-    const { desk, text, sent } = setup({ reply: onIt, react: async () => true });
+    const { desk, text, sent } = setup({ reply: quietly, ...tapbacks() });
     await text.receive({ ...imsg("m1", "Delete sales spam every morning"), reactTo });
     const issue = desk.openIssues()[0]!;
     desk.merge(issue.id, "events", "I saved the daily 7 AM sales-spam cleanup.");
@@ -435,57 +454,82 @@ describe("a text that starts work gets a reaction, not a message", () => {
     expect(sent).toEqual([`imessage ${EZRA}: Done: spam is cleared every morning at 7.`]);
   });
 
-  it("a reaction that fails becomes a short text", async () => {
-    const { text, sent } = setup({ reply: onIt, react: async () => { throw new Error("Inkbox down"); } });
+  it("answered in words with nothing filed, the 👀 comes off and isn't recorded", async () => {
+    const t = tapbacks();
+    const { desk, text, sent } = setup({ talker: async () => "Tuesday at 3.", ...t });
+    await text.receive({ ...imsg("m1", "When's the dentist again?"), reactTo });
+    await settle();
+    expect(t.log).toEqual(["imessage:conv1 msg1 eyes", "off r_1"]);
+    expect(sent).toEqual([`imessage ${EZRA}: Tuesday at 3.`]);
+    expect(desk.repo.ledger().filter((e) => e.tool === "react")).toEqual([]);
+  });
+
+  it("nothing to say and nothing filed: the 👀 comes off", async () => {
+    const t = tapbacks();
+    const { text, sent } = setup({ talker: async () => "", ...t });
+    await text.receive({ ...imsg("m1", "ok"), reactTo });
+    await settle();
+    expect(t.log).toEqual(["imessage:conv1 msg1 eyes", "off r_1"]);
+    expect(sent).toEqual([]);
+  });
+
+  it("a 👍 from the talker takes the 👀's place, so nothing is taken back", async () => {
+    const t = tapbacks();
+    const { desk, text } = setup({ talker: async (x) => (x.tools.react!(), ""), ...t });
+    await text.receive({ ...imsg("m1", "Thanks!"), reactTo });
+    await settle();
+    expect(t.log).toEqual(["imessage:conv1 msg1 eyes", "imessage:conv1 msg1 like"]);
+    expect(desk.repo.ledger().filter((e) => e.tool === "react").map((e) => (e.args as { reaction: string }).reaction)).toEqual(["like"]);
+  });
+
+  it("when the turn fails, the 👀 comes off and they're told", async () => {
+    const t = tapbacks();
+    const { text, sent } = setup({ talker: async () => { throw new Error("model down"); }, ...t });
+    await text.receive({ ...imsg("m1", "Delete sales spam every morning"), reactTo });
+    await settle();
+    expect(t.log).toEqual(["imessage:conv1 msg1 eyes", "off r_1"]);
+    expect(sent).toEqual([`imessage ${EZRA}: Sorry, I couldn't work on that just now. Could you send it again?`]);
+  });
+
+  it("a 👀 that fails with work filed and no words becomes a short text", async () => {
+    const { text, sent } = setup({ reply: quietly, react: async () => { throw new Error("Inkbox down"); } });
     await text.receive({ ...imsg("m1", "Delete sales spam every morning"), reactTo });
     await settle();
     expect(sent).toEqual([`imessage ${EZRA}: On it.`]);
   });
 
-  // Nov 9: 👀 on "every time I get an email…" and nothing filed, so nothing ran.
-  it("an 'on it' reaction with nothing filed gets one more turn, which files it", async () => {
-    const planner: Planner = { handle: async () => {} };
-    const desk = new Desk({ root: mkdtempSync(join(tmpdir(), "textdesk-")), host: new Host(), planner });
-    const turns: TalkerTurn[] = [];
-    const reacted: string[] = [];
-    const text = new TextDesk({
-      desk,
-      callers: () => ({ allowed: true, name: "Ezra", tier: "owner" }),
-      emailPerson: () => undefined,
-      talker: async (t) => {
-        turns.push(t);
-        if (!t.redraft) return (t.tools.react?.("eyes"), "");
-        t.tools.fileIssue(t.thread.at(-1)!.text);
-        return "";
-      },
-      send: { imessage: async () => true, react: async (_c, _m, r) => (reacted.push(r), true) },
-      idleMs: 10_000,
-      burstMs: 10,
-      timezone: "America/Los_Angeles",
-      log: () => {},
-    });
-    await text.receive({ ...imsg("m1", "Every time I get an email, mark it read"), reactTo });
+  it("a 👀 that fails on a text answered in words adds nothing", async () => {
+    const { text, sent } = setup({ talker: async () => "Tuesday at 3.", react: async () => { throw new Error("Inkbox down"); } });
+    await text.receive({ ...imsg("m1", "When's the dentist again?"), reactTo });
     await settle();
-    expect(reacted).toEqual(["eyes"]);
-    expect(turns).toHaveLength(2);
-    expect(turns[1]!.redraft?.why).toMatch(/filed nothing/);
-    expect(turns[1]!.tools.react).toBeUndefined();
-    expect(desk.openIssues().map((i) => i.request)).toEqual(["Every time I get an email, mark it read"]);
+    expect(sent).toEqual([`imessage ${EZRA}: Tuesday at 3.`]);
   });
 
-  it("an 'on it' reaction with the request filed isn't asked again", async () => {
-    const { text, turns, desk } = setup({ reply: onIt, react: async () => true });
+  it("the same text delivered twice gets one 👀", async () => {
+    const t = tapbacks();
+    const { text } = setup({ reply: quietly, ...t });
+    await text.receive({ ...imsg("m1", "Delete sales spam every morning"), reactTo });
     await text.receive({ ...imsg("m1", "Delete sales spam every morning"), reactTo });
     await settle();
-    expect(turns).toHaveLength(1);
-    expect(desk.openIssues()).toHaveLength(1);
+    expect(t.log).toEqual(["imessage:conv1 msg1 eyes"]);
   });
 
-  it("without the message's ids (or by email) there's no react tool", async () => {
-    const { text, turns } = setup({ react: async () => true });
+  it("someone who isn't family gets no 👀", async () => {
+    const t = tapbacks();
+    const { text } = setup(t);
+    await text.receive({ ...imsg("m1", "hello", "+14155550191"), reactTo });
+    await settle();
+    expect(t.log).toEqual([]);
+  });
+
+  it("without the message's ids (or by email) there's no 👀 and no react tool", async () => {
+    const t = tapbacks();
+    const { text, turns } = setup(t);
     await text.receive(imsg("m1", "What's on tomorrow?"));
     await text.receive(mail("e1", "When's the dentist?", { reactTo } as Partial<TextIn>));
-    expect(turns.map((t) => !!t.tools.react)).toEqual([false, false]);
+    await settle();
+    expect(turns.map((x) => !!x.tools.react)).toEqual([false, false]);
+    expect(t.log).toEqual([]);
   });
 });
 
@@ -541,7 +585,7 @@ describe("each message shaped the way they like it (2026-11-03)", () => {
     const { desk, text, sent } = setup({
       react: async (c, m, r) => (reacted.push(`${m} ${r}`), true),
       shape: async (s) => ({ form: s.kind === "result" ? "emoji" : "emoji", link: false }),
-      reply: (t) => ((t.event ? t.tools.react?.("like") : t.tools.react?.("eyes")), ""),
+      reply: (t) => (t.event && t.tools.react?.(), ""),
     });
     await text.receive({ ...imsg("m1", "Add milk to the grocery list"), reactTo });
     const [issue] = desk.openIssues();

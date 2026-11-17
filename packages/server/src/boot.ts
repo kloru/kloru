@@ -1131,7 +1131,10 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
         send: {
           ...(sendImessage ? { imessage: sendImessage } : {}),
           ...(sendEmail ? { email: sendEmail } : {}),
-          ...(inkboxOut ? { react: async (conversation: string, message: string, reaction: string) => (await inkboxOut.react(conversation, message, reaction), true) } : {}),
+          // The ids are the ones Inkbox's webhook gave, so a tapback is one call.
+          ...(inkboxOut && config.features.tapbacks
+            ? { react: (conversation: string, message: string, reaction: string) => inkboxOut.react(conversation, message, reaction, { fromWebhook: true }), unreact: async (reaction: string) => (await inkboxOut.unreact(reaction), true) }
+            : {}),
         },
         timezone: config.owner.timezone ?? "America/Los_Angeles",
         log,

@@ -28,8 +28,8 @@ export interface TalkerTools {
   /** What waits to be sent to them, and stopping one of them. */
   outboxList(): string;
   outboxCancel(id: string): string;
-  /** A tapback on their last message (iMessage only). */
-  react?(reaction: "eyes" | "like"): string;
+  /** A thumbs up on their last message (iMessage only). The 👀 that says "on it" is sent in code, when their text arrives. */
+  react?(): string;
 }
 
 export interface TalkerTurn {
@@ -67,12 +67,12 @@ const TOOLS = [
   fn("outbox_list", "What is waiting to be sent to them, with ids.", {}),
   fn("outbox_cancel", "Stop one waiting message or reminder.", { id: { type: "string", description: "its id (o_…)" } }),
 ];
-const REACT = fn("react", "React to their last message: eyes for on it, like for got it.", { reaction: { type: "string", enum: ["eyes", "like"] } });
+const REACT = fn("react", "A thumbs up on their last message: got it, or done.", {});
 
 /** How to show they're heard: a tapback where the thread has them, else a few words. */
 /** The shape decided for this message, in words the talker follows. */
 const SHAPES = {
-  emoji: "For this reply: file_issue anything new they asked first; then a reaction is enough: react (eyes for on it, like for done) and reply [quiet].",
+  emoji: "For this reply: file_issue anything new they asked first; then no words: react if a thumbs up fits (got it, done) and reply [quiet].",
   one_line: "For this reply: one line.",
   short: "For this reply: a sentence or two.",
   detailed: "For this reply: the whole answer, as long as it takes.",
@@ -82,7 +82,7 @@ const shapeLine = (s: NonNullable<TalkerTurn["shape"]>, canReact: boolean) =>
   `${s.form === "emoji" && !canReact ? SHAPES.one_line : SHAPES[s.form]}${s.link === undefined ? "" : s.link ? " Include the page link." : " Leave out the page link."}`;
 
 const ON_IT = {
-  react: "When they ask for something new, react eyes and reply [quiet]; the result is the message.",
+  react: "Their text already shows 👀. When they ask for something new, file it and reply [quiet]; the result is the message.",
   write: "To show you're on it, say so in a few words and how long: lookups seconds, bigger jobs a minute or two.",
 };
 
@@ -146,7 +146,7 @@ async function run(c: ToolCall, tools: TalkerTools): Promise<string> {
         return tools.outboxCancel(String(a.id ?? ""));
       case "react":
         if (!tools.react) return "No tool named react.";
-        return tools.react(a.reaction === "like" ? "like" : "eyes");
+        return tools.react();
       default:
         return `No tool named ${c.function.name}.`;
     }
