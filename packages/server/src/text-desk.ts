@@ -358,7 +358,7 @@ export class TextDesk {
         },
         outboxList: () => this.o.desk.outboxList(t.phone).join("\n") || "Nothing is waiting to be sent to them.",
         outboxCancel: (id) => ((r) => (r.ok ? "Cancelled; it won't be sent." : r.error))(this.o.desk.outboxCancel(id, t.phone)),
-        ...(target && this.o.send.react ? { react: () => ((reacted.done = true), void this.like(t, target, replyingTo ?? t.lastAsk ?? ""), "Reacted.") } : {}),
+        ...(target && this.o.send.react ? { react: () => (reacted.done || ((reacted.done = true), void this.like(t, target, replyingTo ?? t.lastAsk ?? "")), "Reacted.") } : {}),
       },
       ...(shape ? { shape } : {}),
       timezone: this.o.timezone,

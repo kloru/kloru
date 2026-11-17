@@ -475,7 +475,8 @@ describe("their text gets 👀 the moment it arrives, and keeps it only while wo
 
   it("a 👍 from the talker takes the 👀's place, so nothing is taken back", async () => {
     const t = tapbacks();
-    const { desk, text } = setup({ talker: async (x) => (x.tools.react!(), ""), ...t });
+    // The model sometimes calls react twice in one turn: one 👍 goes.
+    const { desk, text } = setup({ talker: async (x) => (x.tools.react!(), x.tools.react!(), ""), ...t });
     await text.receive({ ...imsg("m1", "Thanks!"), reactTo });
     await settle();
     expect(t.log).toEqual(["imessage:conv1 msg1 eyes", "imessage:conv1 msg1 like"]);
