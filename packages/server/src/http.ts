@@ -384,7 +384,7 @@ export function createHttpServer(app: HttpApp, opts: HttpServerOptions = {}): ht
           const attachments = (inbound.attachments ?? []).flatMap((a) => (a.url ? [{ url: a.url, ...(a.mimeType ? { mime: a.mimeType } : {}), ...(a.name ? { name: a.name } : {}) }] : []));
           const { conversationId, messageId } = inbound.replyRef;
           // A tapback of theirs names Kloru's own message, which gets no reaction back.
-          void app.textDesk.receive({ channel: "imessage", id: inbound.id, from, thread: `imessage:${from}`, text: inbound.text, ...(conversationId && messageId && !inbound.meta?.reaction ? { reactTo: { conversation: `imessage:${conversationId}`, message: messageId } } : {}), ...(attachments.length ? { attachments } : {}) }).catch((err: Error) => log(`text: iMessage from ${from} failed: ${err.message}`));
+          void app.textDesk.receive({ channel: "imessage", id: inbound.id, from, thread: `imessage:${from}`, text: inbound.text, at: inbound.receivedAt, ...(conversationId && messageId && !inbound.meta?.reaction ? { reactTo: { conversation: `imessage:${conversationId}`, message: messageId } } : {}), ...(attachments.length ? { attachments } : {}) }).catch((err: Error) => log(`text: iMessage from ${from} failed: ${err.message}`));
         } else if (inbound) await acceptInbound(app, inbound);
       }
       res.statusCode = 204;

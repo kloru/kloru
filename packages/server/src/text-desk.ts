@@ -33,6 +33,8 @@ export interface TextIn {
   dmarc?: string;
   /** iMessage: Inkbox's conversation key and message id, so Kloru can react to it. */
   reactTo?: ReactTarget;
+  /** When the provider stamped the event, so the log can say how long the text took to reach Kloru. */
+  at?: string;
   /** Photos and files that came with it: downloaded only once the sender is known to be family. */
   attachments?: Array<{ url: string; mime?: string; name?: string }>;
 }
@@ -153,7 +155,7 @@ export class TextDesk {
       return;
     }
     // 👀 as soon as the text is known to be family's: before attachments, the thread's turn or any model.
-    const seen = m.channel === "imessage" && m.reactTo && this.o.send.react ? this.receipt(m.reactTo) : undefined;
+    const seen = m.channel === "imessage" && m.reactTo && this.o.send.react ? this.receipt(m.reactTo, m.at) : undefined;
     const notes = await this.keep(m.attachments ?? [], phone);
     const raw = [m.text.trim(), ...notes].filter(Boolean).join("\n");
     if (!raw) return void (seen && this.takeBack(seen));
@@ -185,8 +187,13 @@ export class TextDesk {
   }
 
   /** 👀 on their text, sent without waiting on anything. One that fails is only logged: a text for every text would be noise. */
-  private receipt(to: ReactTarget): Receipt {
-    const sent = this.o.send.react!(to.conversation, to.message, "eyes").catch((e: Error) => (this.o.log(`text: 👀 on ${to.message} failed: ${e.message}`), false));
+  private receipt(to: ReactTarget, at?: string): Receipt {
+    const start = Date.now();
+    const lag = at ? start - Date.parse(at) : NaN;
+    const sent = this.o.send
+      .react!(to.conversation, to.message, "eyes")
+      .then((id) => (this.o.log(`text: 👀 on ${to.message} sent in ${Date.now() - start}ms${Number.isFinite(lag) ? `; the text reached Kloru ${lag}ms after it was stamped` : ""}`), id))
+      .catch((e: Error) => (this.o.log(`text: 👀 on ${to.message} failed: ${e.message}`), false));
     return { to, sent };
   }
 
