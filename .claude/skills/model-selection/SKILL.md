@@ -122,6 +122,14 @@ and keep the bench case. An owner's pick under Admin → Models wins over both.
 Every job is on a latest-generation model since 2026-11-16. Benches below are from that day, ZDR
 providers only, least thinking unless said.
 
+- **Fallback** (`model-fallback.ts`, since 2026-11-21): every agent turn (engineers, PM, organizer,
+  QA, memory) names a second model, and OpenRouter uses it only when no provider of the first can
+  take the turn. An OpenAI model falls back to Hydrogen, a Google one to Luna: one vendor's models
+  are rate-limited together (11-16 to 11-20 a third of engineer runs failed on Luna's limit).
+  `KLORU_FALLBACK_MODEL` sets another, `off` turns it off. Once the fallback takes a turn the run
+  stays on it. Live check: `test/model-fallback.live.test.ts` (Hydrogen sends an empty turn about
+  one run in ten there, as it does when it is the first model). A new default needs a fallback
+  that is latest generation, from another vendor, and passes the job's bench.
 - **Texting:** **Gemini 4 Hydrogen.** Full suite twice: Hydrogen 24/24 in 25 s; Gemini 3.8 Flash
   24/24 in 59–85 s; Luna 20/24. `talker-bench` 5 runs a case: Hydrogen 15/15, medians 1.6–2.6 s;
   3.8 Flash 15/15, 4.8–7.7 s. Earlier (11-09): DeepSeek V4.1 Flash fast but wrote email results

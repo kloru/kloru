@@ -98,6 +98,7 @@ runs on that machine.
 Decisions with a fixed set of answers (access, message shape, draft fit, send/hold/drop, time
 saved) go to Jev, a small structured decision model, never to a general model. An owner can pick another
 decision model for any of them, and another model for each talker and worker, under Admin →
-Models: the choices are what OpenRouter offers now through a provider that keeps no data. Words people read
+Models: the choices are what OpenRouter offers now through a provider that keeps no data. When an
+agent's model is rate-limited, a second one from another vendor takes the turn (`model-fallback.ts`). Words people read
 or hear are written by the talkers and workers. Prompts stay short and say the goal; each
 person's own guidelines and preferences set the details.

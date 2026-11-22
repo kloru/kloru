@@ -60,6 +60,7 @@ import { browserTools, findChromium, type BrowserPool, type TakeoverInput } from
 import { scriptTool } from "./script-tool.js";
 import { Metrics } from "./metrics.js";
 import { Models, isRole, modelOf, useModels, type RoleId } from "./models.js";
+import { withFallback } from "./model-fallback.js";
 import { REDRAFT, draftChecker, feedbackDecider, shapeDecider } from "./message-shape.js";
 import { textTalker } from "./text-talker.js";
 import { CALL_ORIGINATIONS, InkboxA2A, InkboxChannel, InkboxInboundHydrator, InkboxProvisioner, messagingTools, sendFileTool, voiceInstructions } from "@kloru/inkbox";
@@ -283,6 +284,8 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
     ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
   });
   useModels(models);
+  // Every agent turn names a second model for when its own is rate-limited (model-fallback.ts).
+  const streamFn = withFallback(opts.streamFn ?? (streamSimple as StreamFn), { env, log });
   // An agent's model as each run starts: the one picked for the job (through OpenRouter), else what it has always run on.
   const pickedModels = new Map<string, Model<any>>();
   const picked = (role: RoleId, fallback: Model<any>) => (): Model<any> => {
@@ -658,7 +661,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
     a2aStore,
     ...(a2a ? { loadA2ATask: (taskId: string) => a2a.getTask(taskId) } : {}),
     skillsPrompt,
-    streamFn: opts.streamFn ?? (streamSimple as StreamFn),
+    streamFn,
     getApiKey: (provider: string) => apiKeyFor(provider, env),
     // Core cannot import the network package; the server bridges OIP and the network guidance.
     describeData: describeDataPart,
@@ -971,7 +974,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       ),
       planner: new TechnicalPM({
         model: picked("pm", pmModel),
-        streamFn: opts.streamFn ?? (streamSimple as StreamFn),
+        streamFn,
         getApiKey: (provider: string) => apiKeyFor(provider, env),
         log,
         // The PM's replies go where the metrics read session costs, as desk:pm.
@@ -1005,7 +1008,7 @@ export async function boot(env: NodeJS.ProcessEnv, opts: BootOptions = {}): Prom
       ...(fastKey && env.KLORU_COMS?.trim() !== "off" ? { firstPass: outboxDecider({ apiKey: fastKey, log }) } : {}),
       organizer: new OutboxOrganizer({
         model: picked("organizer", pmModel),
-        streamFn: opts.streamFn ?? (streamSimple as StreamFn),
+        streamFn,
         getApiKey: (provider: string) => apiKeyFor(provider, env),
         log,
         ...(config.owner.timezone ? { timezone: config.owner.timezone } : {}),
